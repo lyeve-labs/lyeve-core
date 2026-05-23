@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS example_widgets (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    name VARCHAR(255) NOT NULL
+);
