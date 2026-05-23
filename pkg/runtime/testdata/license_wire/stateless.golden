@@ -1,0 +1,142 @@
+=== entitlements with the operator key
+GET /api/admin/entitlements as operator key
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "caps": {},
+  "features": [
+    "gadgets",
+    "widgets"
+  ],
+  "license_module": false,
+  "plan": "free",
+  "state": "free",
+  "tenant_quota": 0,
+  "withheld": []
+}
+
+=== entitlements with no credential
+GET /api/admin/entitlements
+status: 401
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "unauthorized",
+  "error": "authentication required",
+  "request_id": "<request-id>"
+}
+
+=== plugin status with the operator key
+GET /api/admin/plugins/status as operator key
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "compiled": [
+    "gadgets",
+    "widgets"
+  ],
+  "entitled": [
+    "gadgets",
+    "widgets"
+  ],
+  "plugins": [
+    {
+      "active": true,
+      "compiled": true,
+      "entitled": true,
+      "name": "gadgets",
+      "phase": "running",
+      "requested": true,
+      "routes": [
+        {
+          "group": "admin",
+          "method": "GET",
+          "pattern": "/api/admin/wire/gadgets"
+        }
+      ],
+      "started_at": "<time>"
+    },
+    {
+      "active": true,
+      "compiled": true,
+      "entitled": true,
+      "name": "widgets",
+      "phase": "running",
+      "requested": true,
+      "routes": [
+        {
+          "group": "admin",
+          "method": "GET",
+          "pattern": "/api/admin/wire/widgets"
+        }
+      ],
+      "started_at": "<time>"
+    }
+  ]
+}
+
+=== running plugins with the operator key
+GET /api/admin/plugins/running as operator key
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugins": [
+    "gadgets",
+    "widgets"
+  ],
+  "withheld": []
+}
+
+=== renew with the operator key
+POST /api/admin/license/renew as operator key
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== tenant features with the operator key
+GET /api/admin/tenant-features/default as operator key
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== an ungated plugin's route
+GET /api/admin/wire/widgets as operator key
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugin": "widgets",
+  "tenant": "default"
+}
+
+=== a gated plugin's route
+GET /api/admin/wire/gadgets as operator key
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugin": "gadgets",
+  "tenant": "default"
+}
+

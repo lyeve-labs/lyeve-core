@@ -1,0 +1,3739 @@
+=== entitlements as a super admin
+GET /api/admin/entitlements as super admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "caps": {},
+  "features": [
+    "gadgets",
+    "widgets"
+  ],
+  "license_module": false,
+  "plan": "free",
+  "state": "free",
+  "tenant_quota": 0,
+  "withheld": []
+}
+
+=== entitlements as an admin
+GET /api/admin/entitlements as admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "caps": {},
+  "features": [
+    "gadgets",
+    "widgets"
+  ],
+  "license_module": false,
+  "plan": "free",
+  "state": "free",
+  "tenant_quota": 0,
+  "withheld": []
+}
+
+=== entitlements with no credential
+GET /api/admin/entitlements
+status: 401
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "unauthorized",
+  "error": "authentication required",
+  "request_id": "<request-id>"
+}
+
+=== entitlements naming another tenant
+GET /api/admin/entitlements as super admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "caps": {},
+  "features": [
+    "gadgets",
+    "widgets"
+  ],
+  "license_module": false,
+  "plan": "free",
+  "state": "free",
+  "tenant_quota": 0,
+  "withheld": []
+}
+
+=== renew with no credential
+POST /api/admin/license/renew
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== renew as an admin
+POST /api/admin/license/renew as admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== renew with an empty key
+POST /api/admin/license/renew as super admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== renew with a body that is not JSON
+POST /api/admin/license/renew as super admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== renew by GET
+GET /api/admin/license/renew as super admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== an ungated plugin's route
+GET /api/admin/wire/widgets as admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugin": "widgets",
+  "tenant": "default"
+}
+
+=== a gated plugin's route
+GET /api/admin/wire/gadgets as admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugin": "gadgets",
+  "tenant": "default"
+}
+
+=== tenant features read
+GET /api/admin/tenant-features/default as super admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== tenant features write
+PUT /api/admin/tenant-features/default as super admin
+status: 404
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "code": "not_found",
+  "error": "The requested endpoint does not exist.",
+  "request_id": "<request-id>"
+}
+
+=== plugin status
+GET /api/admin/plugins/status as super admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "compiled": [
+    "gadgets",
+    "widgets"
+  ],
+  "entitled": [
+    "gadgets",
+    "widgets"
+  ],
+  "plugins": [
+    {
+      "active": true,
+      "compiled": true,
+      "entitled": true,
+      "name": "gadgets",
+      "phase": "running",
+      "requested": true,
+      "routes": [
+        {
+          "group": "admin",
+          "method": "GET",
+          "pattern": "/api/admin/wire/gadgets"
+        }
+      ],
+      "started_at": "<time>"
+    },
+    {
+      "active": true,
+      "compiled": true,
+      "entitled": true,
+      "name": "widgets",
+      "phase": "running",
+      "requested": true,
+      "routes": [
+        {
+          "group": "admin",
+          "method": "GET",
+          "pattern": "/api/admin/wire/widgets"
+        }
+      ],
+      "started_at": "<time>"
+    }
+  ]
+}
+
+=== running plugins as an admin
+GET /api/admin/plugins/running as admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "plugins": [
+    "gadgets",
+    "widgets"
+  ],
+  "withheld": []
+}
+
+=== security controls
+GET /api/admin/security/controls as super admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "checked_at": "<time>",
+  "controls": [],
+  "failures": 0
+}
+
+=== openapi as a super admin
+GET /api/admin/openapi.json as super admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "components": {
+    "securitySchemes": {
+      "adminToken": {
+        "bearerFormat": "lyat",
+        "description": "An admin token, sent as Authorization: Bearer lyat_<secret>. It reaches only the admin operations whose x-admin-grant it holds, in the one tenant it was issued for.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "cookieAuth": {
+        "description": "Session cookie set at sign-in. A server running without secure cookies names it sys_session.",
+        "in": "cookie",
+        "name": "__Host-sys_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "Headless CMS - Admin API (cookie + bearer) and Content API (bearer only).",
+    "title": "LyEve API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/.well-known/jwks.json": {
+      "get": {
+        "description": "Verify a token the engine issued without calling it: every key the engine signs with, current and rotated, by kid.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "The signing keys, as a JWK Set",
+        "tags": [
+          "Content API / Auth"
+        ]
+      }
+    },
+    "/api/admin/api-key-scopes": {
+      "get": {
+        "description": "One row per route: method, path, the scope's resource, the name that qualifies it (a path parameter such as {schema}, a literal endpoint, or none), the action, the narrowest scope that reaches the route, and the owner. A route marked declared names its own scope, which takes no qualifier. A scope on the bare resource covers every name under it.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Every route an API key can be scoped to",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device": {
+      "post": {
+        "description": "Opens a sign-in for a command line tool or another device without a browser. Answers a device_code the device keeps and polls with, a user_code of the form XXXX-XXXX a person enters on verification_uri while signed in to the admin, and verification_uri_complete with the code filled in. verification_uri is the console's device page on LYEVE_CONSOLE_URL, or on the console dev server outside production when that is unset. In production without LYEVE_CONSOLE_URL the request is refused with 503. The request expires in 600 seconds; poll no more often than interval seconds. Rate limited per address, and one address holds at most ten open requests.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "client_name": "cli on build-box"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval"
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "422": {
+            "description": "client_name is missing, longer than 64 characters or not printable"
+          },
+          "429": {
+            "description": "Rate limited, or too many open requests from this address or its IPv6 /64"
+          },
+          "503": {
+            "description": "The install holds too many open requests; retry after the Retry-After seconds"
+          }
+        },
+        "summary": "Start a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/device/token": {
+      "post": {
+        "description": "Exchanges the device_code for a session once a person approves it. Until then it answers 400 with error set to authorization_pending, slow_down (polled sooner than the interval; the interval grows by five seconds and is returned), access_denied, expired_token (expired, or already exchanged) or invalid_grant (unknown code). On approval it answers 200 with user, token (a session JWT with the engine's normal expiry, the approver's roles in the approved tenant and their token version), token_type, expires_in and expires_at, once. There is no refresh token. Rate limited per address.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "device_code": "\u003cdevice_code\u003e"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A session"
+          },
+          "400": {
+            "description": "authorization_pending, slow_down, access_denied, expired_token, invalid_grant or invalid_request"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "summary": "Poll a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/device/{user_code}": {
+      "get": {
+        "description": "What a person is about to approve: the client name as the device sent it, the address the request came from, when it was made and when it expires; and what approving hands over: tenant_id, the tenant the caller's session acts in, roles, the roles the session would carry, and session_expires_in, its lifetime in seconds. approver_ip and same_address set the caller's own address beside the requester's. Session only: an API key or an admin token is refused. The code is read in any case, with or without the dash.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Read a pending device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device/{user_code}/approve": {
+      "post": {
+        "description": "Binds the sign-in to the caller and the tenant their session acts in. The caller confirms with mfa_code when the account has MFA enrolled and with password otherwise; wrong answers count toward the account's lockouts and a locked account answers 429. The device's next poll receives a session, unless the caller's sessions end first. Session only: an API key or an admin token is refused. One decision per request.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "password": "your-password"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Approve a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device/{user_code}/deny": {
+      "post": {
+        "description": "Refuses the sign-in; the device's next poll is answered access_denied. Session only: an API key or an admin token is refused. One decision per request.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Deny a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/login": {
+      "post": {
+        "description": "Returns `mfa_required: true` and a `challenge_token` when the user has MFA enabled. Exchange the token via `/auth/mfa-verify`.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "admin@example.com",
+                  "password": "changeme"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Login and receive session cookie",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/logout": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Logout (clear session cookie)",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/me": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Current authenticated user",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/memberships": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Tenants the caller may act in, home tenant first",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/mfa-verify": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "challenge_token": "\u003cshort-lived JWT\u003e",
+                  "code": "123456"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Invalid code"
+          }
+        },
+        "summary": "Complete MFA challenge - exchange challenge token + TOTP code for a full session JWT",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/auth/refresh": {
+      "post": {
+        "description": "Rotates the refresh token and issues a new access token. Rate limited.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Refresh the session",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/config": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Report every setting and the layer it comes from",
+        "tags": [
+          "Admin / Configuration"
+        ]
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Every submitted key is pinned by a higher layer"
+          },
+          "412": {
+            "description": "A credential was submitted with no encryption key configured"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Store engine settings in the admin layer",
+        "tags": [
+          "Admin / Configuration"
+        ]
+      }
+    },
+    "/api/admin/debug/goroutines": {
+      "get": {
+        "description": "The tracker snapshot: tracked and runtime totals, counts by source name, and by_owner, one row per plugin or the engine with its live count and the age of its oldest goroutine, so a leak names who started it.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Tracked goroutines",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/entitlements": {
+      "get": {
+        "description": "Plan, state, feature list and caps, with license_source, which says where the license came from (token, key or stored_key), expires_at, and license_error, which says why the configured license is not in force. A licensing implementation may add plan_label, the plan as an operator reads it, and grace_ends_at, which it sets only in grace. license_module is always present, and true when the build links a licensing implementation. Never the token or the key itself.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "What the license entitles",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/gdpr/erase": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "identifier": "user@example.com",
+                  "identifier_type": "email"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Erase or anonymize a data subject's data (Art.17 right to erasure)",
+        "tags": [
+          "Admin / GDPR"
+        ]
+      }
+    },
+    "/api/admin/gdpr/export": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "identifier": "user@example.com",
+                  "identifier_type": "email"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Export all data for a data subject (Art.15/20 portable bundle)",
+        "tags": [
+          "Admin / GDPR"
+        ]
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "503": {
+            "description": "Database unreachable"
+          }
+        },
+        "summary": "Liveness probe - is the process alive?",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/admin/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Prometheus text format"
+          }
+        },
+        "summary": "Prometheus metrics",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/admin/openapi.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    },
+    "/api/admin/openapi/admin.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON"
+          },
+          "403": {
+            "description": "Not a super admin"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "OpenAPI 3.1 specification of the /api/admin routes",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    },
+    "/api/admin/openapi/public.json": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "OpenAPI 3.1 specification of the content API and every route outside /api/admin",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    },
+    "/api/admin/plugins/running": {
+      "get": {
+        "description": "Any signed-in role. plugins is every compiled plugin that is running or starts on first use, less the ones withheld from the caller's tenant. withheld is every plugin that runs but is withheld from it. Names only, sorted, and neither list is ever null.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "The plugins that serve the caller's tenant",
+        "tags": [
+          "Admin / Plugins"
+        ]
+      }
+    },
+    "/api/admin/plugins/status": {
+      "get": {
+        "description": "One row per compiled plugin. A plugin that describes itself carries a manifest: a label of at most 40 characters, a description of at most 240, a category (content, delivery, access, automation, insight, operations, compliance, ai, platform) and a maturity (stable or beta). A plugin that does not is listed by its name.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Every plugin's phase, start time and last error",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/{name}/config": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "A plugin's configuration, secrets masked",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      },
+      "put": {
+        "description": "Validated against the plugin's schema; secret values are sealed at rest.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Replace a plugin's configuration",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/{name}/config/reset": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Reset a plugin's configuration to its defaults",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/{name}/schema": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "JSON Schema of a plugin's configuration",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/pool/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "503": {
+            "description": "Pool unhealthy"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    },
+    "/api/admin/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "503": {
+            "description": "Not ready"
+          }
+        },
+        "summary": "Readiness probe - is the server ready to serve traffic?",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/admin/schemas/export": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "yaml",
+              "enum": [
+                "yaml",
+                "json"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Schema engine unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Export every content type as a portable bundle",
+        "tags": [
+          "Admin / Content Types"
+        ],
+        "x-admin-grant": "schemas:read"
+      }
+    },
+    "/api/admin/schemas/import": {
+      "post": {
+        "description": "Reports what would change. Nothing is written unless apply=true, because the statements a schema change generates include destructive ones.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "default": "lyeve",
+              "enum": [
+                "lyeve",
+                "json-schema",
+                "openapi",
+                "strapi",
+                "contentful",
+                "wordpress"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "apply",
+            "required": false,
+            "schema": {
+              "default": false,
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "References cannot be satisfied; nothing was applied"
+          },
+          "422": {
+            "description": "Definitions could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Import content types from a bundle or another system",
+        "tags": [
+          "Admin / Content Types"
+        ]
+      }
+    },
+    "/api/admin/security/controls": {
+      "get": {
+        "description": "One row per control: pass, warn, fail or skip, the detail behind it, and what turns a control on that is not enforcing. Read live, so a plugin the license activates after boot shows without a restart.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Which security controls are enforcing",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/setup": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "Check setup status",
+        "tags": [
+          "Admin / Auth"
+        ]
+      },
+      "post": {
+        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine logs at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "admin@example.com",
+                  "password": "changeme",
+                  "setup_token": "from-the-engine-log"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Setup already complete"
+          }
+        },
+        "summary": "Initial admin setup (first-run only)",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "List all users",
+        "tags": [
+          "Admin / Users"
+        ]
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "user@example.com",
+                  "password": "pass",
+                  "roles": [
+                    "editor"
+                  ]
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Create a user",
+        "tags": [
+          "Admin / Users"
+        ]
+      }
+    },
+    "/api/admin/users/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Delete a user",
+        "tags": [
+          "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/password": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "password": "a-new-password-of-twelve"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "422": {
+            "description": "Password policy not met"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Set a user's password; every session the account held ends",
+        "tags": [
+          "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/roles": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "roles": [
+                    "editor"
+                  ]
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Set a user's roles",
+        "tags": [
+          "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/users/{id}/state": {
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "locked": true
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Lock or unlock a user",
+        "tags": [
+          "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/wire/gadgets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "GET /api/admin/wire/gadgets",
+        "tags": [
+          "Plugin / gadgets"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/wire/widgets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "GET /api/admin/wire/widgets",
+        "tags": [
+          "Plugin / widgets"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/auth/token": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "user@example.com",
+                  "password": "changeme"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Obtain a Bearer token",
+        "tags": [
+          "Content API / Auth"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, or * for all.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of relations to resolve.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List records",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Hook validation failed"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/bulk": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create records in bulk",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/cursor": {
+      "get": {
+        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The cursor from the previous page; empty for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List records by cursor",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/stream": {
+      "get": {
+        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "application/x-ndjson"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stream records",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, or * for all.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of relations to resolve.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a record",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/publish": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/relations/{field}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A relation field of the collection",
+            "in": "path",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the records a relation field points at",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A relation field of the collection",
+            "in": "path",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "ids": [
+                    "\u003cuuid\u003e",
+                    "\u003cuuid\u003e"
+                  ]
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the records a relation field points at",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List a record's revisions",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore": {
+      "put": {
+        "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Revision id",
+            "in": "path",
+            "name": "rev_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore a revision",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/unpublish": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unpublish a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "API server liveness probe",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "API server readiness probe",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/schemas": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List collections",
+        "tags": [
+          "Content API / Schemas"
+        ]
+      }
+    },
+    "/api/v1/schemas/{name}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a collection's definition",
+        "tags": [
+          "Content API / Schemas"
+        ]
+      }
+    },
+    "/robots.txt": {
+      "get": {
+        "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
+        "responses": {
+          "200": {
+            "description": "A robots.txt disallowing every path"
+          }
+        },
+        "summary": "Refuses every crawler",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Admin server (local dev)",
+      "url": "http://localhost:3001"
+    },
+    {
+      "description": "Content API server (local dev)",
+      "url": "http://localhost:3002"
+    }
+  ]
+}
+
+=== openapi as an admin
+GET /api/admin/openapi.json as admin
+status: 200
+Cache-Control: no-store
+Content-Type: application/json
+body (json, newline):
+{
+  "components": {
+    "securitySchemes": {
+      "adminToken": {
+        "bearerFormat": "lyat",
+        "description": "An admin token, sent as Authorization: Bearer lyat_<secret>. It reaches only the admin operations whose x-admin-grant it holds, in the one tenant it was issued for.",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "cookieAuth": {
+        "description": "Session cookie set at sign-in. A server running without secure cookies names it sys_session.",
+        "in": "cookie",
+        "name": "__Host-sys_session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "description": "The content API, auth, and every route outside /api/admin.",
+    "title": "LyEve API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/.well-known/jwks.json": {
+      "get": {
+        "description": "Verify a token the engine issued without calling it: every key the engine signs with, current and rotated, by kid.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "The signing keys, as a JWK Set",
+        "tags": [
+          "Content API / Auth"
+        ]
+      }
+    },
+    "/api/v1/auth/token": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "user@example.com",
+                  "password": "changeme"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Obtain a Bearer token",
+        "tags": [
+          "Content API / Auth"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, or * for all.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of relations to resolve.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List records",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Hook validation failed"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/bulk": {
+      "post": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Validation failed"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Create records in bulk",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/cursor": {
+      "get": {
+        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The cursor from the previous page; empty for the first page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List records by cursor",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/stream": {
+      "get": {
+        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "application/x-ndjson"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Stream records",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, or * for all.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of relations to resolve.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
+            "in": "query",
+            "name": "locale",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          },
+          "503": {
+            "description": "The translations could not be read"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a record",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/publish": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Publish a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/relations/{field}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A relation field of the collection",
+            "in": "path",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the records a relation field points at",
+        "tags": [
+          "Content API / Content"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A relation field of the collection",
+            "in": "path",
+            "name": "field",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "ids": [
+                    "\u003cuuid\u003e",
+                    "\u003cuuid\u003e"
+                  ]
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Replace the records a relation field points at",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/revisions": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List a record's revisions",
+        "tags": [
+          "Content API / Content"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore": {
+      "put": {
+        "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Revision id",
+            "in": "path",
+            "name": "rev_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Restore a revision",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/content/{schema}/{id}/unpublish": {
+      "put": {
+        "parameters": [
+          {
+            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Unpublish a record",
+        "tags": [
+          "Content API / Content"
+        ],
+        "x-roles": [
+          "editor",
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "API server liveness probe",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/ready": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "API server readiness probe",
+        "tags": [
+          "System"
+        ]
+      }
+    },
+    "/api/v1/schemas": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List collections",
+        "tags": [
+          "Content API / Schemas"
+        ]
+      }
+    },
+    "/api/v1/schemas/{name}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get a collection's definition",
+        "tags": [
+          "Content API / Schemas"
+        ]
+      }
+    },
+    "/robots.txt": {
+      "get": {
+        "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
+        "responses": {
+          "200": {
+            "description": "A robots.txt disallowing every path"
+          }
+        },
+        "summary": "Refuses every crawler",
+        "tags": [
+          "Admin / System"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Admin server (local dev)",
+      "url": "http://localhost:3001"
+    },
+    {
+      "description": "Content API server (local dev)",
+      "url": "http://localhost:3002"
+    }
+  ]
+}
+
