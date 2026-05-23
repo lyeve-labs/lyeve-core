@@ -1,0 +1,5 @@
+BEGIN;
+
+ALTER TABLE sys_users DROP COLUMN IF EXISTS anonymized;
+
+COMMIT;
