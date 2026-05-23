@@ -1,0 +1,31 @@
+# Test functions in this repository that contain no assertion.
+# Format: test<TAB>file, the file relative to the repository root.
+#
+# The file can only shrink: a new one fails the lint and an entry that
+# stops reproducing fails it too, so a fix has to delete its line.
+#
+# Regenerate with: tools/lint-inert-tests.sh '' baseline
+TestAllTenancyTypes_SatisfyInterface	internal/db/identifier_quoting_test.go
+TestBuffer_ConcurrentPushSubscribe	internal/logstream/logstream_test.go
+TestBuffer_Subscribe_DoubleUnsubscribe	internal/logstream/logstream_test.go
+TestConcurrentAccess_RaceFree	internal/testhost/testhost_test.go
+TestEdgeCase_ConcurrentRouteCollection	internal/api/edge_cases_test.go
+TestEdgeCase_ConcurrentRouteEnumeration	internal/api/edge_cases_test.go
+TestFlushProtectedBackend_ConcurrentSafety	internal/auth/flush_protected_test.go
+TestMain	internal/auth/key_hashing_test.go
+TestMain	internal/config/config_test.go
+TestMemoryCache_ConcurrentRaces	internal/cache/concurrent_test.go
+TestMemoryCache_ConcurrentSetGet	internal/cache/cache_test.go
+TestMemoryCache_ConcurrentSingleKey	internal/cache/concurrent_test.go
+TestMockRow_WithScan	pkg/plugintest/mockhost/mockhost_test.go
+TestMountPluginRoutes_Empty	internal/api/handlers_test.go
+TestRaceConcurrentRecordRequest	internal/metrics/metrics_test.go
+TestRace_ConcurrentResolveStartStatus	pkg/plugin/activator_race_test.go
+TestRace_ConcurrentResolves	pkg/plugin/activator_race_test.go
+TestRace_ConcurrentStartCalls	pkg/plugin/activator_race_test.go
+TestRace_ConcurrentStartStop	pkg/plugin/activator_race_test.go
+TestRace_ConcurrentStatusReaders	pkg/plugin/activator_race_test.go
+TestRace_MFAAndRiskConcurrent	pkg/plugin/activator_race_test.go
+TestRace_ParseRequestedConcurrent	pkg/plugin/activator_race_test.go
+TestS3ClientImplementsStorageClient	internal/provider/storage_s3_test.go
+TestTenantSampler_Concurrent	internal/tracing/tracing_integration_test.go
