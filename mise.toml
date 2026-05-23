@@ -1,0 +1,27 @@
+[tools]
+# Exact patch, matching the go.mod floor and the golang:1.27 Docker images. Not a
+# range and not "latest": mise exports GOROOT for whichever version it resolves, so
+# any config that resolves differently leaves GOROOT and PATH disagreeing and every
+# compile fails, stdlib included.
+go = "1.27.1"
+
+# Pinned to avoid GitHub API rate limiting on every `mise install`.
+# Bump manually when you need a newer version.
+kubectl = "1.36.1"
+helm = "4.2.0"
+
+# `make lint-secrets` guards on `command -v gitleaks`, which the shim satisfies
+# even with no version resolved, so an unpinned gitleaks fails inside the recipe
+# rather than at the guard: the whole verify gate goes red and the secret scan
+# never runs.
+gitleaks = "8.30.1"
+
+# Same version the CI lint step installs, so a local run and the gate report the
+# same findings. Without a pin the shim still resolves on PATH and fails with
+# "No version is set for shim", which reads like a missing install.
+golangci-lint = "2.13.2"
+
+[settings]
+# Suppress GitHub API rate-limit warnings. If you have a GITHUB_TOKEN set
+# in your environment, mise will use it and you can change this to "warn".
+log_level = "error"

@@ -1,0 +1,64 @@
+# Secrets - never commit real env files
+.env
+*.env
+!*.env.example
+
+# Local env overrides (never commit - may contain secrets)
+.env.local
+
+
+# Signing private keys, never committed
+*signing-key*
+*.key
+*.pem
+
+# Build output (Go / Rust / Node)
+**/bin/
+# `go build ./cmd/lyeve` drops the binary here. Root-anchored so it does not
+# shadow the cmd/lyeve/ package directory.
+/lyeve
+**/target/
+
+**/build/
+**/dist/
+
+# Uploads - never commit user content
+**/uploads/
+
+
+# mise local overrides
+.mise.local.toml
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp
+
+# Coverage profiles
+coverage.out
+coverage.html
+*.cov
+
+# Benchmark results (generated locally, bench targets recreate this dir)
+bench-results/
+
+# SBOMs (generated locally, sbom targets recreate this dir)
+sboms/
+
+# Go test binaries (go test -c output)
+*.test
+api.test
+db.test
+schema.test
+
+# Binaries built by hand at the root. The make targets write to bin/, which is
+# covered above. Root-anchored so they do not match a cmd/*/ source directory.
+/main
+/migrate
+/lyeve-core
+
+# Coverage profiles - all variants (ci-coverage.out, coverage-full.out, coverage_auth.out, ...)
+*coverage*.out
+
+# Editor backups
+*.bak

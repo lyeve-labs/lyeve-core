@@ -1,0 +1,40 @@
+# Build artifacts
+**/bin/
+**/dist/
+**/coverage.out
+**/*.test
+
+# Editor / OS
+**/.DS_Store
+**/.idea/
+**/.vscode/
+
+# Git internals
+.git/
+**/.gitignore
+
+# CI metadata not needed in build context
+.github/
+
+# Documentation
+**/README.md
+**/CHANGELOG.md
+**/CONTRIBUTING.md
+**/SECURITY.md
+
+# Tests + benchmarks (built when running tests, not deployed)
+**/testdata/
+**/*_test.go
+tests/
+
+# Dotenv files: never bake secrets into the image
+**/.env
+**/.env.local
+**/.env.*
+
+# Runtime image needs exactly one build artifact: the compiled server binary at
+# bin/lyeve (see the Dockerfile for how a clone builds it). Re-include it, and
+# only it, from bin/.
+!bin
+bin/*
+!bin/lyeve
