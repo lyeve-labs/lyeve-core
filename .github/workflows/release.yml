@@ -1,0 +1,307 @@
+# PUBLISH - build & push the batteries-included engine image to GHCR.
+#
+# Triggered on a `vX.Y.Z` tag. Builds a multi-arch image (linux/amd64 +
+# linux/arm64) and pushes ghcr.io/lyeve-labs/lyeve-core with three tags:
+#   X.Y.Z (immutable), X.Y (rolling minor) and latest
+#
+# The image tags carry no `v`: the tag step strips it (${RELEASE_REF#v}),
+# so the git tag v0.22.0 publishes as :0.22.0. A `v`-prefixed image tag does
+# not exist.
+#
+# Triggers on a vX.Y.Z tag push, or on manual workflow_dispatch with a `tag`
+# input to rebuild an existing tag (e.g. when a push lands during an Actions
+# outage). Both resolve RELEASE_REF and publish identical artifacts.
+#
+# cmd/lyeve blank-imports every plugin, and each plugin replaces lyeve-core with
+# a sibling path, so the build needs the whole workspace checked out as siblings:
+# lyeve-core, lyeve-libs, and one directory per plugin. The binary is static and
+# CGO-free (libwebp embedded as WASM via the `nodynamic` tag), so both arches
+# cross-compile on one amd64 runner, with no native arm runner and no QEMU.
+#
+# This deliberately avoids docker/metadata-action:
+# tags/labels are derived in shell so a GitHub REST API blip can't fail a
+# release. GHCR, Actions runners, and Git are the only services needed.
+#
+# Required secrets:
+#   GITHUB_TOKEN - built-in, pushes to GHCR.
+#   WORKSPACE_READ_TOKEN - PAT / GitHub App token with read on the
+#                             lyeve-labs/lyeve-plugin-* and lyeve-libs repos
+#                             (cross-repo clone).
+#   LICENSE_PUBLIC_KEY_HEX - the license verifier's public key, as hex, baked
+#                             into the binary so licenses verify. If unset the
+#                             image boots and no license verifies.
+
+name: release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  # Manual re-run for a tag that already exists: rebuild and republish the
+  # image for an existing vX.Y.Z without cutting a new version. Needed when a
+  # tag push lands during a GitHub Actions outage and never triggers a run.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing vX.Y.Z tag to (re)build and publish'
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: lyeve-labs/lyeve-core
+  GO_VERSION: '1.27.1'
+  # Pinned, not advisory: GOTOOLCHAIN=local refuses a mismatched toolchain.
+  GOTOOLCHAIN: local
+  PLATFORMS: amd64 arm64
+  # The release ref: the pushed tag on a tag push, or the manually supplied
+  # tag on workflow_dispatch. Every version/image-tag derivation reads this
+  # instead of GITHUB_REF_NAME so both triggers publish identical artifacts.
+  RELEASE_REF: ${{ github.event.inputs.tag || github.ref_name }}
+  # Size budget for the compiled server, with every plugin compiled in. A
+  # release over this fails, so accidental bloat cannot ship silently. The
+  # headroom is deliberate rather than snug: the binary grows with every
+  # plugin added, and a budget a few plugins away from tripping fails releases
+  # that carry no size regression at all.
+  BINARY_MAX_MB: '140'
+
+jobs:
+  # A tag is a person's decision and the workflow it triggers is not, so this
+  # is the only place the two meet: publish waits on the suite, and a red one
+  # means no image. It runs here rather than being looked up after the fact
+  # because a merge to main does not trigger CI, so the tagged commit has no
+  # earlier run to find. All three dialects run, the tag being the point where
+  # a wrong answer is most expensive.
+  test:
+    name: suite
+    uses: ./.github/workflows/ci.yml
+    # The called workflow can narrow these permissions but never widen them.
+    permissions:
+      contents: read
+    # RELEASE_REF, spelled out: the env context is not in scope for a called
+    # workflow's inputs. Without it a manual re-publish would test the default
+    # branch and report it as the tag's suite.
+    with:
+      ref: ${{ github.event.inputs.tag || github.ref_name }}
+      release: true
+    # The suite takes no secrets.
+
+  publish:
+    name: build, push & tag
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write # pushes the image to GHCR
+    steps:
+      # Must be `lyeve-core`: every plugin go.mod replaces
+      # github.com/lyeve-labs/lyeve-core => ../lyeve-core.
+      - name: Checkout core
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: lyeve-core
+          ref: ${{ env.RELEASE_REF }}
+          persist-credentials: false
+
+      # A dispatch input is free-form. A bad tag would otherwise build under a
+      # nonsense version. Fail fast unless it is a real vX.Y.Z on this repo.
+      - name: Validate release ref
+        working-directory: lyeve-core
+        run: |
+          set -euo pipefail
+          case "${RELEASE_REF}" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::RELEASE_REF '${RELEASE_REF}' is not a vX.Y.Z tag"; exit 1 ;;
+          esac
+          if ! git rev-parse -q --verify "refs/tags/${RELEASE_REF}" >/dev/null; then
+            echo "::error::tag ${RELEASE_REF} does not exist in this repo"
+            exit 1
+          fi
+
+      # cmd/lyeve blank-imports every plugin and links the license verifier, so
+      # both are cloned next to lyeve-core/. PLUGIN_VERSIONS.txt
+      # pins each to an exact SHA, so tampering with a plugin's main branch has no
+      # effect on a release without a lockfile change under code review.
+      - name: Clone workspace repos (pinned)
+        env:
+          TOKEN: ${{ secrets.WORKSPACE_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Git over HTTPS rejects `Bearer <pat>` with "invalid credentials".
+          # Basic, with the token as the password, is the form GitHub accepts.
+          # The header still keeps the token out of the remote URL, which is
+          # why it is used instead of embedding credentials.
+          #
+          # Base64 defeats the runner's automatic secret masking, so the
+          # encoded value is masked explicitly or it would print in full on any
+          # `set -x` or curl trace.
+          AUTH=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$AUTH"
+
+          # The header reaches git through its environment only, never a config file.
+          git_auth() {
+            GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0="http.https://github.com/lyeve-labs/.extraHeader" \
+            GIT_CONFIG_VALUE_0="Authorization: Basic ${AUTH}" \
+              git "$@"
+          }
+
+          # Active blank imports only: commented-out lines are not cloned.
+          plugins=$(grep -oE '^[[:space:]]*_ "github\.com/lyeve-labs/lyeve-plugin-[a-z0-9-]+/plugin"' \
+                      lyeve-core/cmd/lyeve/main.go \
+                    | grep -oE 'lyeve-plugin-[a-z0-9-]+' | sort -u)
+          if [ -z "$plugins" ]; then
+            echo "::error::no plugin imports found in cmd/lyeve/main.go - the discovery pattern is stale; a release built now would ship an engine with no plugins."
+            exit 1
+          fi
+
+          repos="lyeve-libs $plugins"
+          echo "Cloning $(echo "$repos" | wc -w) repos pinned to PLUGIN_VERSIONS.txt"
+
+          missing=0
+          for r in $repos; do
+            sha=$(awk -v n="$r" '$1 == n { print $3 }' lyeve-core/PLUGIN_VERSIONS.txt)
+            if [ -z "$sha" ]; then
+              echo "::error::$r is not pinned in PLUGIN_VERSIONS.txt - run 'make lock-plugin-versions' and commit the result."
+              missing=$((missing + 1))
+              continue
+            fi
+            git_auth clone --quiet --filter=blob:none \
+              "https://github.com/lyeve-labs/${r}.git" "$r"
+            # A partial clone fetches the pinned tree's blobs here, so this needs the header too.
+            git_auth -C "$r" -c advice.detachedHead=false checkout --quiet "$sha"
+            echo "  $r @ ${sha:0:9}"
+          done
+          if [ "$missing" -gt 0 ]; then
+            echo "::error::$missing repo(s) unpinned - refusing to build an unreproducible release."
+            exit 1
+          fi
+
+      # Before anything runs go. With GOTOOLCHAIN=local the runner's own Go is
+      # older than the toolchain every module requires, and go work refuses a
+      # module that requires a newer one.
+      - name: Set up Go
+        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # A release never restores a cache that another run wrote.
+          cache: false
+
+      # Wire core, lyeve-libs and every plugin into one go.work.
+      - name: Generate go.work
+        run: |
+          set -euo pipefail
+          go work init
+          go work use ./lyeve-core ./lyeve-core/cmd/lyeve ./lyeve-libs $(ls -d lyeve-plugin-*)
+
+      # The lints that read the plugin repositories cannot run in ci.yml, which
+      # checks out this repository alone. This job already clones every pinned
+      # plugin, and lyeve-libs, which carries those lints, so it is the one
+      # place they can run. Running them here, before the build, gates the
+      # published image on the exact set of commits going into it.
+      - name: Workspace-wide lints
+        run: bash lyeve-libs/lints/run.sh "$GITHUB_WORKSPACE"
+
+      # The release binary's own tests compile every plugin and need the same
+      # pinned set, so they run here as well. Their make targets come from the
+      # cloned lyeve-libs, read before this repository's Makefile. Some start
+      # a database container, which the hosted runner's Docker serves.
+      - name: Release binary tests
+        working-directory: lyeve-core
+        run: make -f ../lyeve-libs/release/release.mk -f Makefile test-release
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          # GHCR_TOKEN when the repository has one, the built-in token
+          # otherwise. A PAT with write:packages can create the package.
+          password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
+
+      # For each arch: cross-compile the static binary, then build that arch's
+      # image and push it by digest. No QEMU: the file-prep stage runs on the
+      # native build platform and the runtime stage only copies the binary.
+      - name: Build & push each arch by digest
+        working-directory: lyeve-core
+        env:
+          VERSION: ${{ env.RELEASE_REF }}
+          COMMIT: ${{ github.sha }}
+          LICENSE_PUBLIC_KEY_HEX: ${{ secrets.LICENSE_PUBLIC_KEY_HEX }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/digests"
+          for arch in ${PLATFORMS}; do
+            echo "::group::$arch"
+            GOARCH="$arch" make -f ../lyeve-libs/release/release.mk -f Makefile build-lyeve-image \
+              VERSION="${VERSION}" \
+              COMMIT="${COMMIT}" \
+              LICENSE_PUBLIC_KEY_HEX="${LICENSE_PUBLIC_KEY_HEX:-0000000000000000000000000000000000000000000000000000000000000000}"
+
+            # Size-budget gate (see BINARY_MAX_MB).
+            mb=$(( $(stat -c%s bin/lyeve) / 1024 / 1024 ))
+            echo "bin/lyeve ($arch): ${mb} MB (budget ${BINARY_MAX_MB} MB)"
+            if [ "$mb" -gt "${BINARY_MAX_MB}" ]; then
+              echo "::error::bin/lyeve ($arch) is ${mb} MB, over the ${BINARY_MAX_MB} MB budget - investigate the size regression or bump BINARY_MAX_MB with a reason."
+              exit 1
+            fi
+
+            docker buildx build \
+              --platform "linux/${arch}" \
+              --file Dockerfile \
+              --label "org.opencontainers.image.title=lyeve-core" \
+              --label "org.opencontainers.image.description=LyEve CMS engine (all plugins)" \
+              --label "org.opencontainers.image.vendor=LyEve Labs" \
+              --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+              --label "org.opencontainers.image.licenses=LicenseRef-LyEve-Commercial" \
+              --label "org.opencontainers.image.version=${VERSION}" \
+              --label "org.opencontainers.image.revision=${COMMIT}" \
+              --output "type=image,name=${REGISTRY}/${IMAGE_NAME},push-by-digest=true,name-canonical=true,push=true" \
+              --metadata-file "${{ runner.temp }}/meta-${arch}.json" \
+              .
+            digest="$(jq -r '."containerimage.digest"' "${{ runner.temp }}/meta-${arch}.json")"
+            touch "${{ runner.temp }}/digests/${digest#sha256:}"
+            echo "::endgroup::"
+          done
+
+      # refs/tags/v1.2.3 -> 1.2.3, 1.2 and latest, all in shell with no REST API.
+      - name: Create manifest list & push tags
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          ver="${RELEASE_REF#v}"
+          minor="${ver%.*}"
+          img="${REGISTRY}/${IMAGE_NAME}"
+          docker buildx imagetools create \
+            -t "${img}:${ver}" -t "${img}:${minor}" -t "${img}:latest" \
+            $(printf "${img}@sha256:%s " *)
+          docker buildx imagetools inspect "${img}:${ver}"
+
+      # Generate CycloneDX SBOM for the release image with syft, then
+      # upload it as a workflow artifact alongside the image.
+      - name: Generate SBOM
+        env:
+          SYFT_VERSION: '1.52.0'
+          # The linux_amd64 entry of that release's checksums file.
+          SYFT_SHA256: 'caeedb81fb0491615f1ebd1761e4145d41ee86dd2cc7bf80669f9f5ad9d6133d'
+        run: |
+          set -euo pipefail
+          tarball="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o "${RUNNER_TEMP}/${tarball}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${tarball}"
+          echo "${SYFT_SHA256}  ${RUNNER_TEMP}/${tarball}" | sha256sum --check --strict -
+          tar -xzf "${RUNNER_TEMP}/${tarball}" -C "${RUNNER_TEMP}" syft
+          "${RUNNER_TEMP}/syft" "${REGISTRY}/${IMAGE_NAME}:${RELEASE_REF#v}" \
+            -o cyclonedx-json \
+            --file "/tmp/sbom-${RELEASE_REF}.cdx.json"
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ env.RELEASE_REF }}
+          path: /tmp/sbom-${{ env.RELEASE_REF }}.cdx.json
+          retention-days: 90

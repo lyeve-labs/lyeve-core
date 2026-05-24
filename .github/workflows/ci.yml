@@ -1,0 +1,347 @@
+name: CI
+
+# Static gate plus the test suite, run once per database dialect.
+#
+# The suite is dialect-aware: plugintest reads CI_DIALECT and builds hosts only
+# for the dialect named there. One job per dialect is the only way every test
+# body executes, and the three run in parallel so the wall clock is the slowest
+# dialect rather than the sum.
+#
+# The dialect-independent work (fmt, lints, secret scan, vet, golangci-lint,
+# build, govulncheck) is its own `static` job, so no dialect shard carries it.
+#
+# Triggers, and which dialects each one runs:
+#
+#   pull_request          postgres only. The fast lane, on the path a change
+#                         actually takes, so it has to stay near four minutes.
+#   push to dev           none. The lints run. The suite does not. This is a
+#                         merge of a pull request the suite already answered,
+#                         so re-running it re-tests an answer we have. It is
+#                         not a gate before a release, and reading it as one is
+#                         how a green tick comes to mean nothing was run.
+#   schedule              all three, nightly. This is where mysql and mssql
+#                         coverage actually comes from.
+#   workflow_call         all three when release.yml sets `release: true`.
+#   workflow_dispatch     whichever the `dialects` input names.
+#
+# `make verify-ci` is `make verify` without the secret scan, which the static
+# job runs itself against a pinned gitleaks. Every lint in it reads this
+# repository alone.
+
+on:
+  push:
+    # dev only. A merge to main is a fast-forward of a commit this already
+    # tested, so running it again gates the release on a second identical run.
+    # The release workflow calls this one on the tag instead, which is the
+    # point where a green suite actually decides whether an image ships.
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+  # Called by release.yml on a version tag.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Ref to test. Empty means the ref that triggered the run.'
+        type: string
+        required: false
+        default: ''
+      release:
+        description: 'Run the full matrix. Set by release.yml; a plain push does not.'
+        type: boolean
+        required: false
+        default: false
+  workflow_dispatch:
+    inputs:
+      dialects:
+        description: "Which dialects to test"
+        type: choice
+        default: all
+        options:
+          - all
+          - postgres
+          - mysql
+          - mssql
+  schedule:
+    # 03:17 UTC. Off the hour because the top of the hour is when every other
+    # repo's cron fires and Actions queues behind it.
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # A matrix axis cannot be filtered by a job-level `if`, because the matrix
+  # context is not in scope there. Resolving the list in a prior job is the
+  # only way one workflow serves both "test everything" and "postgres only,
+  # quickly".
+  plan:
+    name: "resolve dialects"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      dialects: ${{ steps.pick.outputs.dialects }}
+    steps:
+      - id: pick
+        # Read through the environment rather than interpolating into the
+        # script body, so the input never becomes shell.
+        env:
+          CHOICE: ${{ inputs.dialects }}
+          EVENT: ${{ github.event_name }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+          all='["postgres","mysql","mssql"]'
+          # A release runs everything: it is the last point where a wrong
+          # answer is cheaper than a wrong image.
+          if [ "$RELEASE" = true ]; then
+            echo "dialects=$all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$EVENT" in
+            workflow_dispatch)
+              case "$CHOICE" in
+                postgres|mysql|mssql) list="[\"$CHOICE\"]" ;;
+                *)                    list="$all" ;;
+              esac
+              ;;
+            # A pull request is where a change is actually judged, so it runs
+            # the suite. Postgres only: MySQL and MSSQL wait for the release,
+            # which runs all three.
+            pull_request) list='["postgres"]' ;;
+            # A push to dev is a merge of a pull request the suite already ran
+            # on, so it re-tests an answer we have. The lints still run, being
+            # the cheap half and the half that catches a bad merge.
+            push)         list='[]' ;;
+            *)            list="$all" ;;
+          esac
+          echo "dialects=$list" >> "$GITHUB_OUTPUT"
+
+  # The dialect-independent checks. Nothing here reads a database, so it is a
+  # job of its own, and the wall clock is the slowest dialect rather than the
+  # slowest dialect plus the lints.
+  static:
+    name: "static · lint, vet, build"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: lyeve-core
+    env:
+      ENGINE_PKGS: "./internal/... ./pkg/... ./cmd/lyeve-core/..."
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: lyeve-core
+          ref: ${{ inputs.ref }}
+          # The secret scan below reads history. The default shallow clone gives
+          # it one commit, which passes without having looked at anything.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: lyeve-core/go.mod
+          cache: true
+          cache-dependency-path: lyeve-core/go.sum
+
+      - name: go mod verify
+        run: go mod verify
+        env:
+          GOWORK: off
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"
+            echo "$unformatted"
+            exit 1
+          fi
+      # The build-time guarantees and the dev-tag build. The secret scan is the
+      # next step, against a pinned gitleaks.
+      - name: make verify-ci
+        run: make verify-ci
+        env:
+          GOWORK: off
+      # Full history, not just the diff: a credential in an old commit is as
+      # readable as one in HEAD. Run from source rather than the published
+      # action, which needs a license key for an organization.
+      - name: secret scan
+        run: |
+          # Retried: the install pulls 40 modules and verifies each against
+          # sum.golang.org, and a single stream error there fails the build
+          # with no finding to show for it.
+          for attempt in 1 2 3; do
+            go install github.com/zricethezav/gitleaks/v8@v8.30.1 && break
+            echo "gitleaks install attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $((attempt * 15))
+          done
+          "$(go env GOPATH)/bin/gitleaks" detect --source . \
+            --config .gitleaks.toml --no-banner --redact --exit-code 1
+        env:
+          GOWORK: off
+      # The scan's configuration has a test of its own, which skips where no
+      # gitleaks is installed. This step has one, so a skip here is a failure.
+      - name: secret scan configuration test
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          out=$(go test -count=1 -v -run '^TestGitleaksConfig_' ./tools/ 2>&1) || { echo "$out"; exit 1; }
+          echo "$out"
+          if printf '%s\n' "$out" | grep -q -- '--- SKIP'; then
+            echo "::error::the gitleaks configuration test skipped although gitleaks is installed"
+            exit 1
+          fi
+        env:
+          GOWORK: off
+      - name: check Dockerfile digests
+        run: bash scripts/check-dockerfile-digests.sh
+      - name: go vet
+        run: go vet $ENGINE_PKGS
+        env:
+          GOWORK: off
+      - name: golangci-lint
+        run: |
+          # Fetch and run are separate so only the fetch is retried. `go run
+          # pkg@version` does both, and pulls the linter with its hundred
+          # dependencies through proxy.golang.org and sum.golang.org on every
+          # run: one stream error from either would fail the build with no
+          # finding to show for it. Retrying that combined command would also re-run
+          # the lint after a real finding.
+          for attempt in 1 2 3; do
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 && break
+            echo "golangci-lint install attempt $attempt failed"
+            [ "$attempt" = 3 ] && exit 1
+            sleep $((attempt * 15))
+          done
+          "$(go env GOPATH)/bin/golangci-lint" run $ENGINE_PKGS
+        env:
+          GOWORK: off
+      - name: go build
+        run: go build $ENGINE_PKGS
+        env:
+          GOWORK: off
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 $ENGINE_PKGS
+        env:
+          GOWORK: off
+
+
+  gate:
+    name: "test · ${{ matrix.dialect }}"
+    needs: plan
+    if: needs.plan.outputs.dialects != '[]'
+    runs-on: ubuntu-latest
+    # MySQL and MSSQL create and migrate a database per test rather than
+    # cloning a pre-migrated template the way Postgres does, and MSSQL
+    # serializes CREATE DATABASE instance-wide. Left at the 360-minute default
+    # a wedged container burns a whole runner-hour before anyone hears about it.
+    timeout-minutes: 90
+    strategy:
+      # One dialect failing is the interesting case, and canceling the other
+      # two hides whether the fault is dialect-specific or general.
+      fail-fast: false
+      matrix:
+        dialect: ${{ fromJSON(needs.plan.outputs.dialects) }}
+    defaults:
+      run:
+        working-directory: lyeve-core
+    env:
+      # Everything except cmd/lyeve, which needs modules that are not
+      # published. Naming the trees keeps this gate to what core can compile on
+      # its own.
+      ENGINE_PKGS: "./internal/... ./pkg/... ./cmd/lyeve-core/..."
+    steps:
+      # Checked out as `lyeve-core` so paths match the release workflow.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: lyeve-core
+          ref: ${{ inputs.ref }}
+          # The secret scan below reads history. The default shallow clone gives
+          # it one commit, which passes without having looked at anything.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: lyeve-core/go.mod
+          cache: true
+          cache-dependency-path: lyeve-core/go.sum
+
+      # CI_DIALECT is mandatory here, and it is what makes this a matrix rather
+      # than a single run. plugintest treats an unset value as "run every
+      # dialect", which would start Postgres, MySQL and Azure SQL Edge
+      # containers in every package that wants a database and serialize the
+      # three inside one job. Pinning each shard to one dialect keeps the
+      # container count per job to one image and lets the three run at once.
+      - name: go test
+        run: |
+          set -euo pipefail
+          # Each package binary starts its own container, so `go test -p N` is
+          # also "N database servers at once". Postgres is cheap enough at the
+          # default fan-out. MySQL and Azure SQL Edge are not, and a 4-core
+          # runner holding four of either runs out of memory rather than time.
+          if [ "$CI_DIALECT" = postgres ]; then
+            go test -count=1 -timeout 60m $ENGINE_PKGS
+          else
+            go test -count=1 -timeout 60m -p 2 $ENGINE_PKGS
+          fi
+        env:
+          GOWORK: off
+          CI_DIALECT: ${{ matrix.dialect }}
+
+  # The kernel binary is the one program a lone checkout of this repository can
+  # run, and compiling it proves only that it links. This boots it on a real
+  # Postgres and walks the first run an operator makes: the probes, setup,
+  # sign-in and the entitlements the admin console reads. The script is the one
+  # a contributor runs by hand, so a red job here reproduces locally.
+  #
+  # It runs wherever the Postgres shard runs, and not on a push to dev, for the
+  # reason the plan job gives.
+  kernel:
+    name: "kernel · boot on postgres"
+    needs: plan
+    if: contains(fromJSON(needs.plan.outputs.dialects), 'postgres')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: lyeve-core
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lyeve_kernel
+        # No fixed host port, so a runner that already holds 5432 still starts
+        # it. The step below reads the port that was assigned.
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lyeve_kernel"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          path: lyeve-core
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: lyeve-core/go.mod
+          cache: true
+          cache-dependency-path: lyeve-core/go.sum
+
+      - name: build bin/lyeve-core
+        run: make build-kernel
+
+      - name: boot, set up, sign in, read entitlements, stop
+        run: bash scripts/kernel-smoke.sh bin/lyeve-core
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/lyeve_kernel?sslmode=disable
