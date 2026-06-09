@@ -1,0 +1,61 @@
+# LyEve CMS - air (Go auto-reload) configuration.
+#
+# Watches this module, rebuilds when any .go or template file changes, and
+# restarts the CMS server. It runs the nested cmd/lyeve module, which needs
+# modules that are not published. A clone of this repository alone runs
+# go run ./cmd/lyeve-core instead.
+#
+# Usage:
+#   air                  # auto-reload from the repository root
+#   air -c .air.toml     # explicit config path
+#
+# Install air: go install github.com/air-verse/air@latest
+# Or: mise install (configured in mise.toml)
+
+root = "."
+testdata_dir = "testdata"
+tmp_dir = "tmp"
+
+[build]
+  # Build and run the CMS binary from the nested cmd/lyeve module.
+  cmd = "go run ./cmd/lyeve"
+  # Include Go source files and templates
+  include_ext = ["go", "tmpl", "html", "sql"]
+  # Exclude test files, test data, tmp, and vendored code
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "node_modules", "tests", "bin", "data", "coverage"]
+  exclude_file = ["_test.go", "test_helpers.go"]
+  # Log the build command before running
+  log = "build-errors.log"
+  # Delay before rebuilding on file change (debounce)
+  delay = 500
+  # Stop signal for graceful shutdown
+  stop_signal = "SIGINT"
+  # Rebuild after first run on startup
+  full_bin = ""
+  # Kill existing process before rebuild
+  kill_delay = "2s"
+  # Polling interval for file watcher (milliseconds)
+  poll = false
+  poll_interval = 0
+  # Exclude unchanged files from triggering rebuild
+  exclude_unchanged = false
+
+[color]
+  # Custom colors for build log
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+  app = ""
+
+[log]
+  # Show timestamps in log
+  time = true
+
+[misc]
+  # Clean tmp/ on exit
+  clean_on_exit = false
+
+[screen]
+  clear_on_rebuild = true
+  keep_scroll = true

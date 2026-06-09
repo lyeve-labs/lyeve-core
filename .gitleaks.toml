@@ -1,0 +1,126 @@
+# LyEve CMS - Gitleaks Configuration
+# Detect hardcoded secrets, API keys, tokens, and credentials.
+#
+# Run manually:
+#   gitleaks detect --config=.gitleaks.toml --verbose
+#   gitleaks protect --config=.gitleaks.toml --staged
+
+title = "LyEve CMS Gitleaks Config"
+
+# Without this a config REPLACES the built-in ruleset rather than adding to
+# it, so this file would detect only the rules written below and a tree
+# holding an AWS secret key would scan clean.
+[extend]
+  useDefault = true
+
+
+# Allowlist: patterns that are false positives in our codebase
+[allowlist]
+  description = "LyEve CMS project allowlist"
+
+  # Example/test keys used in documentation and test fixtures
+  paths = [
+    # A pin file lists 40-character git commit SHAs, which the built-in
+    # high-entropy rule reads as API keys.
+    '''PLUGIN_VERSIONS\.txt$''',
+    # This file quotes the patterns it allowlists, so it matches itself.
+    '''\.gitleaks\.toml$''',
+    '''testdata/''',
+    '''_test\.go$''',
+    '''\.md$''',
+    '''Makefile$''',
+    '''\.env\.example$''',
+    '''migrations/.*\.sql$''',
+    '''internal/auth/testdata/''',
+  ]
+
+  # Known false positives - test credentials, example values
+  stopwords = [
+    "example",
+    "test",
+    "sample",
+    "dummy",
+    "placeholder",
+    "changeme",
+    "TODO",
+  ]
+
+  # Regex patterns for test credentials we use
+  regexTarget = "match"
+  regexes = [
+    # JWKS test fixtures use fixed Ed25519 keys from RFC 8037
+    '''"kid":\s*"[^"]*test[^"]*"''',
+    # A doc comment naming the token's format after the variable it
+    # documents. The phrase is not a value, so naming it opens nothing.
+    '''\bLYEVE_LICENSE_KEY: Ed25519-signed\b''',
+  ]
+
+# Custom allowlist rules
+[[rules]]
+  id = "lyeve-jwt-signing-key"
+  description = "LyEve EdDSA JWT signing keys, allowed in internal/auth/ and tests only"
+  # Ed25519 private key in PKCS#8 PEM format
+  regex = '''(?i)-----BEGIN\s+PRIVATE\s+KEY-----[\s\S]*?-----END\s+PRIVATE\s+KEY-----'''
+  [rules.allowlist]
+    paths = [
+      '''internal/auth/''',
+      '''testdata/''',
+      '''_test\.go$''',
+    ]
+
+# Extended detection rules
+[[rules]]
+  id = "lyeve-database-url"
+  description = "Database connection strings"
+  regex = '''(?i)(?:postgres|mysql|mssql|sqlserver)://[^\s'"]+'''
+  [rules.allowlist]
+    # Placeholder DSNs written into doc comments.
+    regexTarget = "match"
+    regexes = [
+      '''postgres://\.\.\.''',
+      '''mysql://root:pw@tcp\(db:3306\)/app''',
+      # A DSN whose userinfo is literally user:pass documents the shape.
+      '''(?:postgres|postgresql|mysql|mssql|sqlserver)://user:pass@''',
+      # The same in capitals, as a placeholder an operator replaces.
+      '''(?:postgres|postgresql|mysql|mssql|sqlserver)://USER:PASSWORD@''',
+      # The throwaway development container the README starts, whose password
+      # is the one its docker run line sets.
+      '''postgres://postgres:postgres@localhost:4321/''',
+      # A scheme with no credentials names a driver, it does not carry one.
+      '''(?:postgres|postgresql|mysql|mssql|sqlserver)://[^:@\s]*(?:[,.)\s]|$)''',
+      # A password that is a shell substitution is a command the reader runs,
+      # not a secret anybody holds. The deployment manifest documents creating
+      # the secret with $(openssl rand).
+      '''(?:postgres|postgresql|mysql|mssql|sqlserver)://[^:@\s]*:\$\(''',
+    ]
+    paths = [
+      '''\.env\.example$''',
+      '''Makefile$''',
+      '''docker-compose''',
+      '''_test\.go$''',
+      # CI workflows use ${VAR} / masked example DSNs, not real credentials
+      '''\.github/''',
+      # Dockerfiles carry example DATABASE_URL comments
+      '''Dockerfile''',
+      # Source files with example/format-string DSNs (real DSNs come from env
+      # at runtime, never hardcoded here)
+      '''internal/testdb/''',
+      '''internal/provider/provider\.go$''',
+      '''internal/db/provider/dsn\.go$''',
+      '''pkg/core/enginehost/host_options\.go$''',
+    ]
+
+[[rules]]
+  id = "lyeve-api-key-header"
+  description = "LyEve API key patterns in headers"
+  regex = '''(?i)x-api-key[:\s=]+[a-zA-Z0-9_-]{32,}'''
+  [rules.allowlist]
+    paths = ['''_test\.go$''', '''testdata/''']
+
+# A license key carries the product's prefix, so no stopword may name the
+# product: a stopword drops every finding whose secret contains it.
+[[rules]]
+  id = "lyeve-license-key"
+  description = "license keys"
+  regex = '''\blyeve_[a-z]+_[A-Za-z0-9]{16,}'''
+  keywords = ["lyeve_"]

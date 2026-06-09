@@ -1,0 +1,267 @@
+# LyEve CMS - golangci-lint Configuration
+# Target: the root module of lyeve-core
+#
+# Run manually:
+#   golangci-lint run --config=.golangci.yml ./...
+#   golangci-lint run --config=.golangci.yml --new-from-rev=HEAD~1  # changed only
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+  allow-parallel-runners: true
+
+output:
+  formats:
+    text:
+      path: stdout
+      print-issued-lines: true
+      print-linter-name: true
+
+linters:
+  enable:
+    # Default set
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # Extra quality linters
+    - bodyclose          # HTTP response body must be closed
+    - copyloopvar        # Detect copies of loop variables (Go 1.22+)
+    - errorlint          # Error wrapping and comparison
+    - exhaustive         # Check exhaustiveness of enum switches
+    - gocritic           # Opinionated Go linter with many checks
+    - gosec              # Security checks
+    - nilerr             # Find nil error returns
+    - noctx              # No context.Context passing to net/http
+    - prealloc           # Slice preallocation hints
+    - reassign           # Check for re-assignment of returned error
+    - revive             # Fast, configurable, extensible linter
+    - unconvert          # Remove unnecessary type conversions
+    - unparam            # Unused function parameters
+    - usestdlibvars      # Use stdlib constants (http.MethodGet etc.)
+    - whitespace         # Checks for unnecessary whitespace
+  disable:
+    # Too many false positives in our codebase
+    - cyclop             # Covered by gocritic
+    - funlen             # Handled during code review
+    - gochecknoglobals   # Plugins need global registration
+    - gochecknoinits     # Plugins use init() for registration
+    - mnd                # Magic number detector: too noisy for a CMS
+    - lll                # Covered during code review
+    - wsl                # Whitespace linter: too opinionated
+    - nlreturn           # Newline before return: too opinionated
+  exclusions:
+    generated: lax
+    paths:
+      - '\.pb\.go$'
+      - '\.gen\.go$'
+      - 'migrations/'
+    rules:
+      - path: '_test\.go'
+        linters:
+          - errcheck
+          - gosec
+          - gocritic
+          - unparam
+          - bodyclose
+          - redefines-builtin-id
+      - path: '(main|_test)\.go'
+        text: "string `context.Background`"
+        linters:
+          - noctx
+      - path: 'cmd/.*/main\.go'
+        text: "use of `fmt.Println`"
+        linters:
+          - revive
+      # exitAfterDefer: CLI mains call os.Exit after deferred cleanup.
+      - path: 'cmd/.*/main\.go'
+        text: 'exitAfterDefer'
+        linters:
+          - gocritic
+      # Interface implementations and callback signatures must keep declared params.
+      - text: 'unused-parameter'
+        linters:
+          - revive
+      # Missing doc comments: too noisy for per-PR lint.
+      - text: 'should have comment.*or be unexported|comment on exported|should have a package comment|package comment is detached|stutters; consider calling|unexported-return'
+        linters:
+          - revive
+      # Context key type is a deliberate design choice in this codebase.
+      - text: 'should not use basic type string as key in context'
+        linters:
+          - revive
+      # Context-as-argument: interface compliance forces param order.
+      - text: 'context.Context should be the first parameter'
+        linters:
+          - revive
+      # G115: integer overflow on narrowing conversions - audited, bounds checked upstream.
+      # G304: file inclusion via variable - intentional in CMS template/schema loading.
+      # G101: hardcoded credential patterns - false positives on config struct tags.
+      # G301/G306: directory/file permissions - dev tooling, not production.
+      # G104: errors unhandled - too noisy, errcheck covers this better.
+      # G112/G116: slowloris/pprof - dev servers only.
+      # G201/G202: SQL formatting - parameterized queries used, string build for DDL.
+      # G204: subprocess - intentional in CLI tooling.
+      # G404: weak random - non-crypto use (test fixtures, jitter).
+      # G117: JSON-marshal struct with "password" field - intentional for credential storage.
+      # G124: Cookie attributes - set dynamically at runtime (Secure, SameSite from config).
+      # G701/G703/G704/G705: Taint-analysis false positives - parameterized SQL, validated paths, internal HTTP.
+      - text: 'G115|G304|G101|G301|G306|G104|G112|G116|G201|G202|G204|G404|G117|G124|G701|G703|G704|G705'
+        linters:
+          - gosec
+      # Cleanup defers (Close, Flush) - error intentionally discarded.
+      - text: 'Error return value of.*is not checked'
+        linters:
+          - errcheck
+      # Prealloc hints - advisory, not a correctness issue.
+      - text: 'Consider pre-?allocating'
+        linters:
+          - prealloc
+      # Redefines builtin id - safe in Go 1.21+ with min/max/cap as locals.
+      - text: 'redefinition of the built-in function'
+        linters:
+          - revive
+      # nilerr: returning nil where error is expected - audited, intentional patterns.
+      - text: 'error is not nil|error is always nil'
+        linters:
+          - nilerr
+      # noctx: context passing in non-HTTP code - handled by middleware.
+      - text: 'must not be called|should rewrite.*WithContext|no context'
+        linters:
+          - noctx
+      # Exhaustive: default-signifies-exhaustive handles most switches.
+      - text: 'missing cases in switch'
+        linters:
+          - exhaustive
+      # Inline: govet/inline suggests inlining constants like reflect.Ptr -> 22. Hurts readability.
+      - text: 'inline:'
+        linters:
+          - govet
+      # Unparam: unused parameters in non-test code - interface/strategy compliance.
+      - text: 'always receives|is unused|is never used|is always'
+        linters:
+          - unparam
+      # SA1019: deprecated exported helpers keep callers in this module.
+      - text: 'SA1019'
+        linters:
+          - staticcheck
+      # SA1029/QF: string context keys and De Morgan - acceptable in test code.
+      - text: 'SA1029|QF1001'
+        linters:
+          - staticcheck
+
+  # Under linters, not at the top level. golangci-lint 2 accepts a v1-style
+  # top-level linters-settings block without complaint and ignores every key
+  # in it, so every linter configured below would silently run at its
+  # defaults. `golangci-lint config verify` reports it.
+  settings:
+    gocritic:
+      enabled-checks:
+        - appendCombine
+        - argOrder
+        - badCall
+        - badCond
+        - codegenComment
+        - commentedOutCode
+        - deferInLoop
+        - deprecatedComment
+        - dupArg
+        - dupBranchBody
+        - dupCase
+        - dupSubExpr
+        - exitAfterDefer
+        - ifElseChain
+        - indexAlloc
+        - mapKey
+        - methodExprCall
+        - nestingReduce
+        - nilValReturn
+        - octalLiteral
+        - offBy1
+        - preferDecodeRune
+        - ptrToRefParam
+        - regexpMust
+        - ruleguard
+        - sloppyLen
+        - sqlQuery
+        - stringXbytes
+        - switchTrue
+        - tooManyResultsChecker
+        - truncateCmp
+        - typeDefFirst
+        - typeUnparen
+        - uncheckedInlineErr
+        - underef
+        - unnecessaryDefer
+        - weakCond
+
+    gosec:
+      excludes:
+        - G104  # "Errors unhandled": errcheck covers this better
+      config:
+        G101:  # Hardcoded credentials: 16 chars minimum
+          pattern: "(?i)pass(word|wd|phrase)|secret|token|api[_-]?key|auth"
+          ignore_entropy: false
+          entropy_threshold: "80.0"
+          per_char_threshold: "3.0"
+          truncate: "16"
+        G306:  # Expect 0644 or stricter
+          "0644"
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: exported
+          arguments:
+            - checkPrivateReceivers
+            - sayRepetitiveInsteadOfStutters
+            # The stutter half is off. It objects to core.PluginStatus,
+            # core.PluginRoutes and fifteen more, which are published names
+            # every plugin imports, so acting on it would be a breaking rename
+            # across every consumer to satisfy a style rule. The rest of the
+            # rule, which catches an exported symbol with no doc comment, is on.
+            - disableStutteringCheck
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: var-naming
+        - name: unexported-return
+        - name: unused-parameter
+          disabled: true
+
+    staticcheck:
+      checks:
+        - all
+        - -SA1019  # Using deprecated things: see the exclusion above
+        - -ST1000  # Package comment style: too strict
+        - -ST1003  # Naming conventions with underscores: some names keep them
+        - -ST1016  # Receiver naming: too strict
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
