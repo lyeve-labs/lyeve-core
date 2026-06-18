@@ -1,0 +1,33 @@
+# Gremlins mutation testing config for LyEve Core.
+# Docs: https://gremlins.dev
+#
+# This config sets module-wide defaults. The mutation.sh script
+# runs gremlins per-package with per-package --exclude-files flags
+# to handle known test infrastructure issues.
+
+unleash:
+  # Target packages (overridden per-invocation by mutation.sh).
+  # Common settings only - thresholds, workers, timeout.
+
+  # Thresholds: CI gate fails if score drops below these.
+  # efficacy  = killed / (killed + lived) - how good tests are at killing covered mutants
+  # mcover    = (killed + lived) / total - how many mutants are even reachable by tests
+  threshold-efficacy: 0.5
+  threshold-mcover:   0.3
+
+  # Workers: cap to avoid OOM on CI runners (2 vCPU).
+  workers: 2
+
+  # Timeout coefficient: multiply default per-mutant timeout.
+  # EdDSA keygen in auth is slow. Use 3x for safety.
+  timeout-coefficient: 3
+
+  # Build tags: include integration tests when DB is available.
+  # mutation.sh passes this only when TEST_DATABASE_URL is set.
+  # tags: "integration"
+
+  # Enable extra mutant types beyond defaults.
+  # Defaults: ARITHMETIC_BASE, CONDITIONALS_BOUNDARY, CONDITIONALS_NEGATION,
+  #           INCREMENT_DECREMENT, INVERT_NEGATIVES
+  invert-assignments: true
+  invert-logical: true
