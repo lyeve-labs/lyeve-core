@@ -1,0 +1,71 @@
+# Release pin file. Pins every repository the release build clones beside
+# this one to an exact commit SHA, so builds are reproducible and a
+# supply-chain attack has to modify this file, which lives here under code
+# review.
+#
+# Format:  repo-name = full-40-char-commit-sha
+# Empty lines and lines starting with # are ignored.
+#
+# Covers the license module cmd/lyeve replaces with a sibling path, and every
+# plugin cmd/lyeve compiles in. release.yml refuses to build a repository
+# missing from this file.
+#
+# SHAs are the tip of each repository's default branch on origin, never a
+# local HEAD: the release workflow clones them from GitHub, so an unpushed
+# commit fails the build. Run `make lock-plugin-versions` to update, and
+# review the diff before committing.
+#
+# Generated 2026-10-05T09:22:47Z from origin default branches.
+
+lyeve-libs = c990914e123f173639f550f8ebe30d27407f0017
+lyeve-plugin-ab-testing = ceaaae3a5f5d464cc4c4034e27b39fe84c55a0fa
+lyeve-plugin-ai = d76dce7a469a577a57519ac9e0ea27db21908636
+lyeve-plugin-analytics = 8e8ff044b4648a39fab5a2f54ee272032cd44e5b
+lyeve-plugin-apianalytics = 2be597d9b3ebd87a62a04a95cc8fcb8adf953708
+lyeve-plugin-apikey = 4dac609c841770ee1f9cb20451b549541bdbfeed
+lyeve-plugin-audit = eb8e5fe2f3452a867e943e547344cdbd1b2e9b36
+lyeve-plugin-bulk-import = eca3f3bd301921c073589a9206418ad5259cc109
+lyeve-plugin-cache = 78fda07cae60da4bba032500930f8e50a99a8cdf
+lyeve-plugin-captcha = 22a275687a68cf5aff6433f7a11fe80a0da0e052
+lyeve-plugin-cluster = bab74f229eb6a01762b0b197fb9bca769ab36ba2
+lyeve-plugin-content = e0a5d297c537259b2eb8ecf9654b4afde3efbfa5
+lyeve-plugin-cron = 685984f552dc08572da47f7823aab59b13d80a13
+lyeve-plugin-data-export = 9272a862ed7f2e9df49d791dcb1b105f5546c963
+lyeve-plugin-data-residency = 9b1485865d8534845820c3b98c7924988c9fb4fc
+lyeve-plugin-device-fingerprint = 61eb021f458810b812a5864d1543e691380b3562
+lyeve-plugin-email = c83895cae4c0c7e9a30077a7ba53b0fd3e52ff81
+lyeve-plugin-error-tracking = e2591cd2f4f1dcc6d0f72fade0485d0eb3a26616
+lyeve-plugin-events = d9468983850e253b2a93352097d27cbd28e58a14
+lyeve-plugin-flow = 5ce310919d44a496fc65cf2ab0769322dd1f8dc3
+lyeve-plugin-goroutine-engine = 8508cbef57bba9c0c8ac3b2479e5674b04f71d99
+lyeve-plugin-graphql = 362a7308353f6899d906ac5d63dce6c5aa253582
+lyeve-plugin-grpc = bad61ac365da612ee9dac98d3295565a8f3e6055
+lyeve-plugin-idempotency = 80ddc95c371305d0a72333dff487e2f05a8ae85f
+lyeve-plugin-localization = d8e7145492b306e72ba333ac8927f9447c11c097
+lyeve-plugin-logging = 03b30f1483688ca1cad8b15ced1bf0b5041331c8
+lyeve-plugin-magic-link = ab3527cd9feeeea92861c78646e6fb3c60e8d7f7
+lyeve-plugin-media = 9ca35c9d516f06776be421bfc76656d71d2680b8
+lyeve-plugin-messagebroker = 0d9523f547a4163a7b02983bebeb745d47382d29
+lyeve-plugin-mfa = e9f81dc1367eae20aa060eed7df43e22449c5570
+lyeve-plugin-multitenant = 445a3337055385337d8c583253cc3b6e9b2636e3
+lyeve-plugin-oauth = bd862ff15c01543c4e6888c6abf2373ee5414bf8
+lyeve-plugin-password-reset = fbb87e1abedd3551ab90c1d148219e2cd5c173fb
+lyeve-plugin-permissions = 5986f12c6c2689fe907856fa51c1ee7d930377ee
+lyeve-plugin-pii-mask = 923a6fa80dfe035ed48832205d48482986c433ae
+lyeve-plugin-profiler = d3694fab44becdeb990042f5f276d20468dd7072
+lyeve-plugin-query-monitor = 4b2a4e4d1fb04358d251ef6bebe33d457b53ef1f
+lyeve-plugin-rate-limit = 9d9591c293a4dca07f2c30ace8fee5e9d843f021
+lyeve-plugin-realtime = f0dfa2ee50503bb32c40433dc358d6ca77d85f51
+lyeve-plugin-recommendations = fc647cd7d8c68d8fe70fa7c2207f3f317ba9cb44
+lyeve-plugin-request-capture = cfc8b971864241137e47710fd03f6024bb4416a1
+lyeve-plugin-review = 88a53ab3cb2dc0fee0f412b1da76145c187f5cc8
+lyeve-plugin-saml = 9d84dc96c8d26d57d9ea1691b1e7b13674b98204
+lyeve-plugin-schema = 9056423e48a6e51a67e1a3284d53ae7e650b1b11
+lyeve-plugin-scim = 45056392601e07fbb7695c65b272f21450b55622
+lyeve-plugin-search = 8c87f130b5bf4d883e19ab0c618a7c63ad2b8ec0
+lyeve-plugin-storage = 16db551210bebed22bbd17328bb4e9131a13d31e
+lyeve-plugin-synthetic-monitoring = 749bad53c761f9219dc5de87ac2679014f862bd9
+lyeve-plugin-telemetry = 41fcb135b2cd03fe3cda7efab2ea8a132a2556ce
+lyeve-plugin-usage = c9e79c6a10438c61e58977f125b381e1c31aca94
+lyeve-plugin-waf = 97c79553f259c9df8d02be6d6e0fd5922c6a4fcc
+lyeve-plugin-webhook = deee268940040fdc22e1fe7cbd37e7ef752e7b71

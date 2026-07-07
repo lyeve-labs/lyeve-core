@@ -1,0 +1,322 @@
+// The official image's binary. This is a module of its own so the
+// github.com/lyeve-labs/lyeve-core module stays free of plugin dependencies:
+// the engine is consumable as a library, while the binary that compiles the
+// plugins in is built from here.
+module github.com/lyeve-labs/lyeve-core/cmd/lyeve
+
+// No toolchain directive: go mod tidy removes one that equals the go
+// directive below, so declaring it leaves this file permanently untidy.
+go 1.27.1
+
+// Resolved from checkouts beside this repository. A go.work file can pin the
+// same paths.
+replace github.com/lyeve-labs/lyeve-core => ../..
+
+replace github.com/lyeve-labs/lyeve-libs => ../../../lyeve-libs
+
+replace github.com/lyeve-labs/lyeve-plugin-ab-testing => ../../../lyeve-plugin-ab-testing
+
+replace github.com/lyeve-labs/lyeve-plugin-ai => ../../../lyeve-plugin-ai
+
+replace github.com/lyeve-labs/lyeve-plugin-analytics => ../../../lyeve-plugin-analytics
+
+replace github.com/lyeve-labs/lyeve-plugin-apianalytics => ../../../lyeve-plugin-apianalytics
+
+replace github.com/lyeve-labs/lyeve-plugin-apikey => ../../../lyeve-plugin-apikey
+
+replace github.com/lyeve-labs/lyeve-plugin-audit => ../../../lyeve-plugin-audit
+
+replace github.com/lyeve-labs/lyeve-plugin-bulk-import => ../../../lyeve-plugin-bulk-import
+
+replace github.com/lyeve-labs/lyeve-plugin-cache => ../../../lyeve-plugin-cache
+
+replace github.com/lyeve-labs/lyeve-plugin-captcha => ../../../lyeve-plugin-captcha
+
+replace github.com/lyeve-labs/lyeve-plugin-cluster => ../../../lyeve-plugin-cluster
+
+replace github.com/lyeve-labs/lyeve-plugin-content => ../../../lyeve-plugin-content
+
+replace github.com/lyeve-labs/lyeve-plugin-cron => ../../../lyeve-plugin-cron
+
+replace github.com/lyeve-labs/lyeve-plugin-data-export => ../../../lyeve-plugin-data-export
+
+replace github.com/lyeve-labs/lyeve-plugin-data-residency => ../../../lyeve-plugin-data-residency
+
+replace github.com/lyeve-labs/lyeve-plugin-device-fingerprint => ../../../lyeve-plugin-device-fingerprint
+
+replace github.com/lyeve-labs/lyeve-plugin-email => ../../../lyeve-plugin-email
+
+replace github.com/lyeve-labs/lyeve-plugin-error-tracking => ../../../lyeve-plugin-error-tracking
+
+replace github.com/lyeve-labs/lyeve-plugin-events => ../../../lyeve-plugin-events
+
+replace github.com/lyeve-labs/lyeve-plugin-flow => ../../../lyeve-plugin-flow
+
+replace github.com/lyeve-labs/lyeve-plugin-goroutine-engine => ../../../lyeve-plugin-goroutine-engine
+
+replace github.com/lyeve-labs/lyeve-plugin-graphql => ../../../lyeve-plugin-graphql
+
+replace github.com/lyeve-labs/lyeve-plugin-grpc => ../../../lyeve-plugin-grpc
+
+replace github.com/lyeve-labs/lyeve-plugin-idempotency => ../../../lyeve-plugin-idempotency
+
+replace github.com/lyeve-labs/lyeve-plugin-localization => ../../../lyeve-plugin-localization
+
+replace github.com/lyeve-labs/lyeve-plugin-logging => ../../../lyeve-plugin-logging
+
+replace github.com/lyeve-labs/lyeve-plugin-magic-link => ../../../lyeve-plugin-magic-link
+
+replace github.com/lyeve-labs/lyeve-plugin-media => ../../../lyeve-plugin-media
+
+replace github.com/lyeve-labs/lyeve-plugin-messagebroker => ../../../lyeve-plugin-messagebroker
+
+replace github.com/lyeve-labs/lyeve-plugin-mfa => ../../../lyeve-plugin-mfa
+
+replace github.com/lyeve-labs/lyeve-plugin-multitenant => ../../../lyeve-plugin-multitenant
+
+replace github.com/lyeve-labs/lyeve-plugin-oauth => ../../../lyeve-plugin-oauth
+
+replace github.com/lyeve-labs/lyeve-plugin-password-reset => ../../../lyeve-plugin-password-reset
+
+replace github.com/lyeve-labs/lyeve-plugin-pii-mask => ../../../lyeve-plugin-pii-mask
+
+replace github.com/lyeve-labs/lyeve-plugin-profiler => ../../../lyeve-plugin-profiler
+
+replace github.com/lyeve-labs/lyeve-plugin-query-monitor => ../../../lyeve-plugin-query-monitor
+
+replace github.com/lyeve-labs/lyeve-plugin-rate-limit => ../../../lyeve-plugin-rate-limit
+
+replace github.com/lyeve-labs/lyeve-plugin-realtime => ../../../lyeve-plugin-realtime
+
+replace github.com/lyeve-labs/lyeve-plugin-recommendations => ../../../lyeve-plugin-recommendations
+
+replace github.com/lyeve-labs/lyeve-plugin-request-capture => ../../../lyeve-plugin-request-capture
+
+replace github.com/lyeve-labs/lyeve-plugin-saml => ../../../lyeve-plugin-saml
+
+replace github.com/lyeve-labs/lyeve-plugin-schema => ../../../lyeve-plugin-schema
+
+replace github.com/lyeve-labs/lyeve-plugin-scim => ../../../lyeve-plugin-scim
+
+replace github.com/lyeve-labs/lyeve-plugin-search => ../../../lyeve-plugin-search
+
+replace github.com/lyeve-labs/lyeve-plugin-storage => ../../../lyeve-plugin-storage
+
+replace github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring => ../../../lyeve-plugin-synthetic-monitoring
+
+replace github.com/lyeve-labs/lyeve-plugin-telemetry => ../../../lyeve-plugin-telemetry
+
+replace github.com/lyeve-labs/lyeve-plugin-usage => ../../../lyeve-plugin-usage
+
+replace github.com/lyeve-labs/lyeve-plugin-waf => ../../../lyeve-plugin-waf
+
+replace github.com/lyeve-labs/lyeve-plugin-webhook => ../../../lyeve-plugin-webhook
+
+replace github.com/lyeve-labs/lyeve-plugin-review => ../../../lyeve-plugin-review
+
+require (
+	github.com/google/uuid v1.6.0
+	github.com/lyeve-labs/lyeve-core v0.0.0-00010101000000-000000000000
+	github.com/lyeve-labs/lyeve-libs v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-ab-testing v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-ai v0.10.1
+	github.com/lyeve-labs/lyeve-plugin-analytics v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-apikey v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-cache v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-captcha v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-cluster v0.1.1
+	github.com/lyeve-labs/lyeve-plugin-content v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-cron v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-data-export v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-data-residency v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-device-fingerprint v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-email v0.11.1
+	github.com/lyeve-labs/lyeve-plugin-error-tracking v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-events v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-flow v0.1.1
+	github.com/lyeve-labs/lyeve-plugin-goroutine-engine v0.4.1
+	github.com/lyeve-labs/lyeve-plugin-graphql v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-grpc v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-idempotency v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-localization v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-logging v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-magic-link v0.10.1
+	github.com/lyeve-labs/lyeve-plugin-media v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-messagebroker v0.9.1
+	github.com/lyeve-labs/lyeve-plugin-mfa v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-multitenant v0.11.1
+	github.com/lyeve-labs/lyeve-plugin-oauth v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-password-reset v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-permissions v0.1.1
+	github.com/lyeve-labs/lyeve-plugin-pii-mask v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-profiler v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-query-monitor v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-rate-limit v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-realtime v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-recommendations v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-request-capture v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-review v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-saml v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-schema v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-scim v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-search v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-storage v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-telemetry v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-usage v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-waf v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-webhook v0.7.1
+	github.com/stretchr/testify v1.12.1
+)
+
+require (
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
+	dario.cat/mergo v1.0.2 // indirect
+	filippo.io/edwards25519 v1.2.0 // indirect
+	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
+	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
+	github.com/Azure/go-autorest/autorest/adal v0.9.24 // indirect
+	github.com/Azure/go-autorest/autorest/date v0.3.1 // indirect
+	github.com/Azure/go-autorest/logger v0.2.2 // indirect
+	github.com/Azure/go-autorest/tracing v0.6.1 // indirect
+	github.com/Microsoft/go-winio v0.6.2 // indirect
+	github.com/andybalholm/brotli v1.2.3 // indirect
+	github.com/beevik/etree v1.7.1 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/boombuler/barcode v1.1.0 // indirect
+	github.com/bytedance/gopkg v0.1.4 // indirect
+	github.com/bytedance/sonic v1.15.3 // indirect
+	github.com/bytedance/sonic/loader v0.5.2 // indirect
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cloudwego/base64x v0.1.7 // indirect
+	github.com/coder/websocket v1.8.15 // indirect
+	github.com/containerd/errdefs v1.0.0 // indirect
+	github.com/containerd/errdefs/pkg v0.3.0 // indirect
+	github.com/containerd/log v0.1.0 // indirect
+	github.com/containerd/platforms v0.2.1 // indirect
+	github.com/cpuguy83/dockercfg v0.3.2 // indirect
+	github.com/crewjam/saml v0.5.1 // indirect
+	github.com/disintegration/imaging v1.6.2 // indirect
+	github.com/distribution/reference v0.6.0 // indirect
+	github.com/docker/go-connections v0.8.1 // indirect
+	github.com/docker/go-units v0.5.0 // indirect
+	github.com/ebitengine/purego v0.11.0 // indirect
+	github.com/expr-lang/expr v1.17.8 // indirect
+	github.com/felixge/httpsnoop v1.1.0 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
+	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
+	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
+	github.com/gen2brain/webp v0.6.4 // indirect
+	github.com/go-chi/chi/v5 v5.3.2 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/go-playground/locales v0.14.1 // indirect
+	github.com/go-playground/universal-translator v0.18.1 // indirect
+	github.com/go-playground/validator/v10 v10.30.4 // indirect
+	github.com/go-sql-driver/mysql v1.10.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
+	github.com/go-webauthn/webauthn v0.18.0 // indirect
+	github.com/go-webauthn/x v0.3.0 // indirect
+	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
+	github.com/golang-migrate/migrate/v4 v4.19.1 // indirect
+	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
+	github.com/golang-sql/sqlexp v0.1.0 // indirect
+	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	github.com/graphql-go/graphql v0.8.1 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.30.0 // indirect
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/pgx/v5 v5.10.0 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
+	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
+	github.com/leodido/go-urn v1.5.0 // indirect
+	github.com/lib/pq v1.12.3 // indirect
+	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
+	github.com/magiconair/properties v1.18.11 // indirect
+	github.com/mattermost/xml-roundtrip-validator v0.1.0 // indirect
+	github.com/microsoft/go-mssqldb v1.11.0 // indirect
+	github.com/moby/docker-image-spec v1.3.1 // indirect
+	github.com/moby/go-archive v0.3.3 // indirect
+	github.com/moby/moby/api v1.56.0 // indirect
+	github.com/moby/moby/client v0.6.0 // indirect
+	github.com/moby/patternmatcher v0.6.1 // indirect
+	github.com/moby/sys/sequential v0.7.0 // indirect
+	github.com/moby/sys/user v0.4.1 // indirect
+	github.com/moby/sys/userns v0.2.0 // indirect
+	github.com/moby/term v0.5.2 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nats-io/nats.go v1.53.1 // indirect
+	github.com/nats-io/nkeys v0.4.16 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
+	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/opencontainers/image-spec v1.1.1 // indirect
+	github.com/philhofer/fwd v1.2.0 // indirect
+	github.com/pierrec/lz4/v4 v4.1.29 // indirect
+	github.com/power-devops/perfstat v0.0.0-20260805114148-88456608a4f6 // indirect
+	github.com/pquerna/otp v1.5.0 // indirect
+	github.com/prometheus/client_golang v1.24.1 // indirect
+	github.com/prometheus/client_model v0.6.3 // indirect
+	github.com/prometheus/common v0.71.0 // indirect
+	github.com/prometheus/procfs v0.22.0 // indirect
+	github.com/rabbitmq/amqp091-go v1.14.0 // indirect
+	github.com/redis/go-redis/v9 v9.22.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
+	github.com/russellhaering/goxmldsig v1.6.1 // indirect
+	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
+	github.com/shirou/gopsutil/v4 v4.26.8 // indirect
+	github.com/shopspring/decimal v1.4.0 // indirect
+	github.com/sirupsen/logrus v1.10.2 // indirect
+	github.com/testcontainers/testcontainers-go v0.44.0 // indirect
+	github.com/testcontainers/testcontainers-go/modules/mssql v0.44.0 // indirect
+	github.com/testcontainers/testcontainers-go/modules/mysql v0.44.0 // indirect
+	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0 // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
+	github.com/tklauser/go-sysconf v0.4.0 // indirect
+	github.com/tklauser/numcpus v0.12.0 // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/twmb/franz-go v1.21.6 // indirect
+	github.com/twmb/franz-go/pkg/kmsg v1.13.1 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
+	go.opentelemetry.io/otel v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.46.0 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.46.0 // indirect
+	go.opentelemetry.io/otel/metric v1.46.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.46.0 // indirect
+	go.opentelemetry.io/otel/sdk/metric v1.46.0 // indirect
+	go.opentelemetry.io/otel/trace v1.46.0 // indirect
+	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	golang.org/x/arch v0.30.0 // indirect
+	golang.org/x/crypto v0.56.0 // indirect
+	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260904194346-d0f1323225a4 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260904194346-d0f1323225a4 // indirect
+	google.golang.org/grpc v1.83.2 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+replace github.com/lyeve-labs/lyeve-plugin-permissions => ../../../lyeve-plugin-permissions

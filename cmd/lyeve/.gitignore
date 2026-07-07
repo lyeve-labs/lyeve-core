@@ -1,0 +1,2 @@
+# go build with no -o names the binary after the last element of the module path
+/lyeve
