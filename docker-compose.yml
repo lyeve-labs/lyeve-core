@@ -1,0 +1,58 @@
+# LyEve CMS - self-host quickstart.
+#
+#   1. Set two secrets (any 32+ char strings):
+#        export JWT_SECRET=$(openssl rand -hex 24)
+#        export ENCRYPTION_KEY=$(openssl rand -hex 24)
+#   2. docker compose up -d
+# 3. Engine API on http://localhost:3002
+#
+# Postgres is the default. To try MySQL or MSSQL instead, point DATABASE_URL at
+# your own server. The engine detects the dialect from the DSN and runs the
+# matching migrations (all three ship in the image).
+
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cms}
+      POSTGRES_DB: cms
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cms -d cms']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  core:
+    image: ${CORE_IMAGE:-ghcr.io/lyeve-labs/lyeve-core:latest}
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://cms:${POSTGRES_PASSWORD:-cms}@db:5432/cms?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET to a 32+ char secret}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY to a 32+ char secret}
+      # APP_ENV is "production" when unset, and production refuses to boot on
+      # unsafe settings. This stack talks to the bundled Postgres over the
+      # compose network with no TLS, which that check rejects, so it declares
+      # what it actually is. A real deployment drops this line and must then
+      # supply a DSN with sslmode=require and non-default credentials,
+      # SECURE_COOKIE=true, RATE_LIMIT_RPS above 0, and a 64-hex-character
+      # LYEVE_AUDIT_HMAC_KEY (openssl rand -hex 32). The boot error names each
+      # one it is missing.
+      APP_ENV: development
+      # Set a license key to enable licensed plugins. Without one, the
+      # plugins that need a license stay off.
+      LYEVE_LICENSE_KEY: ${LYEVE_LICENSE_KEY:-}
+    ports:
+      - '3001:3001'   # admin server
+      - '3002:3002'   # public API
+    volumes:
+      - core-uploads:/app/uploads
+
+volumes:
+  db-data:
+  core-uploads:

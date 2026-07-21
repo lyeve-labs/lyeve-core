@@ -1,0 +1,229 @@
+# LyEve CMS engine - Kubernetes example.
+#
+# A minimal, single-file manifest: a namespace, a secret you must fill in, a
+# Postgres instance, and the engine Deployment + Service with liveness and
+# readiness probes wired to the engine's /startup, /healthz and /readyz endpoints.
+#
+# Fill in the secret, then:  kubectl apply -f kubernetes.yaml
+# For production, run Postgres as a managed database and point DATABASE_URL at
+# it instead of the in-cluster instance below.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lyeve
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: lyeve-cms
+  namespace: lyeve
+type: Opaque
+stringData:
+  # APP_ENV is "production" when unset, and production refuses to boot on unsafe
+  # settings. The Postgres below is a demo instance with no TLS, which that check
+  # rejects, so this example declares what it actually is and applies as written.
+  # Going to production means removing this line and satisfying the block at the
+  # bottom of this secret. The boot error names every value it is missing.
+  APP_ENV: development
+
+  # JWT_SECRET and ENCRYPTION_KEY are not here, and this file will not boot
+  # without them. They are the signing secret and the key that seals stored
+  # credentials, and a value written into an example is a value every install
+  # of that example shares. Create them first, from your own randomness:
+  #
+  #   kubectl -n lyeve create secret generic lyeve-cms \
+  #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+  #     --from-literal=ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+  #     --from-literal=DATABASE_URL="postgres://cms:$(openssl rand -hex 16)@postgres:5432/cms?sslmode=require"
+  #
+  # then apply the rest of this file. The two must differ: reusing one as the
+  # other collapses the key hierarchy, and production rejects it.
+  #
+  # DATABASE_URL below is the demo Postgres this file also creates. Point it at
+  # a managed database before this is anything but a demo.
+  DATABASE_URL: postgres://cms:changeme@postgres:5432/cms?sslmode=disable
+
+  # Production checklist. Point DATABASE_URL at a managed database with
+  # sslmode=require (or verify-full) and credentials that are not postgres/root/sa,
+  # drop APP_ENV above, and uncomment these:
+  # SECURE_COOKIE: 'true'
+  # RATE_LIMIT_RPS: '100'
+  # LYEVE_AUDIT_HMAC_KEY: 'generate with: openssl rand -hex 32 (must be 64 hex chars)'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: lyeve
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: cms }
+            - { name: POSTGRES_PASSWORD, value: changeme }
+            - { name: POSTGRES_DB, value: cms }
+          ports:
+            - containerPort: 5432
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          readinessProbe:
+            exec: { command: ['pg_isready', '-U', 'cms', '-d', 'cms'] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: lyeve
+spec:
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lyeve-core
+  namespace: lyeve
+spec:
+  # One replica is the default because the refresh-token store is in-process
+  # unless a shared session store is configured. Scale this up without that and
+  # a refresh handled by a replica that does not hold the session answers 401,
+  # which logs users out at random. The engine reports which store it has at
+  # boot: look for the "refresh token store" line.
+  #
+  # Once sessions are shared, raise replicas and add a PodDisruptionBudget so a
+  # node drain cannot take every replica at once:
+  #
+  #   apiVersion: policy/v1
+  #   kind: PodDisruptionBudget
+  #   metadata: { name: lyeve-core, namespace: lyeve }
+  #   spec:
+  #     minAvailable: 1
+  #     selector: { matchLabels: { app: lyeve-core } }
+  #
+  # A PodDisruptionBudget at one replica blocks drains outright, so it belongs
+  # with the scale-up and not before it.
+  replicas: 1
+  selector:
+    matchLabels: { app: lyeve-core }
+  template:
+    metadata:
+      labels: { app: lyeve-core }
+    spec:
+      # The image runs as distroless nonroot (65532). fsGroup makes the mounted
+      # volumes writable by that user without an init container chowning them.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: lyeve-core
+          image: ghcr.io/lyeve-labs/lyeve-core:latest
+          envFrom:
+            - secretRef: { name: lyeve-cms }
+          ports:
+            - { name: admin, containerPort: 3001 }
+            - { name: api, containerPort: 3002 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ['ALL'] }
+          # Without these the pod is BestEffort and is the first thing the
+          # kubelet evicts under node pressure. The engine settles around 250Mi
+          # after migrations. The limit leaves room for upload buffering. No
+          # CPU limit on purpose: a limit throttles the Go scheduler during the
+          # migration burst at boot for no benefit, and the request already
+          # reserves the share.
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { memory: 1Gi }
+          # Both paths are written at runtime and both must survive a restart.
+          # /var/lib/lyeve holds the Ed25519 keypair the engine generates on
+          # first boot: lose it and every token issued so far stops verifying.
+          # /app/uploads is the local storage driver's root. On an emptyDir or
+          # the container layer, a rescheduled pod silently signs with a new key
+          # and comes back with no media.
+          volumeMounts:
+            - { name: state, mountPath: /var/lib/lyeve }
+            - { name: uploads, mountPath: /app/uploads }
+            - { name: tmp, mountPath: /tmp }
+          # /startup is what opens the engine's internal readiness gate, which
+          # holds off application traffic until the first full probe pass. Wire
+          # it: /readyz turns 200 as soon as the DB answers, so without a
+          # startup probe the pod can join the Service while the gate is still
+          # returning 503 to real requests.
+          # With TLS_CERT_FILE set the listeners speak TLS: add scheme: HTTPS to
+          # each of these three probes, or the pod never reports ready.
+          startupProbe:
+            httpGet: { path: /startup, port: admin }
+            periodSeconds: 2
+            failureThreshold: 60
+          livenessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /readyz, port: admin }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: state
+          persistentVolumeClaim: { claimName: lyeve-state }
+        - name: uploads
+          persistentVolumeClaim: { claimName: lyeve-uploads }
+        # readOnlyRootFilesystem blocks writes to /tmp, which the Go runtime and
+        # most libraries assume is writable, and optional subsystems such as
+        # dev hot-reload target os.TempDir() explicitly when switched on.
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lyeve-state
+  namespace: lyeve
+spec:
+  accessModes: ['ReadWriteOnce']
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lyeve-uploads
+  namespace: lyeve
+spec:
+  # ReadWriteOnce pins the engine to one node. Scaling past a single replica
+  # means either an RWX volume or moving storage to S3 (STORAGE_DRIVER=s3),
+  # which is the supported path.
+  accessModes: ['ReadWriteOnce']
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lyeve-core
+  namespace: lyeve
+spec:
+  selector: { app: lyeve-core }
+  ports:
+    - { name: admin, port: 3001, targetPort: admin }
+    - { name: api, port: 3002, targetPort: api }
