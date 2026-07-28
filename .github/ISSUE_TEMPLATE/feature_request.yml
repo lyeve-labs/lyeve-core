@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a new feature or improvement.
+labels: ['enhancement', 'triage']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to build? Why doesn't the current engine support it?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: checkboxes
+    id: breaking
+    attributes:
+      label: Would this be a breaking change?
+      options:
+        - label: 'Yes, this changes the existing API'
+        - label: 'No, this is purely additive'

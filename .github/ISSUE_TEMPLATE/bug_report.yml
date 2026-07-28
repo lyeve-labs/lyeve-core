@@ -1,0 +1,71 @@
+name: Bug report
+description: Something is broken in the CMS engine.
+labels: ['bug', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. The more concrete the repro,
+        the faster we can fix it.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag or commit SHA.
+      placeholder: 'v0.51.0'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: dialect
+    attributes:
+      label: Database dialect
+      options:
+        - PostgreSQL
+        - MySQL
+        - MSSQL
+        - All
+    validations:
+      required: true
+
+  - type: input
+    id: deployment
+    attributes:
+      label: Deployment
+      description: Docker image, bare metal, etc.
+      placeholder: 'ghcr.io/lyeve-labs/lyeve-core:0.51.0'
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Observed vs expected behavior. Include error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: API calls, config, or request payloads that trigger the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Engine logs
+      render: text
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - 'Critical: data loss or security'
+        - 'Major: feature broken, no workaround'
+        - 'Minor: workaround exists'
+        - 'Cosmetic'
+    validations:
+      required: true
