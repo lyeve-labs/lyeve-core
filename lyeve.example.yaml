@@ -1,0 +1,130 @@
+# LyEve configuration.
+#
+# Copy to lyeve.yaml, or point LYEVE_CONFIG at it. Every setting here has an
+# environment variable of the same name, and the variable always wins, so an
+# existing deployment keeps working with no file at all.
+#
+# Where a setting comes from:
+#
+#   1. an environment variable        always wins, and setting one to empty
+#                                     turns the setting off
+#   2. this file                      wins over anything saved in the admin UI,
+#                                     unless the value is tagged !overridable
+#   3. the admin UI                   fills what neither of the above sets
+#   4. the engine's own default
+#
+# GET /api/admin/config reports which layer each setting actually came from.
+#
+# A nested key is the variable name with the path joined by underscores, so
+# storage.s3.bucket is STORAGE_S3_BUCKET. Flat names work too, so a .env can be
+# transcribed a line at a time. ${VAR} and ${VAR:-fallback} read the process
+# environment, which is how a container injects a secret without it living here.
+
+# Composition
+# Included files merge first, so this file overrides them. A conf.d directory
+# beside this one merges last, which lets a deployment extend a packaged base
+# without editing it.
+#
+# $include:
+#   - base.yaml
+#   - environments/staging.yaml
+#   - schemas/*.yaml
+
+app:
+  env: production        # development disables the production-only checks
+
+database:
+  url: ${DATABASE_URL}
+  # replica_url: ${DATABASE_REPLICA_URL}
+  driver: postgres       # postgres | mysql | mssql
+  max_connections: 25
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiry_secs: 900
+
+encryption:
+  # Must differ from the JWT secret. Also protects credentials saved in the
+  # admin UI: without it the engine refuses to store one rather than writing it
+  # in plain text.
+  key: ${ENCRYPTION_KEY}
+
+admin:
+  listen_addr: 0.0.0.0:3001
+api:
+  listen_addr: 0.0.0.0:3002
+
+secure:
+  cookie: true
+
+cors:
+  origins:
+    - https://admin.example.com
+
+rate:
+  limit:
+    rps: 100
+    burst: 300
+
+storage:
+  driver: local          # local | s3
+  local_path: ./uploads
+  # s3:
+  #   bucket: media
+  #   region: eu-west-1
+  #   key: ${STORAGE_S3_KEY}
+  #   secret: ${STORAGE_S3_SECRET}
+
+multi:
+  tenant: false
+
+# Plugin settings
+# The plugins block drops its own segment, because a plugin key already
+# carries its own prefix: plugins.example.host is EXAMPLE_HOST.
+#
+# !overridable lets the admin UI take a key over. Without it the value here is
+# final and the UI shows the field read-only, naming this file and line.
+
+plugins:
+  example:
+    host: !overridable service.example.com
+    port: "8443"
+    # Credentials belong in the environment or the admin UI, not in a file
+    # that is committed. One set here is still honored.
+    token: ${EXAMPLE_TOKEN}
+
+  gadgets:
+    enabled: true
+
+# Content types
+# Declaring them here lets a whole project stand up from a repository with no
+# admin UI involved. Applied at boot: a content type named here is created or
+# brought up to date, and one that exists only in the database is left alone,
+# because a file that does not mention a table is not an instruction to drop it.
+#
+# The same shape is what GET /api/admin/schemas/export writes, so an export can
+# be committed and replayed somewhere else.
+
+# schemas:
+#   - name: author
+#     display_name: Author
+#     with_created_at: true
+#     with_updated_at: true
+#     fields:
+#       - {name: name, field_type: text, required: true, indexed: true}
+#       - {name: email, field_type: email, unique: true}
+#
+#   - name: article
+#     display_name: Article
+#     with_created_at: true
+#     with_updated_at: true
+#     with_draft_publish: true
+#     fields:
+#       - {name: title, field_type: text, required: true, indexed: true}
+#       - {name: slug, field_type: text, unique: true}
+#       - {name: body, field_type: rich_text}
+#       - {name: cover, field_type: media}
+#       - {name: published_at, field_type: datetime}
+#       # A belongs_to emits a foreign key, so author is created first no
+#       # matter what order the file lists them in.
+#       - {name: author, field_type: relation, relation_to: author, relation_type: belongs_to}
