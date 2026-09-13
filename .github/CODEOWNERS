@@ -1,0 +1,12 @@
+# Code owners - auto-requested as reviewers on PRs touching these paths.
+# Humans review every PR.
+
+*                       @lyeve-labs/maintainers
+
+# The plugin contract, the migrations, the release surface: extra-cautious review.
+/pkg/core/              @lyeve-labs/maintainers
+/pkg/plugin/            @lyeve-labs/maintainers
+/migrations/            @lyeve-labs/maintainers
+/.github/workflows/     @lyeve-labs/maintainers
+/PLUGIN_VERSIONS.txt    @lyeve-labs/maintainers
+/CHANGELOG.md           @lyeve-labs/maintainers
