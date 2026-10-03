@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -262,44 +261,20 @@ func (h *ContentHandler) checkPermission(w http.ResponseWriter, r *http.Request,
 	return false
 }
 
-// The refusals authorize reports. Anything else it returns is the rule
-// store failing.
+// The refusals authorize reports, shared with every other content transport
+// so a refusal means the same thing whichever one the caller used.
 var (
-	errNoCaller         = errors.New("no caller")
-	errSchemaNotAllowed = errors.New("schema not allowed for this credential")
-	errScopeDenied      = errors.New("insufficient scope")
-	errPermissionDenied = errors.New("permission denied")
+	errNoCaller         = core.ErrNoCaller
+	errSchemaNotAllowed = core.ErrSchemaNotAllowed
+	errScopeDenied      = core.ErrScopeDenied
+	errPermissionDenied = core.ErrPermissionDenied
 )
 
 // authorize is checkPermission without the response, for a caller that has
 // to decide what to do with a refusal itself, such as a populated relation
 // that is left out rather than failing the read it belongs to.
 func (h *ContentHandler) authorize(r *http.Request, schema, action string) error {
-	claims := requestClaims(r)
-	if claims == nil {
-		return errNoCaller
-	}
-	if !claims.AllowsSchema(schema) {
-		return errSchemaNotAllowed
-	}
-	// The scope gate in front of the content routes reads the schema the
-	// path names. A relation and a populated field reach a second schema the
-	// path never names, so a key held to content.posts would read authors
-	// through posts. Each schema a request touches is held to the key's
-	// scope here, on the same terms the gate uses: a key with an admin role
-	// answers to its role instead.
-	if claims.IsAPIKey && !claims.HasRole("admin") && !claims.HasRole("super_admin") &&
-		!core.ScopeGrants(claims.Scopes, "content."+schema, action) {
-		return errScopeDenied
-	}
-	allowed, err := h.checker().Allowed(r.Context(), claims.Roles, schema, action)
-	if err != nil {
-		return fmt.Errorf("permission check %s: %w", schema, err)
-	}
-	if !allowed {
-		return errPermissionDenied
-	}
-	return nil
+	return core.AuthorizeContent(r.Context(), h.checker(), requestClaims(r), schema, action)
 }
 
 // maskFor resolves this request's field mask once and returns the function
@@ -328,38 +303,7 @@ func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema 
 
 // fieldMask is maskFor without the response.
 func (h *ContentHandler) fieldMask(r *http.Request, schema string) (func(map[string]any) map[string]any, error) {
-	keep := func(data map[string]any) map[string]any { return data }
-	masker, ok := h.checker().(core.FieldMasker)
-	if !ok {
-		return keep, nil
-	}
-	claims := requestClaims(r)
-	if claims == nil {
-		return nil, errNoCaller
-	}
-	fields, err := masker.FieldMask(r.Context(), claims.Roles, schema)
-	if err != nil {
-		return nil, fmt.Errorf("field mask %s: %w", schema, err)
-	}
-	if len(fields) == 0 {
-		return keep, nil
-	}
-	hidden := make(map[string]struct{}, len(fields))
-	for _, f := range fields {
-		hidden[f] = struct{}{}
-	}
-	return func(data map[string]any) map[string]any {
-		if len(data) == 0 {
-			return data
-		}
-		out := make(map[string]any, len(data))
-		for k, v := range data {
-			if _, off := hidden[k]; !off {
-				out[k] = v
-			}
-		}
-		return out
-	}, nil
+	return core.ContentFieldMask(r.Context(), h.checker(), requestClaims(r), schema)
 }
 
 // populate resolves ?populate= and ?depth= on items, putting every relation

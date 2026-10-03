@@ -127,8 +127,10 @@ func TestCacheHeaders_2xxResponse(t *testing.T) {
 	assert.True(t, strings.HasPrefix(etag, `"`))
 	assert.True(t, strings.HasSuffix(etag, `"`))
 
-	// Vary must include Authorization
+	// Vary must name both credentials, because a key and a session each
+	// answer by their own access.
 	assert.Contains(t, resp.Header.Get("Vary"), "Authorization")
+	assert.Contains(t, resp.Header.Get("Vary"), "X-API-Key")
 
 	// Body must be intact
 	var body map[string]string
@@ -271,7 +273,7 @@ func TestCacheHeaders_VaryKeepsEveryHandlerValue(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	assert.Equal(t, []string{"Origin, Accept-Language, Authorization"}, rec.Header().Values("Vary"))
+	assert.Equal(t, []string{"Origin, Accept-Language, Authorization, X-API-Key"}, rec.Header().Values("Vary"))
 }
 
 func TestMergeVary(t *testing.T) {

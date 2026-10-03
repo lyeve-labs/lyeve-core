@@ -277,11 +277,13 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 			}
 
 			// Vary: Authorization prevents CDNs from serving cached authenticated
-			// responses to unauthenticated callers. The handler and the middleware
-			// before it may each have added their own value (Origin from CORS,
-			// Accept-Language from a localized read), so every value is merged
-			// rather than only the first one Get would return.
-			ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization"))
+			// responses to unauthenticated callers. X-API-Key does the same for
+			// keys, which answer differently from one another because each is
+			// held to its own schema list, scopes and roles. The handler and
+			// the middleware before it may each have added their own value
+			// (Origin from CORS, Accept-Language from a localized read), so every
+			// value is merged rather than only the first one Get would return.
+			ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization", "X-API-Key"))
 
 			if ew.statusCode == 0 {
 				ew.statusCode = http.StatusOK

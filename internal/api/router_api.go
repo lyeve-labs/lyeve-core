@@ -234,7 +234,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			// because a client reading content has to discover what it may
 			// read without holding admin rights, and they answer 503 rather
 			// than an empty list when no engine is registered.
-			catalog := &schemaCatalog{source: o.schemaSource}
+			catalog := &schemaCatalog{source: o.schemaSource, perms: o.permissionChecker}
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas", catalog.List)
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas/{name}", catalog.Get)
 

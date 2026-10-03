@@ -17,8 +17,45 @@ import (
 //
 // It reads core.SchemaSource per request rather than holding one, because the
 // engine is registered by a plugin that starts after this router is built.
+//
+// A content type is described only to a caller who may read its entries: the
+// credential's schema list, a key's content scopes and the roles' read rule
+// decide, exactly as they do on the content routes. A definition names every
+// field, so listing a schema the caller cannot read tells it what the schema
+// holds.
 type schemaCatalog struct {
 	source core.SchemaSource
+	perms  core.PermissionCheckerProvider // nil = the kernel's role-only checker
+}
+
+// readable reports whether the caller may read entries of schema. A refusal
+// is false with a nil error, and the error is the rule store failing.
+func (h *schemaCatalog) readable(r *http.Request, schema string) (bool, error) {
+	switch err := core.AuthorizeContent(r.Context(), core.PermissionCheckerOf(h.perms), requestClaims(r), schema, "read"); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, core.ErrSchemaNotAllowed), errors.Is(err, core.ErrScopeDenied), errors.Is(err, core.ErrPermissionDenied):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// refuseCatalog answers a caller the catalog will not describe a schema to, in the
+// words the content routes use.
+func refuseCatalog(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, core.ErrNoCaller):
+		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
+	case errors.Is(err, core.ErrSchemaNotAllowed):
+		httpx.ErrorReq(w, r, http.StatusForbidden, "schema not allowed for this credential")
+	case errors.Is(err, core.ErrScopeDenied):
+		httpx.ErrorReq(w, r, http.StatusForbidden, "insufficient scope")
+	case errors.Is(err, core.ErrPermissionDenied):
+		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
+	default:
+		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+	}
 }
 
 // schemaDeprecation names an option a definition sets that something else
@@ -62,10 +99,16 @@ func (h *schemaCatalog) noEngine(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
-// List answers every content type the caller's tenant can read.
+// List answers every content type of the caller's tenant that the caller may
+// read. A schema it may not read is left out, not refused, so the list says
+// what this caller can reach.
 // GET /api/v1/schemas
 func (h *schemaCatalog) List(w http.ResponseWriter, r *http.Request) {
 	if h.noEngine(w, r) {
+		return
+	}
+	if requestClaims(r) == nil {
+		refuseCatalog(w, r, core.ErrNoCaller)
 		return
 	}
 	schemas, err := h.source.List(r.Context())
@@ -75,18 +118,35 @@ func (h *schemaCatalog) List(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]schemaCatalogResponse, 0, len(schemas))
 	for _, sc := range schemas {
-		out = append(out, schemaCatalogEntry(sc))
+		if sc == nil {
+			continue
+		}
+		ok, err := h.readable(r, sc.Name)
+		if err != nil {
+			refuseCatalog(w, r, err)
+			return
+		}
+		if ok {
+			out = append(out, schemaCatalogEntry(sc))
+		}
 	}
 	respond(w, http.StatusOK, out)
 }
 
-// Get answers one content type by name.
+// Get answers one content type by name. The caller's access is decided
+// before the definition is looked up, so a refused name answers the same
+// whether or not a schema by that name exists.
 // GET /api/v1/schemas/{name}
 func (h *schemaCatalog) Get(w http.ResponseWriter, r *http.Request) {
 	if h.noEngine(w, r) {
 		return
 	}
-	sc, err := h.source.GetByName(r.Context(), chi.URLParam(r, "name"))
+	name := chi.URLParam(r, "name")
+	if err := core.AuthorizeContent(r.Context(), core.PermissionCheckerOf(h.perms), requestClaims(r), name, "read"); err != nil {
+		refuseCatalog(w, r, err)
+		return
+	}
+	sc, err := h.source.GetByName(r.Context(), name)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			httpx.ErrorReq(w, r, http.StatusNotFound, "schema not found")

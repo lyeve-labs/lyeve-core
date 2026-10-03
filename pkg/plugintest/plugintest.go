@@ -79,6 +79,16 @@ func WithCapabilities(caps core.CapabilitySet) HostOption {
 	}
 }
 
+// WithPermissionChecker registers c as the host's rule engine, the way the
+// plugin that owns the access rules does on the engine host. When not set,
+// PermissionChecker answers the kernel's role-only checker, as an engine with
+// no rule plugin does.
+func WithPermissionChecker(c core.PermissionChecker) HostOption {
+	return func(h *testHost) {
+		h.perms = c
+	}
+}
+
 // dbPool is the minimal interface needed from a database pool.
 // db.DB (internal/db) satisfies this interface.
 type dbPool interface {
@@ -132,6 +142,7 @@ type testHost struct {
 	version string
 	storage core.Storage
 	caps    *core.CapabilitySet
+	perms   core.PermissionChecker
 
 	// configSections is the registry a plugin's Start registers its
 	// configuration section in, as it does on the engine host.
@@ -152,6 +163,19 @@ var _ core.QueryCacheProvider = (*testHost)(nil)
 // connection by asserting this. A test host that does not satisfy it sends
 // every plugin suite down a different path from the one production takes.
 var _ core.EngineDBConnProvider = (*testHost)(nil)
+
+// A plugin that governs content reads the access rules by asserting this, as
+// it does on the engine host.
+var _ core.PermissionCheckerProvider = (*testHost)(nil)
+
+// PermissionChecker returns the checker WithPermissionChecker registered, or
+// the kernel's role-only checker.
+func (h *testHost) PermissionChecker() core.PermissionChecker {
+	if h.perms != nil {
+		return h.perms
+	}
+	return core.RoleOnlyPermissionChecker{}
+}
 
 // Querier returns a core.Querier backed by the database pool.
 func (h *testHost) Querier(ctx context.Context) core.Querier {
