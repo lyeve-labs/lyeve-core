@@ -241,6 +241,12 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // goes through the field mask and the after-response hooks a read applies,
 // so the stream serves no field that GET would withhold from this caller.
 //
+// The read grant and the mask are asked again for every event, not held from
+// the open. A stream lives for hours, and an operator who revokes a read or
+// hides a field expects the next event to obey it, not the next reconnect. A
+// refused read ends the stream after an error event, and so does a rule store
+// that cannot answer, because an event it cannot judge is not sent.
+//
 // The server's write deadline is set once, when it reads the request, and the
 // first write after it fails and ends the stream. So every write moves the
 // deadline two heartbeats ahead first, and a comment line every heartbeat
@@ -253,8 +259,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
-	if !maskOK {
+	if _, ok := h.maskFor(w, r, schemaName); !ok {
 		return
 	}
 
@@ -339,6 +344,15 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		case c := <-ch:
+			mask, err := h.streamAccess(r, schemaName)
+			if err != nil {
+				if !deadline.Hold() {
+					return
+				}
+				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
+				flusher.Flush()
+				return
+			}
 			data := mask(c.data)
 			h.runAfterResponse(r, schemaName, "list", data)
 			payload, err := jsonpool.MarshalJSON(map[string]any{"event": c.event, "schema": schemaName, "data": data})
@@ -351,5 +365,32 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload) // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		}
+	}
+}
+
+// streamAccess asks whether the caller may still read schema and resolves
+// the mask that applies now. It is the open's checks without a response,
+// because by the time an event arrives the headers have been sent.
+func (h *ContentHandler) streamAccess(r *http.Request, schema string) (func(map[string]any) map[string]any, error) {
+	if err := h.authorize(r, schema, "read"); err != nil {
+		return nil, err
+	}
+	return h.fieldMask(r, schema)
+}
+
+// streamEndReason is the message the error event carries, in the words the
+// content routes answer with, and never the rule store's own text.
+func streamEndReason(err error) string {
+	switch {
+	case errors.Is(err, errNoCaller):
+		return "authentication required"
+	case errors.Is(err, errSchemaNotAllowed):
+		return "schema not allowed for this credential"
+	case errors.Is(err, errScopeDenied):
+		return "insufficient scope"
+	case errors.Is(err, errPermissionDenied):
+		return "permission denied"
+	default:
+		return "access could not be checked"
 	}
 }
