@@ -78,7 +78,7 @@ func (s *ContentStore) Populate(ctx context.Context, c *domain.Content, populate
 			c.Data[fieldName] = out
 
 		case domain.RelManyToMany:
-			related, _, err := s.ListRelated(ctx, c.SchemaName, c.ID, f, 500, 0)
+			related, _, err := s.ListRelated(ctx, c.SchemaName, c.ID, f, 500, 0, true)
 			if err != nil {
 				c.Data[fieldName] = []map[string]any{}
 				continue
@@ -511,7 +511,8 @@ func (s *ContentStore) PopulateWithConfigBatch(ctx context.Context, items []*dom
 // RelationGate decides, per target schema, whether a populated relation may
 // be served and what of each related record may be seen. ok false leaves the
 // relation unpopulated. mask, when not nil, is applied to every related
-// record before it is written into the parent.
+// record before it is written into the parent, and a nil from it hides that
+// record: a to-one relation is served as null and a to-many one leaves it out.
 type RelationGate func(ctx context.Context, target string) (mask func(map[string]any) map[string]any, ok bool)
 
 // PopulateGated is PopulateWithConfigBatch with every relation, at every
@@ -624,15 +625,19 @@ type relationPopulate struct {
 	gate    RelationGate
 }
 
-// mask applies the requested projection, then the gate's mask, to one
-// flattened related record. The projection can only narrow, so the gate's
-// mask has the last word on what is served.
+// mask applies the gate's mask, then the requested projection, to one
+// flattened related record. The gate sees the whole record, so it can judge
+// a field the projection would drop, such as the status. A nil from the gate
+// hides the record, and the caller serves the relation as absent.
 func (r relationPopulate) mask(flat map[string]any) map[string]any {
-	if m := r.masks[r.name]; len(m) > 0 {
-		flat = applyFieldMask(flat, m)
-	}
 	if r.relMask != nil {
 		flat = r.relMask(flat)
+		if flat == nil {
+			return nil
+		}
+	}
+	if m := r.masks[r.name]; len(m) > 0 {
+		flat = applyFieldMask(flat, m)
 	}
 	return flat
 }
@@ -705,9 +710,11 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 			items[i].Data[fieldName] = nil
 			continue
 		}
-		flat := flattenContent(related)
-		flat = rel.mask(flat)
-		items[i].Data[fieldName] = flat
+		if flat := rel.mask(flattenContent(related)); flat != nil {
+			items[i].Data[fieldName] = flat
+		} else {
+			items[i].Data[fieldName] = nil
+		}
 	}
 }
 
@@ -755,9 +762,11 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 			item.Data[fieldName] = nil
 			continue
 		}
-		flat := flattenContent(children[0])
-		flat = rel.mask(flat)
-		item.Data[fieldName] = flat
+		if flat := rel.mask(flattenContent(children[0])); flat != nil {
+			item.Data[fieldName] = flat
+		} else {
+			item.Data[fieldName] = nil
+		}
 	}
 }
 
@@ -804,9 +813,9 @@ func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain
 		}
 		out := make([]map[string]any, 0, len(children))
 		for _, r := range children {
-			flat := flattenContent(r)
-			flat = rel.mask(flat)
-			out = append(out, flat)
+			if flat := rel.mask(flattenContent(r)); flat != nil {
+				out = append(out, flat)
+			}
 		}
 		item.Data[fieldName] = out
 	}
@@ -853,17 +862,19 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 		}
 		out := make([]map[string]any, 0, len(children))
 		for _, r := range children {
-			flat := flattenContent(r)
-			flat = rel.mask(flat)
-			out = append(out, flat)
+			if flat := rel.mask(flattenContent(r)); flat != nil {
+				out = append(out, flat)
+			}
 		}
 		item.Data[fieldName] = out
 	}
 }
 
 // ListRelated returns items from the target schema related to id via a
-// many_to_many pivot table.
-func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int) ([]*domain.Content, int, error) {
+// many_to_many pivot table. A soft-deleted target is never listed, and an
+// unpublished one only when drafts is true. The total counts what the same
+// filter would serve, so a page count never reveals a hidden row.
+func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int, drafts bool) ([]*domain.Content, int, error) {
 	pivotName := f.RelationThrough
 	if pivotName == "" {
 		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
@@ -877,20 +888,26 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 	pivotName = s.qualify(pivotName)
 	tenantID := tenant.ID(ctx)
 
-	// Total count, scoped to the caller's tenant.
-	var total int
-	row, qErr := s.pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), id, tenantID)
-	if qErr != nil {
-		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", qErr)
-	} else if err := row.Scan(&total); err != nil {
-		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", err)
-	}
-
 	// Resolve target schema for data column expression.
 	relSchema, relErr := s.schemas.GetByName(ctx, f.RelationTo)
 	if relErr != nil {
 		return nil, 0, fmt.Errorf("list related: resolve schema %q: %w", f.RelationTo, relErr)
+	}
+	visible := draftWhere(relSchema, "t", drafts)
+	if relSchema.WithSoftDelete {
+		visible += " AND t.deleted_at IS NULL"
+	}
+
+	// Total count, scoped to the caller's tenant.
+	var total int
+	row, qErr := s.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s t JOIN %s p ON p.%s = t.id
+			WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3%s`,
+			targetTable, pivotName, bCol, aCol, visible), id, tenantID, tenantID)
+	if qErr != nil {
+		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", qErr)
+	} else if err := row.Scan(&total); err != nil {
+		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", err)
 	}
 
 	// Dialect-aware pagination ($4=limit, $5=offset; $1 is the relation id,
@@ -901,11 +918,11 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 		       %s
 		FROM %s t
 		JOIN %s p ON p.%s = t.id
-		WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3
+		WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3%s
 		ORDER BY t.created_at DESC
 		%s`,
 		dataColumnExpr(s.pool.Engine(), relSchema, "t"),
-		targetTable, pivotName, bCol, aCol, relPagination,
+		targetTable, pivotName, bCol, aCol, visible, relPagination,
 	), id, tenantID, tenantID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list related %s->%s: %w", schemaName, f.RelationTo, err)

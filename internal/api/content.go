@@ -379,9 +379,15 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			mask, mErr := h.fieldMask(r, target)
 			if mErr != nil {
 				ruleErr = mErr
-			} else {
-				d = decision{mask: mask, ok: true}
+				break
 			}
+			// A related row is held to the rule its own schema's reads
+			// follow: a draft is served to a caller who may read drafts
+			// there, and to anyone else it is absent.
+			if !h.draftResponse(w, r, target) {
+				mask = publishedOnly(mask)
+			}
+			d = decision{mask: mask, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
@@ -395,6 +401,17 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 		return false
 	}
 	return true
+}
+
+// publishedOnly wraps a field mask so an unpublished record is hidden, which
+// the populate walk serves as a null relation or leaves out of a list.
+func publishedOnly(mask func(map[string]any) map[string]any) func(map[string]any) map[string]any {
+	return func(data map[string]any) map[string]any {
+		if !isPublished(data) {
+			return nil
+		}
+		return mask(data)
+	}
 }
 
 // validatePatch validates the body of a partial update: only the fields it

@@ -164,6 +164,7 @@ func (ew *etagWriter) WriteHeader(statusCode int) {
 	// Delay WriteHeader until the body is captured and ETag computed.
 	// Non-2xx flushes immediately without ETag.
 	if statusCode < 200 || statusCode >= 300 {
+		ew.ResponseWriter.Header().Del(PrivateResponseHeader)
 		ew.ResponseWriter.WriteHeader(statusCode)
 		ew.written = true
 	}
@@ -226,6 +227,15 @@ func (ew *etagWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return nil, nil, fmt.Errorf("middleware: underlying ResponseWriter does not support hijacking: %w", http.ErrNotSupported)
 }
 
+// PrivateResponseHeader is the internal signal a handler sets when the
+// response it wrote belongs to the caller alone, such as one that can carry
+// unpublished content. The cache middleware strips it and serves the response
+// private and unstored, whatever the route's policy says.
+const PrivateResponseHeader = "X-Cache-Private"
+
+// privateCacheControl is what a response marked private is served with.
+const privateCacheControl = "private, no-store"
+
 // CacheHeaders wraps a handler to emit Cache-Control + ETag + Last-Modified
 // headers based on the given policy. ETags are strong validators computed from
 // the SHA-256 hash of the response body. Last-Modified is derived from the
@@ -252,7 +262,10 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 				ew.Header().Set("ETag", `"`+hex.EncodeToString(hash[:])+`"`)
 			}
 
-			if cc := policy.buildCacheControl(); cc != "" {
+			if ew.Header().Get(PrivateResponseHeader) != "" {
+				ew.Header().Del(PrivateResponseHeader)
+				ew.Header().Set("Cache-Control", privateCacheControl)
+			} else if cc := policy.buildCacheControl(); cc != "" {
 				ew.Header().Set("Cache-Control", cc)
 			}
 

@@ -53,7 +53,20 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, total, err := h.store.ListRelated(r.Context(), schemaName, id, f, limit, offset)
+	// The relations of a row the caller cannot read are not theirs to list.
+	if !h.draftResponse(w, r, schemaName) {
+		parent, err := h.store.GetByID(r.Context(), schemaName, id)
+		if err != nil {
+			storeError(w, r, err, "failed to list related")
+			return
+		}
+		if !isPublished(parent.Data) {
+			httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
+			return
+		}
+	}
+
+	items, total, err := h.store.ListRelated(r.Context(), schemaName, id, f, limit, offset, h.draftResponse(w, r, f.RelationTo))
 	if err != nil {
 		httpx.ErrorReq(w, r, httpStatus(err), "failed to list related")
 		return

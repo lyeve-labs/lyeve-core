@@ -13,6 +13,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
@@ -60,6 +61,7 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !h.checkStatusFilter(w, r, schemaName, filters) {
 		return
 	}
+	h.draftResponse(w, r, schemaName)
 
 	items, err := h.store.List(r.Context(), schemaName, limit, offset, filters)
 	if err != nil {
@@ -120,7 +122,7 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// or an id learned from a webhook, a log or a guess reads a draft. The
 	// answer is the one a missing row gets, so the read does not confirm
 	// that the draft exists.
-	if !isPublished(item.Data) && !h.canReadDrafts(r, schemaName) {
+	if drafts := h.draftResponse(w, r, schemaName); !drafts && !isPublished(item.Data) {
 		httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
 		return
 	}
@@ -385,7 +387,7 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.store.ListCursor(r.Context(), schemaName, cursor, limit)
+	items, err := h.store.ListCursor(r.Context(), schemaName, cursor, limit, h.draftResponse(w, r, schemaName))
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
 		return
@@ -445,19 +447,27 @@ func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
 	return cfg
 }
 
-// isPublished reports whether a row is public. A schema without draft and
-// publish has no _status column, and every row of it is public. A NULL status
-// reads as published, the way the list filter treats it.
+// isPublished reports whether a row is public. See core.ContentPublished.
 func isPublished(data map[string]any) bool {
-	status, ok := data["_status"].(string)
-	return !ok || status == core.ContentStatusPublished
+	return core.ContentPublished(data)
 }
 
 // canReadDrafts reports whether the caller may see unpublished rows of a
-// schema. Drafts belong to the people who write them, so the test is the
-// update permission. A rule store that cannot be read answers no.
+// schema, on the terms core.CanReadDrafts sets for every transport.
 func (h *ContentHandler) canReadDrafts(r *http.Request, schema string) bool {
-	return h.authorize(r, schema, "update") == nil
+	return core.CanReadDrafts(r.Context(), h.checker(), requestClaims(r), schema)
+}
+
+// draftResponse reports whether this response may carry drafts of schema,
+// and when it may, marks it private. A response that can hold drafts belongs
+// to the caller alone: served public with a max-age, a shared cache keyed on
+// anything but the session would hand an editor's drafts to the next reader.
+func (h *ContentHandler) draftResponse(w http.ResponseWriter, r *http.Request, schema string) bool {
+	if !h.canReadDrafts(r, schema) {
+		return false
+	}
+	w.Header().Set(apimw.PrivateResponseHeader, "1")
+	return true
 }
 
 // checkStatusFilter refuses a list filter on any status but published from a

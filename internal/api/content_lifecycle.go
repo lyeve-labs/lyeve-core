@@ -122,18 +122,35 @@ func (h *ContentHandler) ListRevisions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A revision is a snapshot of a state the row passed through, drafts
+	// included. A caller who cannot read drafts gets the history of a row
+	// they can read, and only its published states.
+	drafts := h.draftResponse(w, r, schemaName)
+	if !drafts {
+		current, err := h.store.GetByID(r.Context(), schemaName, id)
+		if err != nil {
+			storeError(w, r, err, "failed to list revisions")
+			return
+		}
+		if !isPublished(current.Data) {
+			httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
+			return
+		}
+	}
 	revisions, err := store.ListRecordRevisions(r.Context(), schemaName, id)
 	if err != nil {
 		revisionError(w, r, err, "failed to list revisions")
 		return
 	}
-	if revisions == nil {
-		revisions = []core.RecordRevision{}
+	served := make([]core.RecordRevision, 0, len(revisions))
+	for _, rev := range revisions {
+		if !drafts && !isPublished(rev.Data) {
+			continue
+		}
+		rev.Data = mask(rev.Data)
+		served = append(served, rev)
 	}
-	for i := range revisions {
-		revisions[i].Data = mask(revisions[i].Data)
-	}
-	respond(w, http.StatusOK, revisions)
+	respond(w, http.StatusOK, served)
 }
 
 // RestoreRevision replaces current content data with a historical revision snapshot.
@@ -220,6 +237,9 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		data  map[string]any
 	}
 	callerTenant := core.TenantIDFromCtx(r.Context())
+	// Decided once: a stream is one caller for its whole life, and a change
+	// to a draft goes only to a caller who may read drafts on the schema.
+	drafts := h.canReadDrafts(r, schemaName)
 	ch := make(chan change, 16)
 
 	// The hook runs on the writer's goroutine, so it only filters and copies.
@@ -230,6 +250,9 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for _, et := range []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete} {
 		id := h.hooks.RegisterDynamic(schemaName, et, func(_ context.Context, ev hooks.Event) error {
 			if ev.TenantID != callerTenant {
+				return nil
+			}
+			if !drafts && !isPublished(ev.Data) {
 				return nil
 			}
 			select {

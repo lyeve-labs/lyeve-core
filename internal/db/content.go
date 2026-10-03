@@ -479,6 +479,16 @@ func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uu
 	return c, nil
 }
 
+// draftWhere returns the WHERE fragment that keeps a read to published rows,
+// or nothing when the schema has no draft and publish or the caller may read
+// drafts. A NULL status reads as published, the way the list filter treats it.
+func draftWhere(sc *domain.Schema, alias string, drafts bool) string {
+	if drafts || sc == nil || !sc.WithDraftPublish {
+		return ""
+	}
+	return fmt.Sprintf(" AND (%s._status = 'published' OR %s._status IS NULL)", alias, alias)
+}
+
 // softDeleteWhere returns an extra WHERE clause fragment when soft-delete is enabled.
 func softDeleteWhere(sc *domain.Schema) string {
 	if sc != nil && sc.WithSoftDelete {
@@ -768,7 +778,12 @@ func (w *actionWalker) ids(q string, args ...any) ([]uuid.UUID, error) {
 // cursor-based (keyset) pagination for efficient large-dataset traversal.
 // cursor is the UUID of the last seen row. Pass "" for the first page.
 // Rows are returned in ascending id order.
-func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int) ([]*domain.Content, error) {
+//
+// A soft-deleted row is never served. An unpublished row is served only when
+// drafts is true, which the caller decides from who is asking: this list has
+// no filter, so it cannot follow the offset list's default of published
+// unless a status is named.
+func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int, drafts bool) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
@@ -784,6 +799,7 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 		limitClause = "OFFSET 0 ROWS FETCH NEXT $1 ROWS ONLY"
 	}
 	tenantID := tenant.ID(ctx)
+	visible := softDeleteWhere(sc) + draftWhere(sc, "r", drafts)
 
 	var (
 		query string
@@ -794,9 +810,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE tenant_id = $2
+			WHERE tenant_id = $2%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, tenantID}
 	} else {
 		cursorID, parseErr := uuid.Parse(cursor)
@@ -807,9 +823,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE id > $2 AND tenant_id = $3
+			WHERE id > $2 AND tenant_id = $3%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, cursorID, tenantID}
 	}
 
