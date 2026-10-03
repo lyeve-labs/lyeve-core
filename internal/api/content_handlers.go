@@ -57,6 +57,10 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.checkStatusFilter(w, r, schemaName, filters) {
+		return
+	}
+
 	items, err := h.store.List(r.Context(), schemaName, limit, offset, filters)
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
@@ -110,6 +114,14 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	item, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
 		storeError(w, r, err, "failed to get content")
+		return
+	}
+	// The list leaves unpublished rows out, and a read by id has to agree,
+	// or an id learned from a webhook, a log or a guess reads a draft. The
+	// answer is the one a missing row gets, so the read does not confirm
+	// that the draft exists.
+	if !isPublished(item.Data) && !h.canReadDrafts(r, schemaName) {
+		httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -431,6 +443,34 @@ func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
 	}
 
 	return cfg
+}
+
+// isPublished reports whether a row is public. A schema without draft and
+// publish has no _status column, and every row of it is public. A NULL status
+// reads as published, the way the list filter treats it.
+func isPublished(data map[string]any) bool {
+	status, ok := data["_status"].(string)
+	return !ok || status == core.ContentStatusPublished
+}
+
+// canReadDrafts reports whether the caller may see unpublished rows of a
+// schema. Drafts belong to the people who write them, so the test is the
+// update permission. A rule store that cannot be read answers no.
+func (h *ContentHandler) canReadDrafts(r *http.Request, schema string) bool {
+	return h.authorize(r, schema, "update") == nil
+}
+
+// checkStatusFilter refuses a list filter on any status but published from a
+// caller who cannot read drafts, answering 403. The list serves only
+// published rows unless the filter names a status, so without this check
+// the filter is a way around that default.
+func (h *ContentHandler) checkStatusFilter(w http.ResponseWriter, r *http.Request, schema string, filters map[string]any) bool {
+	v, ok := filters["_status"]
+	if !ok || v == core.ContentStatusPublished || h.canReadDrafts(r, schema) {
+		return true
+	}
+	httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
+	return false
 }
 
 // parseFilters reads ?filters[col]=val query params into a map.
