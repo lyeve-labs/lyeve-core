@@ -79,11 +79,13 @@ var DefaultDashboardPolicy = CachePolicy{
 	NoTransform:          true,
 }
 
-// DefaultSchemaPolicy is for rarely-changed schema definitions.
+// DefaultSchemaPolicy is for rarely-changed schema definitions. It is
+// private: the catalog lists only what the caller may read, so two callers
+// get different answers, and a session cookie is not in Vary, so a shared
+// cache would hand one caller's list to the next.
 var DefaultSchemaPolicy = CachePolicy{
 	MaxAge:               300 * time.Second,
 	StaleWhileRevalidate: 3600 * time.Second,
-	Public:               true,
 }
 
 // ImmutablePolicy is for immutable resources such as hashed assets and versioned APIs.

@@ -94,9 +94,20 @@ func TestDefaultDashboardPolicy(t *testing.T) {
 	assert.True(t, DefaultDashboardPolicy.NoTransform)
 }
 
-func TestDefaultSchemaPolicy(t *testing.T) {
+// The schema catalog answers each caller with what it may read, so its
+// responses are private: a shared cache must never store one.
+func TestDefaultSchemaPolicy_IsPrivate(t *testing.T) {
 	assert.Equal(t, 300*time.Second, DefaultSchemaPolicy.MaxAge)
-	assert.True(t, DefaultSchemaPolicy.Public)
+	assert.False(t, DefaultSchemaPolicy.Public)
+
+	h := CacheWithPolicy(DefaultSchemaPolicy)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/schemas", nil))
+	cc := rec.Header().Get("Cache-Control")
+	assert.Contains(t, cc, "private")
+	assert.NotContains(t, cc, "public")
 }
 
 func TestCacheHeaders_2xxResponse(t *testing.T) {

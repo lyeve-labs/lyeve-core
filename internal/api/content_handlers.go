@@ -54,6 +54,9 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
 		return
 	}
+	if !h.refuseHiddenFilters(w, r, schemaName, filters) {
+		return
+	}
 	loc, locale, ok := h.readLocale(w, r)
 	if !ok {
 		return
@@ -498,6 +501,32 @@ func (h *ContentHandler) checkStatusFilter(w http.ResponseWriter, r *http.Reques
 	}
 	httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
 	return false
+}
+
+// refuseHiddenFilters answers 403 when a filter names a field the caller's
+// mask hides, and returns false after answering. The mask keeps the field out
+// of the response, but a filter on it still says which entries hold a guessed
+// value, so it reads the field one guess at a time.
+func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Request, schema string, filters map[string]any) bool {
+	if len(filters) == 0 {
+		return true
+	}
+	hidden, err := core.ContentHiddenFields(r.Context(), h.checker(), requestClaims(r), schema)
+	switch {
+	case errors.Is(err, errNoCaller):
+		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
+		return false
+	case err != nil:
+		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		return false
+	}
+	for key := range filters {
+		if hidden.Names(key) {
+			httpx.ErrorReq(w, r, http.StatusForbidden, core.ErrHiddenFieldQueried.Error())
+			return false
+		}
+	}
+	return true
 }
 
 // parseFilters reads ?filters[col]=val query params into a map.
