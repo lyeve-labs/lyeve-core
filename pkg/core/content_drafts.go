@@ -35,7 +35,8 @@ func DraftPermissionChecker(host any) PermissionChecker {
 // Drafts belong to the people who write them, so the test is the update
 // permission on the schema. An API key needs more than its roles: a key
 // scoped to reading content is a read credential, and a read credential
-// sees what the public sees, so it also needs a write scope on content. A
+// sees what the public sees, so it also needs the update scope on this
+// schema, which content:write and content.<schema>:update both grant. A
 // key holding admin or super_admin is judged by role, as it is at every
 // other scope gate. A rule store that cannot be read answers no, and so do
 // absent claims. The caller passes the claims it authenticated, because a
@@ -45,7 +46,7 @@ func CanReadDrafts(ctx context.Context, checker PermissionChecker, claims *AuthC
 		return false
 	}
 	if claims.IsAPIKey && !claims.HasRole("admin") && !claims.HasRole("super_admin") &&
-		!ScopeGrants(claims.Scopes, "content", "write") {
+		!ScopeGrants(claims.Scopes, "content."+schema, ActionUpdate) {
 		return false
 	}
 	if checker == nil {
