@@ -14,7 +14,9 @@
 #
 # Triggers on a vX.Y.Z tag push, or on manual workflow_dispatch with a `tag`
 # input to rebuild an existing tag (e.g. when a push lands during an Actions
-# outage). Both resolve RELEASE_REF and publish identical artifacts.
+# outage). Both resolve RELEASE_REF and publish identical artifacts. Dispatch
+# on the tag itself (`--ref vX.Y.Z -f tag=vX.Y.Z`), because the secrets below
+# live in the `release` environment and a run from a branch cannot enter it.
 #
 # cmd/lyeve blank-imports every plugin, and each plugin replaces lyeve-core with
 # a sibling path, so the build needs the whole workspace checked out as siblings:
@@ -26,7 +28,9 @@
 # tags/labels are derived in shell so a GitHub REST API blip can't fail a
 # release. GHCR, Actions runners, and Git are the only services needed.
 #
-# Required secrets:
+# Required secrets. Both stored ones belong to the `release` environment,
+# which admits only a `v*` tag ref. Keep them out of the repository's own
+# secrets, which a run dispatched from any branch could read.
 #   GITHUB_TOKEN - built-in, pushes to GHCR.
 #   WORKSPACE_READ_TOKEN - PAT / GitHub App token with read on the
 #                             lyeve-labs/lyeve-plugin-* and lyeve-libs repos
@@ -95,6 +99,7 @@ jobs:
     name: build, push & tag
     needs: test
     runs-on: ubuntu-24.04
+    environment: release
     permissions:
       contents: read
       packages: write # pushes the image to GHCR
