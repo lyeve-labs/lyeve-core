@@ -15,9 +15,9 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-10-07T14:35:57Z from origin default branches.
+# Generated 2026-10-07T18:05:29Z from origin default branches.
 
-lyeve-libs = c990914e123f173639f550f8ebe30d27407f0017
+lyeve-libs = 4387e08f8dc7f1165e533205b74e4384c751249e
 lyeve-plugin-ab-testing = ceaaae3a5f5d464cc4c4034e27b39fe84c55a0fa
 lyeve-plugin-ai = d76dce7a469a577a57519ac9e0ea27db21908636
 lyeve-plugin-analytics = d8ccab318ba0b1768d5c4a5daef7fcfd7d9ee771
@@ -54,7 +54,7 @@ lyeve-plugin-permissions = 5986f12c6c2689fe907856fa51c1ee7d930377ee
 lyeve-plugin-pii-mask = 923a6fa80dfe035ed48832205d48482986c433ae
 lyeve-plugin-profiler = d3694fab44becdeb990042f5f276d20468dd7072
 lyeve-plugin-query-monitor = 4b2a4e4d1fb04358d251ef6bebe33d457b53ef1f
-lyeve-plugin-rate-limit = b725cea4fcb397259ac7bb4f8fb7c9754d759e9c
+lyeve-plugin-rate-limit = d886c7c8e1f10c9fd72b05cca0d0d8a2e5c95b6f
 lyeve-plugin-realtime = f0dfa2ee50503bb32c40433dc358d6ca77d85f51
 lyeve-plugin-recommendations = fc647cd7d8c68d8fe70fa7c2207f3f317ba9cb44
 lyeve-plugin-request-capture = baf6c8c46a72169f86bcee849d31be3b85a80b88
