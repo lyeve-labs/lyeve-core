@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The v0.52.0 tag has no image: its release build stopped on the release
+binary's own checks. This release ships the same engine with the plugin and
+license module releases those checks expect.
+
+### Changed
+
+- The image ships the license module release whose release checks know the
+  response cache's place in the middleware chain, the capture policy and
+  tenant region roles, and the capture set replay route.
+- Rate limiting no longer serves a super admin route for another tenant's
+  refusal history. A super admin switches into the tenant and reads the
+  history route every tenant uses.
+
 ## [0.52.0] - 2026-10-07
 
 ### Added
