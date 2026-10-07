@@ -876,15 +876,32 @@ func TestMSSQL_Temporal_CreateAndQuery(t *testing.T) {
 		pool.Exec(context.Background(), "DROP TABLE IF EXISTS [dbo].["+historyName+"]")
 	})
 
+	// The period columns hold the server's clock, so every point the queries
+	// below name is read from the server. The runner's clock can sit apart
+	// from the container's, and a point taken from it can land before the row
+	// existed.
+	serverNow := func() time.Time {
+		t.Helper()
+		row, err := pool.QueryRow(ctx, "SELECT SYSUTCDATETIME()")
+		if err != nil {
+			t.Fatalf("QueryRow: %v", err)
+		}
+		var at time.Time
+		if err := row.Scan(&at); err != nil {
+			t.Fatalf("read server time: %v", err)
+		}
+		return at
+	}
+
 	// Phase 1: Insert and capture time.
-	beforeInsert := time.Now().UTC()
+	beforeInsert := serverNow()
 	_, err = pool.Exec(ctx,
 		"INSERT INTO [dbo].["+baseName+"] (title, price) VALUES ($1, $2)",
 		"Temporal Document", 19.99)
 	if err != nil {
 		t.Fatalf("insert temporal row: %v", err)
 	}
-	afterInsert := time.Now().UTC()
+	afterInsert := serverNow()
 
 	// Phase 2: Update (generates history row).
 	time.Sleep(10 * time.Millisecond) // ensure time gap
@@ -895,7 +912,7 @@ func TestMSSQL_Temporal_CreateAndQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update temporal row: %v", err)
 	}
-	afterUpdate := time.Now().UTC()
+	afterUpdate := serverNow()
 
 	// Phase 3: Query current row.
 	var title string
@@ -922,7 +939,7 @@ func TestMSSQL_Temporal_CreateAndQuery(t *testing.T) {
 	row, qrErr = pool.QueryRow(ctx,
 		fmt.Sprintf(
 			"SELECT price FROM [dbo].[%s] FOR SYSTEM_TIME AS OF '%s' WHERE id = 1",
-			baseName, afterInsert.Add(-1*time.Millisecond).Format("2006-01-02 15:04:05.999"),
+			baseName, afterInsert.Format("2006-01-02 15:04:05.9999999"),
 		),
 	)
 	if qrErr != nil {
