@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Object storage accepts a multipart upload part sent as
+  `application/octet-stream`. Every part was refused with `415`, so a
+  multipart upload could never complete.
+- A data subject export on an install without the audit plugin writes every
+  section. It stopped at the missing audit table and returned an empty body.
+- The email template starters list the required password-reset and
+  magic-link templates first.
+
 ## [0.52.1] - 2026-10-07
 
 The v0.52.0 tag has no image: its release build stopped on the release
