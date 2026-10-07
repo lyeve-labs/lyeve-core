@@ -120,54 +120,54 @@ require (
 	github.com/lyeve-labs/lyeve-libs v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-ab-testing v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-ai v0.10.1
-	github.com/lyeve-labs/lyeve-plugin-analytics v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-analytics v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-apikey v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-apikey v0.9.0
 	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-cache v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-captcha v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-cache v0.7.0
+	github.com/lyeve-labs/lyeve-plugin-captcha v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-cluster v0.1.1
-	github.com/lyeve-labs/lyeve-plugin-content v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-cron v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-content v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-cron v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-data-export v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-data-residency v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-data-residency v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-device-fingerprint v0.5.1
-	github.com/lyeve-labs/lyeve-plugin-email v0.11.1
-	github.com/lyeve-labs/lyeve-plugin-error-tracking v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-email v0.12.0
+	github.com/lyeve-labs/lyeve-plugin-error-tracking v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-events v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-flow v0.1.1
+	github.com/lyeve-labs/lyeve-plugin-flow v0.2.0
 	github.com/lyeve-labs/lyeve-plugin-goroutine-engine v0.4.1
 	github.com/lyeve-labs/lyeve-plugin-graphql v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-grpc v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-idempotency v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-localization v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-logging v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-magic-link v0.10.1
-	github.com/lyeve-labs/lyeve-plugin-media v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-logging v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-magic-link v0.11.0
+	github.com/lyeve-labs/lyeve-plugin-media v0.8.2
 	github.com/lyeve-labs/lyeve-plugin-messagebroker v0.9.1
 	github.com/lyeve-labs/lyeve-plugin-mfa v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-multitenant v0.11.1
 	github.com/lyeve-labs/lyeve-plugin-oauth v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-password-reset v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-password-reset v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-permissions v0.1.1
 	github.com/lyeve-labs/lyeve-plugin-pii-mask v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-profiler v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-query-monitor v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-rate-limit v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-rate-limit v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-realtime v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-recommendations v0.6.1
-	github.com/lyeve-labs/lyeve-plugin-request-capture v0.8.1
-	github.com/lyeve-labs/lyeve-plugin-review v0.6.1
+	github.com/lyeve-labs/lyeve-plugin-request-capture v0.9.0
+	github.com/lyeve-labs/lyeve-plugin-review v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-saml v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-schema v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-schema v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-scim v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-search v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-storage v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.5.1
-	github.com/lyeve-labs/lyeve-plugin-telemetry v0.5.1
+	github.com/lyeve-labs/lyeve-plugin-storage v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.6.0
+	github.com/lyeve-labs/lyeve-plugin-telemetry v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-usage v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-waf v0.8.1
+	github.com/lyeve-labs/lyeve-plugin-waf v0.8.2
 	github.com/lyeve-labs/lyeve-plugin-webhook v0.7.1
 	github.com/stretchr/testify v1.12.1
 )
