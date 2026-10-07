@@ -117,7 +117,7 @@ replace github.com/lyeve-labs/lyeve-plugin-review => ../../../lyeve-plugin-revie
 require (
 	github.com/google/uuid v1.6.0
 	github.com/lyeve-labs/lyeve-core v0.0.0-00010101000000-000000000000
-	github.com/lyeve-labs/lyeve-libs v0.8.0
+	github.com/lyeve-labs/lyeve-libs v0.8.1
 	github.com/lyeve-labs/lyeve-plugin-ab-testing v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-ai v0.10.1
 	github.com/lyeve-labs/lyeve-plugin-analytics v0.6.0
@@ -154,7 +154,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-pii-mask v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-profiler v0.7.1
 	github.com/lyeve-labs/lyeve-plugin-query-monitor v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-rate-limit v0.6.0
+	github.com/lyeve-labs/lyeve-plugin-rate-limit v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-realtime v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-recommendations v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-request-capture v0.9.0
