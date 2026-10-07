@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.52.1] - 2026-10-07
 
 The v0.52.0 tag has no image: its release build stopped on the release
 binary's own checks. This release ships the same engine with the plugin and
