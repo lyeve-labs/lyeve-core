@@ -120,7 +120,7 @@ require (
 	github.com/lyeve-labs/lyeve-libs v0.8.1
 	github.com/lyeve-labs/lyeve-plugin-ab-testing v0.5.1
 	github.com/lyeve-labs/lyeve-plugin-ai v0.10.1
-	github.com/lyeve-labs/lyeve-plugin-analytics v0.6.0
+	github.com/lyeve-labs/lyeve-plugin-analytics v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-apikey v0.9.0
 	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
@@ -133,7 +133,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-data-export v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-data-residency v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-device-fingerprint v0.5.1
-	github.com/lyeve-labs/lyeve-plugin-email v0.12.0
+	github.com/lyeve-labs/lyeve-plugin-email v0.12.1
 	github.com/lyeve-labs/lyeve-plugin-error-tracking v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-events v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-flow v0.2.0
@@ -163,7 +163,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-schema v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-scim v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-search v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-storage v0.8.0
+	github.com/lyeve-labs/lyeve-plugin-storage v0.8.1
 	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-telemetry v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-usage v0.7.1

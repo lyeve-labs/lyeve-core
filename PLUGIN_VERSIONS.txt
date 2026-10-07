@@ -15,12 +15,12 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-10-07T18:05:29Z from origin default branches.
+# Generated 2026-10-07T20:14:17Z from origin default branches.
 
 lyeve-libs = 4387e08f8dc7f1165e533205b74e4384c751249e
 lyeve-plugin-ab-testing = ceaaae3a5f5d464cc4c4034e27b39fe84c55a0fa
 lyeve-plugin-ai = d76dce7a469a577a57519ac9e0ea27db21908636
-lyeve-plugin-analytics = d8ccab318ba0b1768d5c4a5daef7fcfd7d9ee771
+lyeve-plugin-analytics = 36e6a198bb86d8263683eeb25faf182af1250dbb
 lyeve-plugin-apianalytics = 2be597d9b3ebd87a62a04a95cc8fcb8adf953708
 lyeve-plugin-apikey = 0b303c4e1227f75d24423aa93dfd27a9e10e73d2
 lyeve-plugin-audit = eb8e5fe2f3452a867e943e547344cdbd1b2e9b36
@@ -33,7 +33,7 @@ lyeve-plugin-cron = 57df430eaa5b3f079cfa8c6795c657caa93fcb6f
 lyeve-plugin-data-export = 9272a862ed7f2e9df49d791dcb1b105f5546c963
 lyeve-plugin-data-residency = 41d728ef7ea4ff8d7e53427e2691db2b93fde739
 lyeve-plugin-device-fingerprint = 61eb021f458810b812a5864d1543e691380b3562
-lyeve-plugin-email = 22daac284109deb1e2ced23e68f44d96a2ceebb4
+lyeve-plugin-email = 80d09d6c74e5dab970b8bcd81f04592918a0668f
 lyeve-plugin-error-tracking = 702795412058ee56ea2c5bb21428e7e89e2a94e5
 lyeve-plugin-events = d9468983850e253b2a93352097d27cbd28e58a14
 lyeve-plugin-flow = fe1ccf8e47eb61d085f4a5e92ac3dec05a7d0dda
@@ -63,7 +63,7 @@ lyeve-plugin-saml = 9d84dc96c8d26d57d9ea1691b1e7b13674b98204
 lyeve-plugin-schema = c5f88f749cc1d04ba4a6e1845e0bda0ec16a603f
 lyeve-plugin-scim = 45056392601e07fbb7695c65b272f21450b55622
 lyeve-plugin-search = 8c87f130b5bf4d883e19ab0c618a7c63ad2b8ec0
-lyeve-plugin-storage = 78d0f4710f281eb8578632ce77c4975b1898e8e4
+lyeve-plugin-storage = 4a123d4380a9c29e28fedc6fb3092a3e9c98f1ce
 lyeve-plugin-synthetic-monitoring = 226ad39868b3a41cc6264f7648b94d0c9fc59b36
 lyeve-plugin-telemetry = 0cd6ef8f970055cf03d19319360c0deec65e89de
 lyeve-plugin-usage = c9e79c6a10438c61e58977f125b381e1c31aca94
