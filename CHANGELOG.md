@@ -18,6 +18,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   through its host, which asks the running holder on each call and answers
   nil when no plugin holds the role. Two running plugins holding it refuse
   the boot.
+- `DELETE /api/admin/license` in the image removes a license stored on the
+  install, so it returns to the free tier without a restart. A license set
+  in `LYEVE_LICENSE_KEY` is changed there and the route refuses it with
+  `409`.
+
+### Changed
+
+- The image ships the latest release of every plugin and of the license
+  module.
+- The plugin policy grants a database to the plugins that now store tenant
+  settings, the secret configuration to the plugins that seal stored
+  addresses with the tenant key, and the hook bus to the plugin that
+  rebuilds its state when the license changes.
+
+### Fixed
+
+- A revision store can refuse a read with `core.NotGrantedError`, and the
+  record revision routes answer it with the same `402` body a plugin's own
+  route sends. A record with no history lists `[]` instead of `null`.
+- Publishing and unpublishing through the REST routes fire the after-update
+  event every other write fires, so a search index, a webhook or a response
+  cache hears that an entry went live or was withdrawn.
 
 ## [0.51.2] - 2026-10-05
 
