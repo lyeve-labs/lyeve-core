@@ -19,7 +19,7 @@ gitleaks = "8.30.1"
 # Same version the CI lint step installs, so a local run and the gate report the
 # same findings. Without a pin the shim still resolves on PATH and fails with
 # "No version is set for shim", which reads like a missing install.
-golangci-lint = "2.13.2"
+golangci-lint = "2.14.0"
 
 [settings]
 # Suppress GitHub API rate-limit warnings. If you have a GITHUB_TOKEN set
