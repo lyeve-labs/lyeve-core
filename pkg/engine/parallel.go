@@ -112,7 +112,7 @@ func (e *ParallelEngine) FanOut(ctx context.Context, items []any, fn func(contex
 		idx := i
 		it := item
 		wg.Add(1)
-		go func() {
+		GoSafe("parallel-map-task", func() {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
@@ -139,7 +139,7 @@ func (e *ParallelEngine) FanOut(ctx context.Context, items []any, fn func(contex
 			if err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -169,7 +169,7 @@ func (e *ParallelEngine) FanOutVoid(ctx context.Context, items []any, fn func(co
 		idx := i
 		it := item
 		wg.Add(1)
-		go func() {
+		GoSafe("parallel-each-task", func() {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
@@ -190,7 +190,7 @@ func (e *ParallelEngine) FanOutVoid(ctx context.Context, items []any, fn func(co
 			}
 
 			_ = fn(taskCtx, it, idx) // err intentionally discarded. Errors are logged by caller
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -160,7 +160,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Derive the master KEK while the database connects. The derivation is
 	// cached per key, so the first KeyStore a plugin builds finds it ready
 	// instead of spending its start level on it.
-	go func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) }()
+	engine.GoSafe("runtime-kek-warmup", func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) })
 
 	// GOMEMLIMIT + GC tuning
 	// Set a soft memory cap at 85% of the container limit so Go's GC triggers
@@ -1464,6 +1464,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
+	// A panic recovered here would leave the process running with no
+	// listener, which reads as healthy to anything but a request. Ending the
+	// process lets its supervisor restart it.
+	// lyeve:bare-goroutine the server must take the process down with it
 	go func() {
 		logger.Info("admin server listening", "addr", cfg.AdminListenAddr, "tls", listenerTLS != nil)
 		if err := serve(adminSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -1486,6 +1490,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
+	// lyeve:bare-goroutine the server must take the process down with it, as above
 	go func() {
 		logger.Info("api server listening", "addr", cfg.APIListenAddr, "instance_id", cfg.InstanceID, "tls", listenerTLS != nil)
 		if err := serve(apiSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -1496,7 +1501,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Open the readiness gate as soon as the probes pass. The gate's own
 	// timeout is the backstop for a probe that never does, and past it
 	// the probe is left to /startup and /readyz.
-	go func() {
+	engine.GoSafe("runtime-readiness-log", func() {
 		listening := time.Now()
 		awaitCtx, cancel := context.WithTimeout(ctx, readinessGateTimeout)
 		defer cancel()
@@ -1505,7 +1510,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 				"boot_ms", time.Since(runStarted).Milliseconds(),
 				"after_listen_ms", time.Since(listening).Milliseconds())
 		}
-	}()
+	})
 
 	// Graceful shutdown
 	//

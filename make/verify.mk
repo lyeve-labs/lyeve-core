@@ -8,7 +8,7 @@
         lint-no-raw-tenant-header lint-no-raw-error-text lint-no-raw-tx-placeholder \
         lint-no-test-seams lint-no-typography-in-strings \
         lint-mysql-text-default lint-mysql-inline-references lint-mssql-merge-holdlock \
-        lint-mysql-index-guard lint-no-insert-ignore lint-sql-bool-literal lint-validate-tags lint-inert-tests \
+        lint-mysql-index-guard lint-no-insert-ignore lint-sql-bool-literal lint-validate-tags lint-inert-tests lint-bare-goroutines \
         build-dev lint-secrets \
         verify verify-ci preflight
 
@@ -64,6 +64,9 @@ lint-no-typography-in-strings: ## Fail if a Go string literal carries an em dash
 lint-no-test-seams: ## Fail if this repo can be made to behave differently for a test
 	@bash tools/lint-no-test-seams.sh
 
+lint-bare-goroutines: ## Fail if engine source starts a goroutine that does not recover
+	@bash tools/lint-bare-goroutines.sh
+
 lint-mssql-merge-holdlock: ## Fail if an MSSQL MERGE upsert does not take a range lock
 	@bash tools/lint-mssql-merge-holdlock.sh
 
@@ -110,7 +113,7 @@ VERIFY_CORE_LINTS := lint-no-plugin-source env-parity lint-core-pure \
                      lint-mysql-inline-references lint-mssql-merge-holdlock \
                      lint-mysql-index-guard lint-no-test-seams lint-no-typography-in-strings \
                      lint-no-insert-ignore lint-sql-bool-literal \
-                     lint-validate-tags lint-inert-tests
+                     lint-validate-tags lint-inert-tests lint-bare-goroutines
 
 # What CI enforces: everything verify runs except the secret scan. That shells
 # out to whichever gitleaks is on PATH, so the workflow runs it itself against

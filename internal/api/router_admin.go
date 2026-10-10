@@ -21,6 +21,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 )
 
@@ -298,7 +299,8 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 				multiTenant: cfg.MultiTenant,
 				now:         time.Now,
 			}
-			go deviceLogins.runPruner(o.lifetimeCtx())
+			pruneCtx := o.lifetimeCtx()
+			engine.GoSafe("device-login-pruner", func() { deviceLogins.runPruner(pruneCtx) })
 			deviceGuard := apimw.ContentLengthLimit(deviceLoginMaxBody)
 			start := r.With(deviceGuard)
 			poll := r.With(deviceGuard)

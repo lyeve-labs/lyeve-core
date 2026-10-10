@@ -112,6 +112,10 @@ func serveUntilDone(ctx context.Context, mode string, servers []*http.Server, lo
 			return fmt.Errorf("%s: listen %s: %w", mode, srv.Addr, err)
 		}
 		logger.Info(mode+": listening", "addr", srv.Addr, "tls", srv.TLSConfig != nil)
+		// A recovered panic would send nothing on errc, and the setup server
+		// would wait forever with no listener. Ending the process is the
+		// visible failure.
+		// lyeve:bare-goroutine the server must take the process down with it
 		go func(srv *http.Server, ln net.Listener) {
 			if srv.TLSConfig != nil {
 				ln = tls.NewListener(ln, srv.TLSConfig)

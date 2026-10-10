@@ -11,7 +11,6 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -20,6 +19,8 @@ import (
 	"time"
 
 	"golang.org/x/sync/semaphore"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // PoolStatsFunc returns current database pool statistics. Typically (*sql.DB).Stats.
@@ -156,12 +157,7 @@ func Backpressure(cfg BackpressureConfig) (BackpressureResult, error) {
 
 	// Background pool-stats poller
 	if cfg.PoolStats != nil {
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					slog.Error("backpressure pool-stats poller panicked", "panic", r)
-				}
-			}()
+		engine.GoSafe("backpressure-pool-stats", func() {
 			ticker := time.NewTicker(cfg.PoolPollInterval)
 			defer ticker.Stop()
 			for {
@@ -180,7 +176,7 @@ func Backpressure(cfg BackpressureConfig) (BackpressureResult, error) {
 				poolPressure.Store(int64(pressure * 1000))
 				poolShedding.Store(pressure >= cfg.PoolPressureThreshold)
 			}
-		}()
+		})
 	}
 
 	stopFn := func() {
