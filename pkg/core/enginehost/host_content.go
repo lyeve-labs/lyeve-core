@@ -106,7 +106,39 @@ func contentWriterErr(err error, schemaName string) error {
 	return err
 }
 
+// ContentPage reads one page of a schema's generated table for the tenant on
+// ctx, drafts included. Implements core.ContentReader.
+func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after uuid.UUID, limit int) ([]map[string]any, error) {
+	if h.contentStore == nil {
+		return nil, fmt.Errorf("content reader not wired")
+	}
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	cursor := ""
+	if after != uuid.Nil {
+		cursor = after.String()
+	}
+	items, err := h.contentStore.ListCursor(ctx, schemaName, cursor, limit)
+	if err != nil {
+		return nil, contentWriterErr(err, schemaName)
+	}
+	rows := make([]map[string]any, 0, len(items))
+	for _, c := range items {
+		row := make(map[string]any, len(c.Data)+3)
+		for k, v := range c.Data {
+			row[k] = v
+		}
+		row["id"] = c.ID.String()
+		row["created_at"] = c.CreatedAt
+		row["updated_at"] = c.UpdatedAt
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 var (
 	_ core.ContentWriter          = (*engineHost)(nil)
 	_ core.ContentStatusProjector = (*engineHost)(nil)
+	_ core.ContentReader          = (*engineHost)(nil)
 )

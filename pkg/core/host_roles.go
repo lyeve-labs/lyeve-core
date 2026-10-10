@@ -122,6 +122,21 @@ type ContentWriter interface {
 	SetContentStatus(ctx context.Context, schemaName string, id uuid.UUID, status string) error
 }
 
+// ContentReader pages through a schema's generated content table, every row
+// the tenant on ctx holds and every status, ordered by id. It is for
+// a plugin that keeps its own record of entries and has to find the rows
+// another writer put in the table before it was listening, such as entries
+// created through the Content API.
+//
+// Each row is the schema's fields keyed by field name, with "id",
+// "created_at" and "updated_at" added. A relation that holds a column reads
+// under that column's name. A schema the tenant never defined is
+// ErrNotFound. after is the last id of the previous page, or uuid.Nil for the
+// first. A limit outside 1 to 1000 reads 100.
+type ContentReader interface {
+	ContentPage(ctx context.Context, schemaName string, after uuid.UUID, limit int) ([]map[string]any, error)
+}
+
 // ContentStatusProjector moves a content row between draft, published and
 // archived as SetContentStatus does, with the same errors, and publishes no
 // lifecycle event. It is for a plugin that keeps its own record of an entry
