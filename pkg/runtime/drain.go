@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // InflightDrainer tracks in-flight HTTP requests and provides a Wait
@@ -67,14 +69,14 @@ func (d *InflightDrainer) WaitOr(timeout time.Duration) error {
 	defer cancel()
 
 	done := make(chan struct{})
-	go func() {
+	engine.GoSafe("drain-wait", func() {
+		defer close(done)
 		d.mu.Lock()
 		for d.counter > 0 {
 			d.cond.Wait()
 		}
 		d.mu.Unlock()
-		close(done)
-	}()
+	})
 
 	select {
 	case <-done:

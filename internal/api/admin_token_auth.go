@@ -18,6 +18,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
@@ -610,7 +611,7 @@ func newAdminTokenLog(ctx context.Context, store core.AdminTokenStore) *adminTok
 		dropped:   map[uuid.UUID]*adminTokenDropped{},
 	}
 	if store != nil {
-		go l.run(ctx)
+		engine.GoSafe("admin-token-log", func() { l.run(ctx) })
 	}
 	return l
 }

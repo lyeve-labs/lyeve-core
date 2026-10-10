@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // FailoverDB wraps a primary db.DB with replica fallback. When the primary
@@ -120,7 +121,7 @@ func (f *FailoverDB) Start(ctx context.Context) {
 	}
 	f.started = true
 	f.mu.Unlock()
-	go f.healthLoop(ctx)
+	engine.GoSafe("db-failover-health", func() { f.healthLoop(ctx) })
 }
 
 // Stop terminates the background health poller. Safe to call more than once.

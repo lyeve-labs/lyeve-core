@@ -12,6 +12,7 @@ import (
 //
 // The name parameter identifies the goroutine source in log output.
 func GoSafe(name string, fn func()) {
+	// lyeve:bare-goroutine this is the recovering spawn every other one goes through
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {

@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // handlerLimit bounds one handler. A subscriber that blocks holds up every
@@ -68,7 +70,7 @@ func (r *Relay) Attach(ctx context.Context, t Transport) {
 	r.mu.Lock()
 	r.transport = t
 	r.mu.Unlock()
-	go t.Run(ctx, r.deliver)
+	engine.GoSafe("cluster-relay-transport", func() { t.Run(ctx, r.deliver) })
 }
 
 // Attached reports whether a transport is carrying broadcasts. An install

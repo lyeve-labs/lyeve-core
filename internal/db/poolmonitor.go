@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // PoolHealthMonitor runs periodic pool health checks and caches the latest
@@ -68,7 +70,7 @@ func (m *PoolHealthMonitor) Start(ctx context.Context) {
 	// First check is synchronous: ensures a valid snapshot exists before
 	// returning so the /health endpoint never returns empty data.
 	m.runCheck(ctx)
-	go m.loop(ctx)
+	engine.GoSafe("db-pool-monitor", func() { m.loop(ctx) })
 }
 
 // Stop signals the background goroutine to exit. Does not wait: the
