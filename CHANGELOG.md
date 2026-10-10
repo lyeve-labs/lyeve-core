@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.53.0] - 2026-10-10
+
+### Security
+
+- Requires Go 1.27.2, which fixes standard library advisories in crypto/tls, net/http, its bundled http2 and net/textproto (GO-2026-6603, GO-2026-6605, GO-2026-6607, GO-2026-6608, GO-2026-6610, GO-2026-6611, GO-2026-6613, GO-2026-6617).
+- golang.org/x/net 0.60.0, which fixes the same http2 advisories in the module copy.
+
+### Added
+
+- The goroutine tunables carry a lifecycle switch, `ParallelLifecycleSetter`,
+  that decides whether plugin caches warm and plugins stop through the
+  parallel engine.
+
+### Changed
+
+- The engine boots a 100-worker pool, runs hooks in order, and warms and
+  stops plugins one at a time. It no longer reads `GOROUTINE_ENGINE_ENABLED`,
+  `GOROUTINE_ENGINE_POOL_SIZE`, `ASYNC_HOOKS_ENABLED` or `ASYNC_HOOK_TIMEOUT`.
+  The goroutine engine plugin reads them and changes the primitives from its
+  Start onward.
+- Every goroutine the engine starts recovers from a panic and logs it under a
+  name, instead of ending the process. The admin, API and setup servers stay
+  the exception, because a server that died quietly would leave the process
+  running with no listener. `make verify` refuses any other go statement that
+  does not recover.
+- golangci-lint 2.14.0. 2.13.2 cannot read what Go 1.27.2 compiles.
+
+### Fixed
+
+- `Host.Version` returns the build version. It returned the service name, so
+  plugins reported `lyeve-core` as the engine version.
+- The boot warning for a plugin with no capability grant says the grant can
+  come from the host capability policy as well as from
+  `RegisterPluginWithCaps`.
+- `make bench-compare` compares the newest benchmark run against the one
+  before it. It only ever reported one run.
+
 ## [0.52.2] - 2026-10-07
 
 ### Fixed
