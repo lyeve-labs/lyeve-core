@@ -259,9 +259,20 @@ func (h *ScopedHost) ProjectContentStatus(ctx context.Context, schemaName string
 	return pj.ProjectContentStatus(ctx, schemaName, id, status)
 }
 
+// ContentPage forwards a page read of a generated content table to the
+// inner host. Implements ContentReader.
+func (h *ScopedHost) ContentPage(ctx context.Context, schemaName string, after uuid.UUID, limit int) ([]map[string]any, error) {
+	cr, ok := h.inner.(ContentReader)
+	if !ok {
+		return nil, fmt.Errorf("content reader not available")
+	}
+	return cr.ContentPage(ctx, schemaName, after, limit)
+}
+
 var (
 	_ ContentWriter          = (*ScopedHost)(nil)
 	_ ContentStatusProjector = (*ScopedHost)(nil)
+	_ ContentReader          = (*ScopedHost)(nil)
 )
 
 // Config returns the host configuration. Without CapConfigSecret,
