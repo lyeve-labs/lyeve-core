@@ -3,7 +3,7 @@
 # range and not "latest": mise exports GOROOT for whichever version it resolves, so
 # any config that resolves differently leaves GOROOT and PATH disagreeing and every
 # compile fails, stdlib included.
-go = "1.27.1"
+go = "1.27.2"
 
 # Pinned to avoid GitHub API rate limiting on every `mise install`.
 # Bump manually when you need a newer version.

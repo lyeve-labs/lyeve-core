@@ -51,7 +51,7 @@ permissions: {}
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: lyeve-labs/lyeve-core
-  GO_VERSION: '1.27.1'
+  GO_VERSION: '1.27.2'
   # Pinned, not advisory: GOTOOLCHAIN=local refuses a mismatched toolchain.
   GOTOOLCHAIN: local
   PLATFORMS: amd64 arm64
