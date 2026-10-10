@@ -291,3 +291,12 @@ func TestGoroutineTracker_SnapshotCountsByOwner(t *testing.T) {
 	assert.NotEmpty(t, snap.ByOwner["ai"].Oldest)
 	assert.Equal(t, 2, snap.BySource["transcript-sweeper"]+snap.BySource["embedding-queue"])
 }
+
+func TestParallelEngine_LifecycleStartsOffAndSwitches(t *testing.T) {
+	pe := NewParallelEngine(ParallelConfig{MaxConcurrent: 4, Timeout: time.Second})
+	assert.False(t, pe.Lifecycle(), "plugins warm and stop one at a time until something turns this on")
+	pe.SetLifecycle(true)
+	assert.True(t, pe.Lifecycle())
+	pe.SetLifecycle(false)
+	assert.False(t, pe.Lifecycle())
+}

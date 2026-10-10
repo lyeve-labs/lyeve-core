@@ -42,6 +42,7 @@ type relayPlugin struct {
 	queryErr error
 	declared int
 	version  string
+	scaling  map[string]any
 }
 
 func (p *relayPlugin) Name() string           { return p.name }
@@ -54,6 +55,13 @@ func (p *relayPlugin) Start(ctx context.Context, host core.Host) error {
 	row, _ := host.Querier(ctx).QueryRow(ctx, "SELECT 1")
 	p.queryErr = row.Scan(&n)
 	p.version = host.Version()
+	if sh, ok := host.(core.ScalingHost); ok {
+		p.scaling = map[string]any{
+			"pool":        sh.WorkerPool().Size(),
+			"async_hooks": sh.AsyncHookExecutor().Enabled(),
+			"lifecycle":   sh.ParallelEngine().Lifecycle(),
+		}
+	}
 	if !core.IsStateless(host.Config()) {
 		return errors.New("the host does not tell a plugin it is stateless")
 	}
@@ -263,6 +271,10 @@ webhooks:
 	})
 	t.Run("a plugin reads the build version, not the service name", func(t *testing.T) {
 		assert.Equal(t, "v9.8.7", relay.version)
+	})
+	t.Run("the goroutine engine boots at its defaults", func(t *testing.T) {
+		assert.Equal(t, map[string]any{"pool": 100, "async_hooks": false, "lifecycle": false}, relay.scaling,
+			"a 100-worker pool, hooks in order and plugins warmed and stopped one at a time until a plugin changes them")
 	})
 	t.Run("there is no login", func(t *testing.T) {
 		code, _ := get("/api/admin/auth/me", operatorKey)

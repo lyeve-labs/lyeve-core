@@ -187,30 +187,24 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// Goroutine Concurrency Engine
 	// Initialize centralized worker pool, goroutine tracker, parallel engine,
-	// and async hook executor. The configuration sets the boot values. A
-	// plugin reading core.GoroutineTunablesProvider can change the pool size,
-	// the parallel ceiling and the async hook queue while the process runs.
-	// Those changes do not persist across a restart.
+	// and async hook executor at their defaults: a 100-worker pool, hooks run
+	// in order, and plugins warm and stop one at a time. A plugin reading
+	// core.GoroutineTunablesProvider can change the pool size, the parallel
+	// engine and the async hook executor from its Start onward. Those changes
+	// do not persist across a restart.
 	//
 	// The executor always has the pool, whether or not it dispatches to it,
-	// so a runtime tunable can turn async hooks on without a restart. It
-	// starts disabled unless both flags ask for it.
-	wpCfg := engine.DefaultWorkerPoolConfig()
-	if cfg.GoroutineEngineEnabled {
-		wpCfg.Size = cfg.GoroutineEnginePoolSize
-	}
-	workerPool := engine.NewWorkerPool(wpCfg)
+	// so a runtime tunable can turn async hooks on without a restart.
+	workerPool := engine.NewWorkerPool(engine.DefaultWorkerPoolConfig())
 	tracker := engine.NewGoroutineTracker(engine.DefaultTrackerConfig())
 	parallel := engine.NewParallelEngine(engine.ParallelConfig{
 		MaxConcurrent: cfg.DBWarmupParallelism,
 		Timeout:       30 * time.Second,
 	})
-	hookCfg := engine.DefaultAsyncHookConfig()
-	if cfg.AsyncHookTimeout > 0 {
-		hookCfg.Timeout = cfg.AsyncHookTimeout
-	}
-	asyncHooks := engine.NewAsyncHookExecutor(workerPool, hookCfg)
-	if err := asyncHooks.SetEnabled(cfg.AsyncHooksEnabled && cfg.GoroutineEngineEnabled); err != nil {
+	// The executor starts enabled when it is handed a pool, so it is switched
+	// off here: hooks run in order unless a plugin turns this on.
+	asyncHooks := engine.NewAsyncHookExecutor(workerPool, engine.DefaultAsyncHookConfig())
+	if err := asyncHooks.SetEnabled(false); err != nil {
 		return fmt.Errorf("async hooks: %w", err)
 	}
 
@@ -738,7 +732,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	warmCacheStart := time.Now()
 	var warmed int
 	var warmErr error
-	if cfg.GoroutineEngineEnabled && parallel.MaxConcurrent() > 1 {
+	if parallel.Lifecycle() && parallel.MaxConcurrent() > 1 {
 		warmed, warmErr = activator.WarmCacheAllParallel(ctx, parallel)
 	} else {
 		warmed, warmErr = activator.WarmCacheAll(ctx)
@@ -1591,7 +1585,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	activatorNeedsStop = false // graceful path owns the stop from here
 	var stopErr error
-	if cfg.GoroutineEngineEnabled && parallel.MaxConcurrent() > 1 {
+	if parallel.Lifecycle() && parallel.MaxConcurrent() > 1 {
 		stopErr = activator.StopParallel(pluginCtx, parallel)
 	} else {
 		stopErr = activator.Stop(pluginCtx)

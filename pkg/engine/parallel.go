@@ -44,9 +44,20 @@ var ErrInvalidParallelConfig = errors.New("parallel config out of bounds: max_co
 // through Reconfigure while fan-outs run. A fan-out already in flight sees the new ceiling on
 // its next acquire and the new deadline on its next item.
 type ParallelEngine struct {
-	sem     *semaphore
-	timeout atomic.Int64 // nanoseconds. Zero means no per-item deadline
+	sem       *semaphore
+	timeout   atomic.Int64 // nanoseconds. Zero means no per-item deadline
+	lifecycle atomic.Bool
 }
+
+// Lifecycle reports whether the engine warms plugin caches and stops plugins
+// through this fan-out. It starts off, so a plugin warms and stops one at a
+// time unless something running in the process turns it on.
+func (e *ParallelEngine) Lifecycle() bool { return e.lifecycle.Load() }
+
+// SetLifecycle switches the parallel cache warmup and plugin stop on or off.
+// The warmup reads it once, after every plugin has started, and the stop
+// reads it at shutdown.
+func (e *ParallelEngine) SetLifecycle(on bool) { e.lifecycle.Store(on) }
 
 // MaxConcurrent returns the configured maximum concurrency.
 func (e *ParallelEngine) MaxConcurrent() int { return e.sem.Limit() }
