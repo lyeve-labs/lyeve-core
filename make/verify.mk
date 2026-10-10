@@ -22,7 +22,7 @@ lint-go: ## Check gofmt, vet and golangci-lint on the root module
 		echo "$(YELLOW)gofmt needed on:$(RESET)"; echo "$$unformatted"; \
 		echo "run: make tidy"; exit 1; \
 	fi
-	@command -v golangci-lint >/dev/null || (echo "$(YELLOW)golangci-lint not found - install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2$(RESET)" && exit 1)
+	@command -v golangci-lint >/dev/null || (echo "$(YELLOW)golangci-lint not found - install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0$(RESET)" && exit 1)
 	go vet ./...
 	golangci-lint run ./...
 
@@ -34,7 +34,7 @@ lint-go-release: ## Check gofmt, vet and golangci-lint on cmd/lyeve (needs modul
 	if [ -n "$$unformatted" ]; then \
 		echo "$(YELLOW)gofmt needed on:$(RESET)"; echo "$$unformatted"; exit 1; \
 	fi
-	@command -v golangci-lint >/dev/null || (echo "$(YELLOW)golangci-lint not found - install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2$(RESET)" && exit 1)
+	@command -v golangci-lint >/dev/null || (echo "$(YELLOW)golangci-lint not found - install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0$(RESET)" && exit 1)
 	cd $(RELEASE_DIR) && go vet ./... && golangci-lint run ./...
 
 tidy: ## Tidy Go modules and format Go code

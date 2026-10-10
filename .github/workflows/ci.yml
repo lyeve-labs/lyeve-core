@@ -212,7 +212,7 @@ jobs:
           # finding to show for it. Retrying that combined command would also re-run
           # the lint after a real finding.
           for attempt in 1 2 3; do
-            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2 && break
+            go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0 && break
             echo "golangci-lint install attempt $attempt failed"
             [ "$attempt" = 3 ] && exit 1
             sleep $((attempt * 15))
