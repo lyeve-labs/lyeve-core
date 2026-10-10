@@ -305,15 +305,6 @@ type Config struct {
 	BackpressureTenantQuotaPct        float64 // BACKPRESSURE_TENANT_QUOTA_PCT: fraction of max inflight per tenant (default 0.4)
 	BackpressurePoolPressureThreshold float64 // BACKPRESSURE_POOL_PRESSURE_THRESHOLD: InUse/MaxOpen (default 0.85)
 
-	// Goroutine Engine enables centralized worker pools and async hooks.
-	// GOROUTINE_ENGINE_ENABLED applies GOROUTINE_ENGINE_POOL_SIZE to the worker
-	// pool, warms plugin caches in parallel, and lets ASYNC_HOOKS_ENABLED turn
-	// async hooks on.
-	GoroutineEngineEnabled  bool          // GOROUTINE_ENGINE_ENABLED (default false)
-	GoroutineEnginePoolSize int           // GOROUTINE_ENGINE_POOL_SIZE (default 100)
-	AsyncHooksEnabled       bool          // ASYNC_HOOKS_ENABLED (default false)
-	AsyncHookTimeout        time.Duration // ASYNC_HOOK_TIMEOUT (default 5s)
-
 	// MemoryLimitBytes is the container memory limit for GOMEMLIMIT tuning.
 	// Auto-detected from cgroup when unset. Falls back to 0 (no soft limit).
 	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (auto-detected from cgroup)

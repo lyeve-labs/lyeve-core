@@ -293,29 +293,6 @@ func LoadFrom(path string) (*Config, error) {
 		backpressurePoolPressureThreshold = n
 	}
 
-	// Goroutine engine enables centralized worker pools and async hooks.
-	goroutineEngineEnabled := envBool("GOROUTINE_ENGINE_ENABLED", false)
-	goroutineEnginePoolSize := 100
-	if v := lookup("GOROUTINE_ENGINE_POOL_SIZE"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return nil, fmt.Errorf("GOROUTINE_ENGINE_POOL_SIZE must be a number: %w", err)
-		}
-		if n <= 0 {
-			return nil, fmt.Errorf("GOROUTINE_ENGINE_POOL_SIZE must be positive, got %d", n)
-		}
-		goroutineEnginePoolSize = n
-	}
-	asyncHooksEnabled := envBool("ASYNC_HOOKS_ENABLED", false)
-	asyncHookTimeout := 5 * time.Second
-	if v := lookup("ASYNC_HOOK_TIMEOUT"); v != "" {
-		d, err := time.ParseDuration(v)
-		if err != nil {
-			return nil, fmt.Errorf("ASYNC_HOOK_TIMEOUT must be a duration: %w", err)
-		}
-		asyncHookTimeout = d
-	}
-
 	// Memory limit: try cgroup v2 first, then env var.
 	var memoryLimitBytes int64
 	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
@@ -662,10 +639,6 @@ func LoadFrom(path string) (*Config, error) {
 		BackpressureMaxInflight:           backpressureMaxInflight,
 		BackpressureTenantQuotaPct:        backpressureTenantQuotaPct,
 		BackpressurePoolPressureThreshold: backpressurePoolPressureThreshold,
-		GoroutineEngineEnabled:            goroutineEngineEnabled,
-		GoroutineEnginePoolSize:           goroutineEnginePoolSize,
-		AsyncHooksEnabled:                 asyncHooksEnabled,
-		AsyncHookTimeout:                  asyncHookTimeout,
 		MemoryLimitBytes:                  memoryLimitBytes,
 		CPUQuota:                          cpuQuota,
 		DBWarmupParallelism:               dbWarmupParallelism,
