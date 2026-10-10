@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.0] - 2026-10-10
+
+### Added
+
+- `core.ContentReader`: a plugin reads a schema's generated content table one page at a time, every status included, ordered by id, through `ContentPage`. The engine host implements it and `ScopedHost` forwards it.
+
+### Fixed
+
+- Entries created, edited or deleted through the Content API, GraphQL or gRPC appear in the admin console, through the content plugin release this engine pins.
+
 ## [0.53.0] - 2026-10-10
 
 ### Security
