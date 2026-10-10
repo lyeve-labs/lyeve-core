@@ -6,7 +6,7 @@ module github.com/lyeve-labs/lyeve-core/cmd/lyeve
 
 // No toolchain directive: go mod tidy removes one that equals the go
 // directive below, so declaring it leaves this file permanently untidy.
-go 1.27.1
+go 1.27.2
 
 // Resolved from checkouts beside this repository. A go.work file can pin the
 // same paths.

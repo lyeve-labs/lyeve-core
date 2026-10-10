@@ -44,9 +44,20 @@ var ErrInvalidParallelConfig = errors.New("parallel config out of bounds: max_co
 // through Reconfigure while fan-outs run. A fan-out already in flight sees the new ceiling on
 // its next acquire and the new deadline on its next item.
 type ParallelEngine struct {
-	sem     *semaphore
-	timeout atomic.Int64 // nanoseconds. Zero means no per-item deadline
+	sem       *semaphore
+	timeout   atomic.Int64 // nanoseconds. Zero means no per-item deadline
+	lifecycle atomic.Bool
 }
+
+// Lifecycle reports whether the engine warms plugin caches and stops plugins
+// through this fan-out. It starts off, so a plugin warms and stops one at a
+// time unless something running in the process turns it on.
+func (e *ParallelEngine) Lifecycle() bool { return e.lifecycle.Load() }
+
+// SetLifecycle switches the parallel cache warmup and plugin stop on or off.
+// The warmup reads it once, after every plugin has started, and the stop
+// reads it at shutdown.
+func (e *ParallelEngine) SetLifecycle(on bool) { e.lifecycle.Store(on) }
 
 // MaxConcurrent returns the configured maximum concurrency.
 func (e *ParallelEngine) MaxConcurrent() int { return e.sem.Limit() }
@@ -112,7 +123,7 @@ func (e *ParallelEngine) FanOut(ctx context.Context, items []any, fn func(contex
 		idx := i
 		it := item
 		wg.Add(1)
-		go func() {
+		GoSafe("parallel-map-task", func() {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
@@ -139,7 +150,7 @@ func (e *ParallelEngine) FanOut(ctx context.Context, items []any, fn func(contex
 			if err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -169,7 +180,7 @@ func (e *ParallelEngine) FanOutVoid(ctx context.Context, items []any, fn func(co
 		idx := i
 		it := item
 		wg.Add(1)
-		go func() {
+		GoSafe("parallel-each-task", func() {
 			defer wg.Done()
 			defer func() {
 				if r := recover(); r != nil {
@@ -190,7 +201,7 @@ func (e *ParallelEngine) FanOutVoid(ctx context.Context, items []any, fn func(co
 			}
 
 			_ = fn(taskCtx, it, idx) // err intentionally discarded. Errors are logged by caller
-		}()
+		})
 	}
 	wg.Wait()
 }

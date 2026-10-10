@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
 	"strconv"
 	"strings"
@@ -106,7 +107,7 @@ func newPublicEndpointRateLimiterWithConfig(cfg PublicEndpointRateLimiterConfig)
 	if cfg.CleanupInterval > 0 {
 		cleanupCtx, cleanupCancel := context.WithCancel(context.Background())
 		l.stopCleanup = cleanupCancel
-		go l.cleanupLoop(cleanupCtx)
+		engine.GoSafe("public-rate-limit-cleanup", func() { l.cleanupLoop(cleanupCtx) })
 	}
 
 	return l

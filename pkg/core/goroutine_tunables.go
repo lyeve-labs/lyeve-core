@@ -78,6 +78,9 @@ type GoroutinePoolView struct {
 type GoroutineParallelView struct {
 	MaxConcurrent int    `json:"max_concurrent"`
 	Timeout       string `json:"timeout"`
+	// Lifecycle is whether plugin caches warm and plugins stop through the
+	// parallel engine rather than one at a time.
+	Lifecycle bool `json:"lifecycle"`
 }
 
 // GoroutineParallelSettings is a change to the parallel engine. A zero
@@ -85,6 +88,16 @@ type GoroutineParallelView struct {
 type GoroutineParallelSettings struct {
 	MaxConcurrent int
 	Timeout       time.Duration
+}
+
+// ParallelLifecycleSetter is implemented by the tunables the engine host
+// returns. It is a role of its own rather than a method of
+// GoroutineTunables, so a plugin built against an engine without it still
+// compiles and learns by type assertion that the switch is not there.
+type ParallelLifecycleSetter interface {
+	// SetParallelLifecycle decides whether plugin caches warm and plugins
+	// stop through the parallel engine rather than one at a time.
+	SetParallelLifecycle(on bool) (GoroutineParallelView, error)
 }
 
 // AsyncHookView is the async hook executor as its status route answers it.
@@ -128,6 +141,8 @@ func NewGoroutineTunables(sh ScalingHost) GoroutineTunables {
 type scalingTunables struct {
 	sh ScalingHost
 }
+
+var _ ParallelLifecycleSetter = scalingTunables{}
 
 func (t scalingTunables) GoroutineStatus() (GoroutineSnapshot, bool) {
 	if t.sh == nil || t.sh.GoroutineTracker() == nil {
@@ -174,6 +189,7 @@ func parallelView(pe *engine.ParallelEngine) GoroutineParallelView {
 	return GoroutineParallelView{
 		MaxConcurrent: pe.MaxConcurrent(),
 		Timeout:       pe.Timeout().String(),
+		Lifecycle:     pe.Lifecycle(),
 	}
 }
 
@@ -242,6 +258,15 @@ func (t scalingTunables) SetParallelConfig(s GoroutineParallelSettings) (Gorouti
 	if err := pe.Reconfigure(cfg); err != nil {
 		return GoroutineParallelView{}, err
 	}
+	return parallelView(pe), nil
+}
+
+func (t scalingTunables) SetParallelLifecycle(on bool) (GoroutineParallelView, error) {
+	pe := t.parallel()
+	if pe == nil {
+		return GoroutineParallelView{}, ErrScalingPrimitiveMissing
+	}
+	pe.SetLifecycle(on)
 	return parallelView(pe), nil
 }
 

@@ -92,7 +92,7 @@ func runStateless(ctx context.Context, cfg *config.Config, opts Options, blog *b
 	mgr.Start(ctx)
 
 	metrics.Init()
-	hostBase := enginehost.NewHost(db.NoDatabase(), nil, cfg, hookRegistry, opts.ServiceName)
+	hostBase := enginehost.NewHost(db.NoDatabase(), nil, cfg, hookRegistry, opts.Version)
 	wireStatelessHost(hostBase, cfg, mgr, blog, scaling)
 
 	activator := plugin.NewActivator(hostBase, logger)

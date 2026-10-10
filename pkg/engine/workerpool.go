@@ -136,11 +136,11 @@ func (p *WorkerPool) submit(ctx context.Context, fn func(context.Context) error)
 	p.wg.Add(1)
 	p.mu.Unlock()
 
-	go func() {
+	GoSafe("workerpool-dispatch", func() {
 		defer p.wg.Done()
 		defer close(settled)
 		p.dispatch(ctx, fn)
-	}()
+	})
 	return settled, true
 }
 
@@ -201,12 +201,12 @@ func (p *WorkerPool) SubmitBatch(ctx context.Context, items []any, fn func(conte
 		idx := i
 		it := item
 		wg.Add(1)
-		go func() {
+		GoSafe("workerpool-batch-submit", func() {
 			defer wg.Done()
 			errs[idx] = p.SubmitAndWait(ctx, func(taskCtx context.Context) error {
 				return fn(taskCtx, it, idx)
 			})
-		}()
+		})
 	}
 	wg.Wait()
 	return errs
@@ -278,10 +278,10 @@ func (p *WorkerPool) ShutdownWithin(timeout time.Duration) bool {
 	p.mu.Unlock()
 
 	drained := make(chan struct{})
-	go func() {
+	GoSafe("workerpool-drain-wait", func() {
 		p.wg.Wait()
 		close(drained)
-	}()
+	})
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {

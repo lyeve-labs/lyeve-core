@@ -39,27 +39,31 @@ bench-baseline: ## Run benchmarks 5x and save as baseline (creates bench-results
 	ln -sf "$$(basename "$$OUT")" bench-results/latest.txt && \
 	echo "benchmarks saved: $$OUT ($$(wc -l < "$$OUT") lines)"
 
-# Ensure benchstat is installed (auto-installs if missing)
-BENCHSTAT := $(shell go env GOPATH)/bin/benchstat
+# Ensure benchstat is installed (auto-installs if missing). go install writes
+# to GOBIN when it is set, which a version manager usually does, and to
+# GOPATH/bin otherwise.
+BENCHSTAT := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)/benchstat
 $(BENCHSTAT):
 	go install golang.org/x/perf/cmd/benchstat@latest
 
-bench-compare: $(BENCHSTAT) ## Compare latest benchmarks against baseline (requires benchstat)
+bench-compare: $(BENCHSTAT) ## Compare the run latest.txt points at against the run before it (requires benchstat)
 	@LATEST=$$(readlink -f bench-results/latest.txt 2>/dev/null || true); \
 	if [ -z "$$LATEST" ] || [ ! -f "$$LATEST" ]; then \
-		echo "No baseline - run 'make bench-baseline' first"; \
+		echo "No baseline, run 'make bench-baseline' first"; \
 		exit 1; \
 	fi; \
-	PREV=$$(ls -t bench-results/*.txt 2>/dev/null | grep -v latest | head -1 || true); \
+	PREV=""; \
+	for f in $$(ls -t bench-results/*.txt 2>/dev/null); do \
+		[ "$$(basename "$$f")" = latest.txt ] && continue; \
+		[ "$$(readlink -f "$$f")" = "$$LATEST" ] && continue; \
+		PREV=$$(readlink -f "$$f"); break; \
+	done; \
 	if [ -z "$$PREV" ]; then \
-		echo "=== Latest run ==="; \
-		benchstat "$$LATEST"; \
-	elif [ "$$PREV" = "$$LATEST" ]; then \
-		echo "Only one run available - run again to compare"; \
-		benchstat "$$LATEST"; \
+		echo "Only one run available, run 'make bench-baseline' again to compare"; \
+		cd bench-results && $(BENCHSTAT) "$$(basename "$$LATEST")"; \
 	else \
 		echo "=== benchstat: $$(basename "$$PREV") vs $$(basename "$$LATEST") ==="; \
-		benchstat "$$PREV" "$$LATEST"; \
+		cd bench-results && $(BENCHSTAT) "$$(basename "$$PREV")" "$$(basename "$$LATEST")"; \
 	fi
 
 bench-perf-budget: ## Run endpoint performance budget tests (requires Docker)

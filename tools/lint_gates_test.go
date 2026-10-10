@@ -724,3 +724,66 @@ func TestLintMySQLIndexGuard(t *testing.T) {
 		}
 	})
 }
+
+// TestLintBareGoroutines verifies that lint-bare-goroutines.sh passes the
+// repository, fails a go statement that is not marked, and accepts the marker
+// only with a reason.
+func TestLintBareGoroutines(t *testing.T) {
+	t.Parallel()
+
+	script := lintScript(t, "lint-bare-goroutines.sh")
+
+	run := func(t *testing.T, source string) ([]byte, error) {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "spawn.go"), []byte(source), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		return exec.Command("bash", script, dir).CombinedOutput()
+	}
+
+	t.Run("repository_passes", func(t *testing.T) {
+		out, err := exec.Command("bash", script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected every engine goroutine to recover, got: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("bare_go_caught", func(t *testing.T) {
+		out, err := run(t, "package x\n\nfunc start() {\n\tgo func() {}()\n}\n")
+		if err == nil {
+			t.Fatalf("expected a bare go statement to fail, got exit 0:\n%s", out)
+		}
+		if !strings.Contains(string(out), "spawn.go:4 starts a goroutine with no recovery") {
+			t.Errorf("expected the file and line to be named, got:\n%s", out)
+		}
+	})
+
+	t.Run("marker_with_reason_accepted", func(t *testing.T) {
+		out, err := run(t, "package x\n\nfunc start() {\n\t// lyeve:bare-goroutine the server must take the process down with it\n\tgo func() {}()\n}\n")
+		if err != nil {
+			t.Fatalf("expected the marker to exempt the statement, got: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("marker_without_reason_caught", func(t *testing.T) {
+		out, err := run(t, "package x\n\nfunc start() {\n\tgo func() {}() // lyeve:bare-goroutine\n}\n")
+		if err == nil {
+			t.Fatalf("expected a marker with no reason to fail, got exit 0:\n%s", out)
+		}
+	})
+
+	t.Run("test_files_skipped", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "spawn.go"), []byte("package x\n"), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "spawn_test.go"), []byte("package x\n\nfunc spawn() { go func() {}() }\n"), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		out, err := exec.Command("bash", script, dir).CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected a test file to be skipped, got: %v\n%s", err, out)
+		}
+	})
+}

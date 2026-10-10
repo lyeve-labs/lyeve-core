@@ -85,7 +85,7 @@ func NewGoroutineTracker(cfg TrackerConfig) *GoroutineTracker {
 		},
 		owner: OwnerEngine,
 	}
-	go t.monitorLoop()
+	GoSafe("tracker-monitor", t.monitorLoop)
 	return t
 }
 
@@ -120,7 +120,7 @@ func (t *GoroutineTracker) Go(name string, fn TrackedFunc) int64 {
 	t.mu.Unlock()
 
 	t.wg.Add(1)
-	go func() {
+	GoSafe("tracker-goroutine", func() {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("tracked goroutine panicked",
@@ -132,7 +132,7 @@ func (t *GoroutineTracker) Go(name string, fn TrackedFunc) int64 {
 			t.wg.Done()
 		}()
 		fn(t.ctx)
-	}()
+	})
 	return id
 }
 
@@ -140,10 +140,10 @@ func (t *GoroutineTracker) Go(name string, fn TrackedFunc) int64 {
 // canceling the tracker context (via Shutdown).
 func (t *GoroutineTracker) Wait(timeout time.Duration) error {
 	done := make(chan struct{})
-	go func() {
+	GoSafe("tracker-wait", func() {
 		t.wg.Wait()
 		close(done)
-	}()
+	})
 	select {
 	case <-done:
 		return nil

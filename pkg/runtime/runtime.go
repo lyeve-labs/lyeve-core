@@ -160,7 +160,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Derive the master KEK while the database connects. The derivation is
 	// cached per key, so the first KeyStore a plugin builds finds it ready
 	// instead of spending its start level on it.
-	go func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) }()
+	engine.GoSafe("runtime-kek-warmup", func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) })
 
 	// GOMEMLIMIT + GC tuning
 	// Set a soft memory cap at 85% of the container limit so Go's GC triggers
@@ -187,30 +187,24 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// Goroutine Concurrency Engine
 	// Initialize centralized worker pool, goroutine tracker, parallel engine,
-	// and async hook executor. The configuration sets the boot values. A
-	// plugin reading core.GoroutineTunablesProvider can change the pool size,
-	// the parallel ceiling and the async hook queue while the process runs.
-	// Those changes do not persist across a restart.
+	// and async hook executor at their defaults: a 100-worker pool, hooks run
+	// in order, and plugins warm and stop one at a time. A plugin reading
+	// core.GoroutineTunablesProvider can change the pool size, the parallel
+	// engine and the async hook executor from its Start onward. Those changes
+	// do not persist across a restart.
 	//
 	// The executor always has the pool, whether or not it dispatches to it,
-	// so a runtime tunable can turn async hooks on without a restart. It
-	// starts disabled unless both flags ask for it.
-	wpCfg := engine.DefaultWorkerPoolConfig()
-	if cfg.GoroutineEngineEnabled {
-		wpCfg.Size = cfg.GoroutineEnginePoolSize
-	}
-	workerPool := engine.NewWorkerPool(wpCfg)
+	// so a runtime tunable can turn async hooks on without a restart.
+	workerPool := engine.NewWorkerPool(engine.DefaultWorkerPoolConfig())
 	tracker := engine.NewGoroutineTracker(engine.DefaultTrackerConfig())
 	parallel := engine.NewParallelEngine(engine.ParallelConfig{
 		MaxConcurrent: cfg.DBWarmupParallelism,
 		Timeout:       30 * time.Second,
 	})
-	hookCfg := engine.DefaultAsyncHookConfig()
-	if cfg.AsyncHookTimeout > 0 {
-		hookCfg.Timeout = cfg.AsyncHookTimeout
-	}
-	asyncHooks := engine.NewAsyncHookExecutor(workerPool, hookCfg)
-	if err := asyncHooks.SetEnabled(cfg.AsyncHooksEnabled && cfg.GoroutineEngineEnabled); err != nil {
+	// The executor starts enabled when it is handed a pool, so it is switched
+	// off here: hooks run in order unless a plugin turns this on.
+	asyncHooks := engine.NewAsyncHookExecutor(workerPool, engine.DefaultAsyncHookConfig())
+	if err := asyncHooks.SetEnabled(false); err != nil {
 		return fmt.Errorf("async hooks: %w", err)
 	}
 
@@ -486,7 +480,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Engine host
 	// The engine host is the single concrete core.Host backing every
 	// in-process plugin.
-	hostBase := enginehost.NewHost(pool, rawDB, cfg, hookRegistry, opts.ServiceName)
+	hostBase := enginehost.NewHost(pool, rawDB, cfg, hookRegistry, opts.Version)
 	if rawDB != nil {
 		attachSessionPools(context.Background(), hostBase, pool.Engine(), cfg.DatabaseURL, logger)
 	}
@@ -692,7 +686,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			)
 		} else {
 			unScoped = append(unScoped, e.Name)
-			logger.Warn("plugin registered without explicit capabilities runs with none: it must declare them with RegisterPluginWithCaps",
+			logger.Warn("plugin has no capability grant and runs with none: neither the host capability policy nor RegisterPluginWithCaps names it",
 				"plugin", e.Name,
 				"caps", "none",
 			)
@@ -701,7 +695,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// Strict mode: fail boot when any plugin lacks explicit caps.
 	if cfg.PluginCapsStrictMode && len(unScoped) > 0 {
-		return fmt.Errorf("PLUGIN_CAPS_STRICT_MODE is enabled but %d plugin(s) are registered without explicit capabilities: %s",
+		return fmt.Errorf("PLUGIN_CAPS_STRICT_MODE is enabled but %d plugin(s) have no capability grant from the host policy or their own declaration: %s",
 			len(unScoped), strings.Join(unScoped, ", "))
 	}
 
@@ -738,7 +732,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	warmCacheStart := time.Now()
 	var warmed int
 	var warmErr error
-	if cfg.GoroutineEngineEnabled && parallel.MaxConcurrent() > 1 {
+	if parallel.Lifecycle() && parallel.MaxConcurrent() > 1 {
 		warmed, warmErr = activator.WarmCacheAllParallel(ctx, parallel)
 	} else {
 		warmed, warmErr = activator.WarmCacheAll(ctx)
@@ -1464,6 +1458,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
+	// A panic recovered here would leave the process running with no
+	// listener, which reads as healthy to anything but a request. Ending the
+	// process lets its supervisor restart it.
+	// lyeve:bare-goroutine the server must take the process down with it
 	go func() {
 		logger.Info("admin server listening", "addr", cfg.AdminListenAddr, "tls", listenerTLS != nil)
 		if err := serve(adminSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -1486,6 +1484,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
+	// lyeve:bare-goroutine the server must take the process down with it, as above
 	go func() {
 		logger.Info("api server listening", "addr", cfg.APIListenAddr, "instance_id", cfg.InstanceID, "tls", listenerTLS != nil)
 		if err := serve(apiSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -1496,7 +1495,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Open the readiness gate as soon as the probes pass. The gate's own
 	// timeout is the backstop for a probe that never does, and past it
 	// the probe is left to /startup and /readyz.
-	go func() {
+	engine.GoSafe("runtime-readiness-log", func() {
 		listening := time.Now()
 		awaitCtx, cancel := context.WithTimeout(ctx, readinessGateTimeout)
 		defer cancel()
@@ -1505,7 +1504,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 				"boot_ms", time.Since(runStarted).Milliseconds(),
 				"after_listen_ms", time.Since(listening).Milliseconds())
 		}
-	}()
+	})
 
 	// Graceful shutdown
 	//
@@ -1586,7 +1585,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	activatorNeedsStop = false // graceful path owns the stop from here
 	var stopErr error
-	if cfg.GoroutineEngineEnabled && parallel.MaxConcurrent() > 1 {
+	if parallel.Lifecycle() && parallel.MaxConcurrent() > 1 {
 		stopErr = activator.StopParallel(pluginCtx, parallel)
 	} else {
 		stopErr = activator.Stop(pluginCtx)

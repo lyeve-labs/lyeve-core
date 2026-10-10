@@ -29,6 +29,8 @@ import (
 	// Aliased: the stdlib "plugin" above owns the unqualified name here, and
 	// this package is only needed for the factory registry.
 	pluginreg "github.com/lyeve-labs/lyeve-core/pkg/plugin"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // WatchHotReload runs the fsnotify-powered plugin hot-reload loop.
@@ -85,7 +87,7 @@ func WatchHotReload(ctx context.Context, activator Activator, cfg Config) error 
 	trigger := make(chan string, 10) // carries plugin name
 
 	// Debounce goroutine: when a plugin has been quiet for debounce, fire it.
-	go func() {
+	engine.GoSafe("hotreload-debounce", func() {
 		ticker := time.NewTicker(debounce / 4)
 		defer ticker.Stop()
 		for {
@@ -107,10 +109,10 @@ func WatchHotReload(ctx context.Context, activator Activator, cfg Config) error 
 				})
 			}
 		}
-	}()
+	})
 
 	// Rebuild goroutine: drains trigger channel and rebuilds.
-	go func() {
+	engine.GoSafe("hotreload-rebuild", func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -127,7 +129,7 @@ func WatchHotReload(ctx context.Context, activator Activator, cfg Config) error 
 				}
 			}
 		}
-	}()
+	})
 
 	for {
 		select {
