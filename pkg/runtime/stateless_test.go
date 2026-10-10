@@ -41,6 +41,7 @@ type relayPlugin struct {
 	capable  bool
 	queryErr error
 	declared int
+	version  string
 }
 
 func (p *relayPlugin) Name() string           { return p.name }
@@ -52,6 +53,7 @@ func (p *relayPlugin) Start(ctx context.Context, host core.Host) error {
 	var n int
 	row, _ := host.Querier(ctx).QueryRow(ctx, "SELECT 1")
 	p.queryErr = row.Scan(&n)
+	p.version = host.Version()
 	if !core.IsStateless(host.Config()) {
 		return errors.New("the host does not tell a plugin it is stateless")
 	}
@@ -142,7 +144,7 @@ webhooks:
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- RunWithOptions(ctx, Options{}) }()
+	go func() { done <- RunWithOptions(ctx, Options{Version: "v9.8.7"}) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -258,6 +260,9 @@ webhooks:
 	})
 	t.Run("a plugin reads its declared resources through the host", func(t *testing.T) {
 		assert.Equal(t, 1, relay.declared)
+	})
+	t.Run("a plugin reads the build version, not the service name", func(t *testing.T) {
+		assert.Equal(t, "v9.8.7", relay.version)
 	})
 	t.Run("there is no login", func(t *testing.T) {
 		code, _ := get("/api/admin/auth/me", operatorKey)
