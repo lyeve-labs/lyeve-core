@@ -486,7 +486,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Engine host
 	// The engine host is the single concrete core.Host backing every
 	// in-process plugin.
-	hostBase := enginehost.NewHost(pool, rawDB, cfg, hookRegistry, opts.ServiceName)
+	hostBase := enginehost.NewHost(pool, rawDB, cfg, hookRegistry, opts.Version)
 	if rawDB != nil {
 		attachSessionPools(context.Background(), hostBase, pool.Engine(), cfg.DatabaseURL, logger)
 	}
@@ -692,7 +692,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			)
 		} else {
 			unScoped = append(unScoped, e.Name)
-			logger.Warn("plugin registered without explicit capabilities runs with none: it must declare them with RegisterPluginWithCaps",
+			logger.Warn("plugin has no capability grant and runs with none: neither the host capability policy nor RegisterPluginWithCaps names it",
 				"plugin", e.Name,
 				"caps", "none",
 			)
@@ -701,7 +701,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// Strict mode: fail boot when any plugin lacks explicit caps.
 	if cfg.PluginCapsStrictMode && len(unScoped) > 0 {
-		return fmt.Errorf("PLUGIN_CAPS_STRICT_MODE is enabled but %d plugin(s) are registered without explicit capabilities: %s",
+		return fmt.Errorf("PLUGIN_CAPS_STRICT_MODE is enabled but %d plugin(s) have no capability grant from the host policy or their own declaration: %s",
 			len(unScoped), strings.Join(unScoped, ", "))
 	}
 
