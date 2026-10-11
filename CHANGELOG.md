@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.54.1] - 2026-10-11
+
+### Fixed
+
+- The admin console no longer reads a content type's whole table again after every engine restart, through the content plugin release this engine pins. Picking up entries written through the Content API, GraphQL, gRPC or a bulk import stores its progress, runs once per content type, and spends at most two seconds per list. Entries a flow writes through its content node appear in the console as soon as they are written.
+
 ## [0.54.0] - 2026-10-10
 
 ### Added
