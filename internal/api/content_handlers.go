@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/bytedance/sonic"
 	"github.com/go-chi/chi/v5"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
@@ -514,8 +515,12 @@ func httpStatus(err error) int {
 
 // etagFor computes a weak ETag from the JSON representation of v.
 // Returns a string of the form `W/"<hex>"`.
+//
+// The encoding sorts map keys. An entry's fields are a map, and the fast
+// encoder writes a map in Go's random iteration order, so the same entry
+// hashed to a different tag on each read and If-None-Match never matched.
 func etagFor(v any) string {
-	b, err := jsonpool.MarshalJSON(v)
+	b, err := sonic.ConfigStd.Marshal(v)
 	if err != nil {
 		return ""
 	}
