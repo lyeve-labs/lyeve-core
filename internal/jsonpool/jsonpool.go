@@ -42,7 +42,7 @@ func Buffer(buf *bytes.Buffer) {
 func MarshalJSON(v any) ([]byte, error) {
 	buf := GetBuffer()
 	defer Buffer(buf)
-	encoder := sonic.ConfigFastest.NewEncoder(buf)
+	encoder := encoding.NewEncoder(buf)
 	if err := encoder.Encode(v); err != nil {
 		return nil, err
 	}
