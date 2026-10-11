@@ -4,6 +4,10 @@
 # linux/arm64) and pushes ghcr.io/lyeve-labs/lyeve-core with three tags:
 #   X.Y.Z (immutable), X.Y (rolling minor) and latest
 #
+# A release candidate tag, `vX.Y.Z-rc.N`, runs the same suite and the same
+# build and publishes one tag, X.Y.Z-rc.N. It never moves X.Y or latest.
+# .github/scripts/image-tags.sh holds both rules and refuses any other tag.
+#
 # The image tags carry no `v`: the tag step strips it (${RELEASE_REF#v}),
 # so the git tag v0.22.0 publishes as :0.22.0. A `v`-prefixed image tag does
 # not exist.
@@ -42,7 +46,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing vX.Y.Z tag to (re)build and publish'
+        description: 'Existing vX.Y.Z or vX.Y.Z-rc.N tag to (re)build and publish'
         required: true
         type: string
 
@@ -105,15 +109,16 @@ jobs:
           persist-credentials: false
 
       # A dispatch input is free-form. A bad tag would otherwise build under a
-      # nonsense version. Fail fast unless it is a real vX.Y.Z on this repo.
+      # nonsense version. Fail fast unless it is a real vX.Y.Z or vX.Y.Z-rc.N
+      # tag on this repo.
       - name: Validate release ref
         working-directory: lyeve-core
         run: |
           set -euo pipefail
-          case "${RELEASE_REF}" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::RELEASE_REF '${RELEASE_REF}' is not a vX.Y.Z tag"; exit 1 ;;
-          esac
+          if ! bash .github/scripts/image-tags.sh "${RELEASE_REF}" >/dev/null; then
+            echo "::error::RELEASE_REF '${RELEASE_REF}' is not a vX.Y.Z or vX.Y.Z-rc.N tag"
+            exit 1
+          fi
           if ! git rev-parse -q --verify "refs/tags/${RELEASE_REF}" >/dev/null; then
             echo "::error::tag ${RELEASE_REF} does not exist in this repo"
             exit 1
@@ -269,15 +274,19 @@ jobs:
             echo "::endgroup::"
           done
 
-      # refs/tags/v1.2.3 -> 1.2.3, 1.2 and latest, all in shell with no REST API.
+      # v1.2.3 -> 1.2.3, 1.2 and latest. v1.2.3-rc.1 -> 1.2.3-rc.1 alone.
+      # All in shell with no REST API.
       - name: Create manifest list & push tags
         working-directory: ${{ runner.temp }}/digests
         run: |
+          set -euo pipefail
           ver="${RELEASE_REF#v}"
-          minor="${ver%.*}"
           img="${REGISTRY}/${IMAGE_NAME}"
-          docker buildx imagetools create \
-            -t "${img}:${ver}" -t "${img}:${minor}" -t "${img}:latest" \
+          args=()
+          while read -r t; do args+=(-t "${img}:${t}"); done \
+            < <(bash "${GITHUB_WORKSPACE}/lyeve-core/.github/scripts/image-tags.sh" "${RELEASE_REF}")
+          echo "Publishing: ${args[*]}"
+          docker buildx imagetools create "${args[@]}" \
             $(printf "${img}@sha256:%s " *)
           docker buildx imagetools inspect "${img}:${ver}"
 
