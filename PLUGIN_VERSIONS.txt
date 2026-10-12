@@ -15,24 +15,24 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-10-10T21:23:06Z from origin default branches.
+# Generated 2026-10-12T07:29:55Z from origin default branches.
 
-lyeve-libs = 50d26333dd3a04d88b66fc467661359f2ad59199
+lyeve-libs = ce0121b3819bf389a52a5603494a1c06a90945f1
 lyeve-plugin-ab-testing = 9cfbead40d7f2d2e65bb0af42a59d007635529fa
 lyeve-plugin-ai = 071d61f679e850bcdbcf5172f0be09bdd0c98297
 lyeve-plugin-analytics = b53919536cc1c797dd93a210a762bfabfbf9b306
 lyeve-plugin-apianalytics = fe6a191730ff6865d2426d097afb092e6f111ea3
 lyeve-plugin-apikey = dc4e8dce5d32ae2bb01286a435112d77dc133596
-lyeve-plugin-audit = 5d8afd3d8ccf7121d0882781d3377eaa3f458988
-lyeve-plugin-bulk-import = 2f084caf008809deb82122e8e8efeb71d1973c8e
-lyeve-plugin-cache = 0eb0b5e87b0918ecf81a440efe824adcd4c434e0
+lyeve-plugin-audit = 974e6203735fa3fced5e6663716997bc51cfdc05
+lyeve-plugin-bulk-import = 6f16b3a9f0a076fa9ea265d8cb955d18c2561389
+lyeve-plugin-cache = e740af75db1a081ab6f47504988d2e5afa47d208
 lyeve-plugin-captcha = 30a1e6f4a1bccce68789f70e0a57af44c077a2a1
 lyeve-plugin-cluster = 16ee5fc8985fd193d7ea111b7dc6a698837b3722
-lyeve-plugin-content = e98229124c77f8f6c19ecdc38c1b73597356055d
+lyeve-plugin-content = 31447502ac242204f9fea76dc7717e1f7079cd25
 lyeve-plugin-cron = d031da5ac4a4f2601e3177100487eff76ed5228f
 lyeve-plugin-data-export = d97bedd3fc03a601559ffef241e523133d19219d
-lyeve-plugin-data-residency = d8983a472d2fbaca692bca5ac91d25b2a790f864
-lyeve-plugin-device-fingerprint = 59456b371a9c51dcfbd6097d14414747e0defd32
+lyeve-plugin-data-residency = 907658ef907bfc9ca4ec07eaa3931fc4b42f496e
+lyeve-plugin-device-fingerprint = e2dac168c709ce08d15d2187371f99780a03d7f7
 lyeve-plugin-email = d3edb0eee383bef2170a3c2e4e671cd462f7520c
 lyeve-plugin-error-tracking = e9388160884c350e9003cf20b5d1a4c3de89a28c
 lyeve-plugin-events = b714c4f3e08de9884234e53ae347058ada7c558c
@@ -41,30 +41,30 @@ lyeve-plugin-goroutine-engine = ca3cbba0b90926257469253c5580692b71a5589a
 lyeve-plugin-graphql = efe44bf367bcc7205f65b3a00734c0465c7c2be2
 lyeve-plugin-grpc = e5dd3e25d3d1b56d499c571e4da8ffd29d139a6d
 lyeve-plugin-idempotency = 223d244eee17e2754bed742d639a1cd11d7a32b8
-lyeve-plugin-localization = 7c0e044d31cab6656607624017a0f54502ed7563
+lyeve-plugin-localization = 78be870e7e9fe281f20c2bad10df05aeb9f03666
 lyeve-plugin-logging = e802101a5c6d6f12fae9dfc10ea9fcdcd0c98ada
 lyeve-plugin-magic-link = d2a4b6bac10577fc43ad33d1dd763ec80645e8d5
-lyeve-plugin-media = d1fc1b2db6c5102b1ba73df6d7358a24b85532f0
+lyeve-plugin-media = 122377ec234a3f9331d6a3762750d7b935519878
 lyeve-plugin-messagebroker = 70a25566136078bbded00c983ca53bcab2d8049f
 lyeve-plugin-mfa = f6dbecaea0afde42e6759be695f51b77f2ca7abc
-lyeve-plugin-multitenant = b46f6b97cc6f41d6acd9445219ea8a7114ba0901
+lyeve-plugin-multitenant = 93245ee9aafc0dd482e295a0c1e55eb4ce26b537
 lyeve-plugin-oauth = beeea5f540badcc6e2266118541724d71e7e3adf
 lyeve-plugin-password-reset = 120beefd107a7062a8af4c266a9a629be48e4aab
 lyeve-plugin-permissions = 071afaa5d218c3dc78a8a9d8f278694eda64482b
-lyeve-plugin-pii-mask = 91fed65b6b4b337838821a4cab2cd1faf8b594c9
-lyeve-plugin-profiler = 90ffd4e5b08ec4b47a6d471ba631006344a9e85e
-lyeve-plugin-query-monitor = 7666019a6a0014bf0a1a19f262a985ad34dedce1
-lyeve-plugin-rate-limit = b2331e2d9165efd7526d82b36a1022c27dc7aed6
+lyeve-plugin-pii-mask = 84655ec932af34409a0e846897aaca55c98dd8ab
+lyeve-plugin-profiler = 2e68de51c5fc7c899070988d3a46a950f642628a
+lyeve-plugin-query-monitor = 68bb1b89459aa45cf2749921d6d7adfc8f0256f8
+lyeve-plugin-rate-limit = 1db91e5f263de09133fde9b008b875899ab77b5a
 lyeve-plugin-realtime = 96c50381ddddb1214550c1ae5665c3743b2e9fba
-lyeve-plugin-recommendations = cc2275e3faa205fcd8a8589ec64bb319375412e0
-lyeve-plugin-request-capture = 072dba388a395bf39aa19f9080280a8dbc692009
+lyeve-plugin-recommendations = 1d09ef84f1e6cfaabb6fb3b3048befd878ebf6ab
+lyeve-plugin-request-capture = 5210387334f203859dbeda9e180e0ede4f5aff1a
 lyeve-plugin-review = bf8d3897d571fa1b82801a895443e932cd2ea2f4
 lyeve-plugin-saml = ae8c2acc9cc43ee247c2f0d4fc69c27286a6835f
 lyeve-plugin-schema = 5219acad0b7dcab45d478c754122ce244d9ca732
-lyeve-plugin-scim = aef8479720329060a5bcfcec0e1453714751fba4
-lyeve-plugin-search = 37f8332d0318d87c7dea9ba5c3a17c7014afb482
+lyeve-plugin-scim = a8c8f2a1214aeb5f1910a2ca6375d107752f402e
+lyeve-plugin-search = 160479692c199349dd472a85ed9382b3aea8eb1f
 lyeve-plugin-storage = bcf7fd6a1d212049d91859528c9e1515bcf8e67c
-lyeve-plugin-synthetic-monitoring = b3d9be9194fdf2f27089112c25c7227f96317ab9
+lyeve-plugin-synthetic-monitoring = 2750e8154a26a82db191a61804b132e09825377e
 lyeve-plugin-telemetry = 43f87716717137583c36210c564dc71848018e50
 lyeve-plugin-usage = b61fcce943137d81439b17a6347a6b81f10a8a46
 lyeve-plugin-waf = 16fc9df6263d158b4cfcafb03255dca6900a3d6d
