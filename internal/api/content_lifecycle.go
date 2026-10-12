@@ -208,6 +208,22 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 // gone quiet.
 const contentStreamHeartbeat = 10 * time.Second
 
+// contentStreamEvents are the writes a change stream sends, one event each.
+// The API document lists the same names, so a client generated from it knows
+// every event the stream can carry.
+var contentStreamEvents = []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete}
+
+// The comment lines a change stream writes: the first line of every stream,
+// a format taking the schema name, and the heartbeat. A comment carries no
+// event, so an EventSource never reports one. The API document quotes both.
+const (
+	contentStreamConnectedComment = ": connected to %s stream"
+	contentStreamHeartbeatComment = ": heartbeat"
+	// contentStreamErrorEvent names the one event the stream sends with an
+	// event field: the last one, saying why the stream stopped.
+	contentStreamErrorEvent = "error"
+)
+
 // streamHeartbeatInterval is the handler's heartbeat, or the default when
 // none was set.
 func (h *ContentHandler) streamHeartbeatInterval() time.Duration {
@@ -293,8 +309,8 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// The copy matters: the event's map is shared with every other
 	// subscriber, and the after-response hooks below delete keys from the map
 	// they are handed.
-	hookIDs := make([]string, 0, 3)
-	for _, et := range []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete} {
+	hookIDs := make([]string, 0, len(contentStreamEvents))
+	for _, et := range contentStreamEvents {
 		id := h.hooks.RegisterDynamic(schemaName, et, func(_ context.Context, ev hooks.Event) error {
 			if ev.TenantID != callerTenant {
 				return nil
@@ -324,7 +340,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		if !deadline.Hold() {
 			return
 		}
-		_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
+		_, _ = fmt.Fprintf(w, "event: "+contentStreamErrorEvent+"\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
 		flusher.Flush()
 	}
 	var expired <-chan time.Time
@@ -333,7 +349,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		defer expiry.Stop()
 		expired = expiry.C
 	}
-	_, _ = fmt.Fprintf(w, ": connected to %s stream\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
+	_, _ = fmt.Fprintf(w, contentStreamConnectedComment+"\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
 	flusher.Flush()
 
 	ticker := time.NewTicker(heartbeat)
@@ -347,7 +363,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if !deadline.Hold() {
 				return
 			}
-			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
+			_, _ = fmt.Fprint(w, contentStreamHeartbeatComment+"\n\n") // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		case <-expired:
 			end(errCredentialEnded)

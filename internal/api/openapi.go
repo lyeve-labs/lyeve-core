@@ -31,6 +31,11 @@ const (
 // adminPathPrefix separates the two halves.
 const adminPathPrefix = "/api/admin"
 
+// prometheusProtobufMediaType is the format the metrics route answers a
+// scraper whose Accept header names it. The Prometheus library negotiates it,
+// and every other request gets the text format.
+const prometheusProtobufMediaType = "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited"
+
 // openAPIHandler returns the OpenAPI 3.1 specification for the CMS API, or
 // the half of it the scope names.
 //
@@ -301,7 +306,16 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			Parameters: []openAPIParameter{
 				{Name: "format", In: "query", Schema: map[string]any{"type": "string", "enum": []any{"yaml", "json"}, "default": "yaml"}},
 			},
-			Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Schema engine unavailable"}},
+			Responses: map[string]any{
+				"200": openAPIResponse{
+					Description: "The bundle: a YAML file to download, or JSON when format is json",
+					Content: map[string]openAPIMediaType{
+						"application/yaml": {Schema: map[string]any{"type": "string"}},
+						"application/json": {Schema: map[string]any{"type": "object"}},
+					},
+				},
+				"401": err401, "503": map[string]any{"description": "Schema engine unavailable"},
+			},
 		},
 	}
 	paths["/api/admin/schemas/import"] = openAPIPath{
@@ -342,7 +356,13 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"get": {Tags: []string{"System"}, Summary: "Readiness probe - is the server ready to serve traffic?", Responses: map[string]any{"200": ok200, "503": map[string]any{"description": "Not ready"}}},
 	}
 	paths["/api/admin/metrics"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "Prometheus metrics", Responses: map[string]any{"200": map[string]any{"description": "Prometheus text format"}}},
+		"get": {Tags: []string{"System"}, Summary: "Prometheus metrics", Responses: map[string]any{"200": openAPIResponse{
+			Description: "The Prometheus text format, version 0.0.4, or the delimited protobuf format when the Accept header asks for it",
+			Content: map[string]openAPIMediaType{
+				"text/plain":                {Schema: map[string]any{"type": "string"}},
+				prometheusProtobufMediaType: {},
+			},
+		}}},
 	}
 	paths["/api/admin/pool/health"] = openAPIPath{
 		"get": {Tags: []string{"Admin / System"}, Summary: "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)", Security: bothAuth, Responses: map[string]any{"200": ok200, "503": map[string]any{"description": "Pool unhealthy"}}},

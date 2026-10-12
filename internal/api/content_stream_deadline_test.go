@@ -163,6 +163,14 @@ func hideTheConnection(next http.Handler) http.Handler {
 // The channel closes when the response ends.
 func openChangeStream(t *testing.T, url string) <-chan string {
 	t.Helper()
+	_, lines := openChangeStreamResponse(t, url)
+	return lines
+}
+
+// openChangeStreamResponse is openChangeStream for a test that also reads the
+// response's headers.
+func openChangeStreamResponse(t *testing.T, url string) (*http.Response, <-chan string) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -183,7 +191,7 @@ func openChangeStream(t *testing.T, url string) <-chan string {
 			}
 		}
 	}()
-	return lines
+	return resp, lines
 }
 
 // readStreamLine reads lines until one contains want. It fails when the

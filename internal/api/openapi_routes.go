@@ -1,10 +1,13 @@
 package api
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 )
@@ -121,9 +124,15 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	}
 	paths[base+"/stream"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "Stream records", Description: "Newline-delimited JSON, one record per line, for exports too large to page.", Security: bearer,
+			Tags: []string{tag}, Summary: "Stream changes to the collection", Description: contentStreamDescription(), Security: bearer,
 			Parameters: []openAPIParameter{schema},
-			Responses:  map[string]any{"200": map[string]any{"description": "application/x-ndjson"}, "401": err401, "404": err404},
+			Responses: map[string]any{
+				"200": openAPIResponse{
+					Description: "The stream, open until the client disconnects",
+					Content:     map[string]openAPIMediaType{"text/event-stream": {Schema: contentStreamEventSchema()}},
+				},
+				"401": err401, "404": err404,
+			},
 		},
 	}
 	paths[base+"/bulk"] = openAPIPath{
@@ -191,6 +200,103 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema, id},
 			Responses:  map[string]any{"200": ok200, "401": err401, "404": err404},
 		}, writers...),
+	}
+}
+
+// contentStreamEventNames are the names the change stream gives its events, in
+// the order the handler subscribes to them.
+func contentStreamEventNames() []string {
+	names := make([]string, len(contentStreamEvents))
+	for i, et := range contentStreamEvents {
+		names[i] = string(et)
+	}
+	return names
+}
+
+// orList joins names as a sentence lists alternatives: "a, b or c".
+func orList(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
+}
+
+// contentStreamDescription says what the change stream sends, from the
+// events, the comments and the heartbeat the handler writes, so the text
+// cannot drift from the stream.
+func contentStreamDescription() string {
+	names := contentStreamEventNames()
+	heartbeat := strconv.Itoa(int(contentStreamHeartbeat / time.Second))
+	return "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. " +
+		"It replays nothing written before it opened.\n\n" +
+		"Each event is a single `data` line holding a JSON object. `event` is " + orList(names) + ", `schema` names the collection, " +
+		"and `data` is the record after the change, or as it was before a delete. " +
+		"The record carries its `id` and leaves out every field a read withholds from the caller. " +
+		"Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\n" +
+		"A change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. " +
+		"A client that reads more slowly than changes arrive misses some of them.\n\n" +
+		"When the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `" + contentStreamErrorEvent + "`, " +
+		"whose `data` line holds `{\"error\": reason}`, and closes.\n\n" +
+		"Comment lines carry no event. The stream opens with `" + fmt.Sprintf(contentStreamConnectedComment, "{schema}") + "` " +
+		"and sends `" + contentStreamHeartbeatComment + "` every " + heartbeat + " seconds to keep an idle connection open. " +
+		"The route takes no query parameters.\n\n" +
+		"A record created in posts arrives as " +
+		"`data: {\"data\":{\"id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"title\":\"Hello\"},\"event\":\"" + string(hooks.AfterCreate) + "\",\"schema\":\"posts\"}`."
+}
+
+// contentStreamEventSchema describes one event of the change stream.
+//
+// OpenAPI 3.1 has no field for the items of a stream, so the schema describes
+// a single event, in the shape OpenAPI 3.2 gives an item of an event stream:
+// an object whose data field is a string of JSON, with contentMediaType and
+// contentSchema saying what that JSON holds.
+func contentStreamEventSchema() map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": "One event. A change sends only its data line, and comment lines are not events. The event that ends the stream also names itself.",
+		"required":    []string{"data"},
+		"properties": map[string]any{
+			"event": map[string]any{
+				"type":        "string",
+				"enum":        []string{contentStreamErrorEvent},
+				"description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+			},
+			"data": map[string]any{
+				"type":             "string",
+				"contentMediaType": "application/json",
+				"contentSchema":    map[string]any{"oneOf": []any{contentStreamChangeSchema(), contentStreamEndSchema()}},
+			},
+		},
+	}
+}
+
+// contentStreamChangeSchema is the JSON a change's data line holds.
+func contentStreamChangeSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"event", "schema", "data"},
+		"properties": map[string]any{
+			"event":  map[string]any{"type": "string", "enum": contentStreamEventNames()},
+			"schema": map[string]any{"type": "string", "description": "The collection the record belongs to."},
+			"data": map[string]any{
+				"type":        "object",
+				"description": "The record after the change, or as it was before a delete, without the fields a read withholds from the caller.",
+				"required":    []string{"id"},
+				"properties":  map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}},
+			},
+		},
+	}
+}
+
+// contentStreamEndSchema is the JSON the data line of the event that ends a
+// stream holds.
+func contentStreamEndSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"error"},
+		"properties": map[string]any{
+			"error": map[string]any{"type": "string", "description": "Why the stream stopped, for example that the credential expired or was revoked."},
+		},
 	}
 }
 
@@ -290,7 +396,10 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	}, admins...))
 	set("/robots.txt", "get", &openAPIOperation{
 		Tags: []string{"Admin / System"}, Summary: "Refuses every crawler", Description: "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
-		Responses: map[string]any{"200": map[string]any{"description": "A robots.txt disallowing every path"}},
+		Responses: map[string]any{"200": openAPIResponse{
+			Description: "A robots.txt disallowing every path",
+			Content:     map[string]openAPIMediaType{"text/plain": {Schema: map[string]any{"type": "string"}}},
+		}},
 	})
 	set("/.well-known/jwks.json", "get", &openAPIOperation{
 		Tags: []string{"Content API / Auth"}, Summary: "The signing keys, as a JWK Set", Description: "Verify a token the engine issued without calling it: every key the engine signs with, current and rotated, by kid.",
