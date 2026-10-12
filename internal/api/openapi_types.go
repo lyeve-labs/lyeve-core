@@ -75,8 +75,9 @@ type openAPIParameter struct {
 }
 
 type openAPIRequestBody struct {
-	Required bool                        `json:"required"`
-	Content  map[string]openAPIMediaType `json:"content"`
+	Description string                      `json:"description,omitempty"`
+	Required    bool                        `json:"required"`
+	Content     map[string]openAPIMediaType `json:"content"`
 }
 
 type openAPIMediaType struct {
