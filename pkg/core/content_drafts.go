@@ -48,25 +48,34 @@ func DraftPermissionChecker(host any) PermissionChecker {
 // hidden from the same callers whichever transport reads it.
 //
 // Drafts belong to the people who write them, so the test is the update
-// permission on the schema. An API key needs more than its roles: a key
-// scoped to reading content is a read credential, and a read credential
-// sees what the public sees, so it also needs the update scope on this
-// schema, which content:write and content.<schema>:update both grant. A
-// key holding admin or super_admin is judged by role, as it is at every
-// other scope gate. A rule store that cannot be read answers no, and so do
-// absent claims. The caller passes the claims it authenticated, because a
-// session and a key reach a handler under different context keys.
+// permission on the schema, with read beside it: a role that may update a
+// schema but not read it reads no rows of it at all, drafts included. An
+// API key needs more than its roles: a key scoped to reading content is a
+// read credential, and a read credential sees what the public sees, so it
+// also needs the read and the update scope on this schema, which
+// content:read with content:write, or content.<schema>:read with
+// content.<schema>:update, grant. A key holding admin or super_admin is
+// judged by role, as it is at every other scope gate. A rule store that
+// cannot be read answers no, and so do absent claims. The caller passes the
+// claims it authenticated, because a session and a key reach a handler
+// under different context keys.
 func CanReadDrafts(ctx context.Context, checker PermissionChecker, claims *AuthClaims, schema string) bool {
 	if claims == nil || !claims.AllowsSchema(schema) {
 		return false
 	}
 	if claims.IsAPIKey && !claims.HasRole("admin") && !claims.HasRole("super_admin") &&
-		!ScopeGrants(claims.Scopes, "content."+schema, ActionUpdate) {
+		(!ScopeGrants(claims.Scopes, "content."+schema, ActionRead) ||
+			!ScopeGrants(claims.Scopes, "content."+schema, ActionUpdate)) {
 		return false
 	}
 	if checker == nil {
 		checker = RoleOnlyPermissionChecker{}
 	}
-	ok, err := checker.Allowed(ctx, claims.Roles, schema, "update")
-	return err == nil && ok
+	for _, action := range []string{ActionRead, ActionUpdate} {
+		ok, err := checker.Allowed(ctx, claims.Roles, schema, action)
+		if err != nil || !ok {
+			return false
+		}
+	}
+	return true
 }

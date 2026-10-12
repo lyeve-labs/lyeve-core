@@ -7,14 +7,12 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-type updateChecker struct{ roles map[string]bool }
+// actionChecker grants each action to the roles listed for it.
+type actionChecker map[string]map[string]bool
 
-func (c updateChecker) Allowed(_ context.Context, roles []string, _, action string) (bool, error) {
-	if action != "update" {
-		return true, nil
-	}
+func (c actionChecker) Allowed(_ context.Context, roles []string, _, action string) (bool, error) {
 	for _, r := range roles {
-		if c.roles[r] {
+		if c[action][r] {
 			return true, nil
 		}
 	}
@@ -22,7 +20,10 @@ func (c updateChecker) Allowed(_ context.Context, roles []string, _, action stri
 }
 
 func TestCanReadDrafts_SessionsAndKeys(t *testing.T) {
-	checker := updateChecker{roles: map[string]bool{"editor": true, "admin": true}}
+	checker := actionChecker{
+		"read":   {"viewer": true, "editor": true, "admin": true},
+		"update": {"editor": true, "admin": true, "writer": true},
+	}
 	cases := []struct {
 		name   string
 		claims *AuthClaims
@@ -31,10 +32,13 @@ func TestCanReadDrafts_SessionsAndKeys(t *testing.T) {
 		{"no caller", nil, false},
 		{"an editor session", &AuthClaims{Roles: []string{"editor"}}, true},
 		{"a viewer session", &AuthClaims{Roles: []string{"viewer"}}, false},
+		{"a session that may update and not read", &AuthClaims{Roles: []string{"writer"}}, false},
 		{"an editor key scoped to read", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content:read"}, IsAPIKey: true}, false},
 		{"an editor key scoped to read everything", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"*:read"}, IsAPIKey: true}, false},
 		{"an editor key scoped to write content", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content:read", "content:write"}, IsAPIKey: true}, true},
-		{"an editor key scoped to update this schema", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content.posts:update"}, IsAPIKey: true}, true},
+		{"an editor key scoped to read and update this schema", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content.posts:read", "content.posts:update"}, IsAPIKey: true}, true},
+		{"an editor key scoped to update this schema only", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content.posts:update"}, IsAPIKey: true}, false},
+		{"an editor key scoped to write content without read", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content:write"}, IsAPIKey: true}, false},
 		{"an editor key scoped to write another schema", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content.other:write"}, IsAPIKey: true}, false},
 		{"an editor key scoped to create only", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"content:create"}, IsAPIKey: true}, false},
 		{"an editor key with every scope", &AuthClaims{Roles: []string{"editor"}, Scopes: []string{"*:*"}, IsAPIKey: true}, true},
