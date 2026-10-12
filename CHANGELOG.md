@@ -14,9 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - The deprecation `Link` header on an admin-role API key, and the README, point at the documentation's new address, lyeve.com/docs. The old host redirects there.
+- A release candidate image is published under its exact tag only, `X.Y.Z-rc.N`, and never as `latest` or the minor line, so an install that follows either tag never receives a candidate.
 
 ### Fixed
 
+- An unchanged content entry carries the same `ETag` on every read, so `If-None-Match` answers `304` again. Content responses encode map keys in sorted order, and the entry's tag hashes those bytes. Before, an entry's fields were written in random order and its tag changed on almost every read.
 - Every boot logged a `public rate-limit config gap` ERROR for public routes with no limit of their own, although each runs on the general per-address cap, which is the intended limit for a route that guards no credential. Those routes are now listed once at Info. The ERROR remains for the cases it was written for: a route with no limit of its own and no general cap, which runs unlimited, and a route under `/auth` with no limit of its own, which guards a credential with only the general cap.
 
 ## [0.54.1] - 2026-10-11
