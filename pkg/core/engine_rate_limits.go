@@ -5,8 +5,11 @@ package core
 // only with the setting and a restart. A page that shows them says so rather
 // than offering an edit that would not reach the running process.
 type EngineRateLimit struct {
-	// Scope is "global" for the per-address cap on every request, or
-	// "public" for the table covering unauthenticated and auth routes.
+	// Scope is "global" for the per-address cap on every request, "public"
+	// for the table covering unauthenticated and auth routes, or "general"
+	// for a public route with no limit of its own, which runs on the public
+	// table's "*" row and which an administrator may give a limit of its own
+	// (see RegisterPublicRouteLimitResolver).
 	Scope string `json:"scope"`
 	// Endpoint is "METHOD /path", or "*" for a cap over every route.
 	Endpoint string `json:"endpoint"`

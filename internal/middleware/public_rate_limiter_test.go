@@ -505,6 +505,8 @@ func TestVerify_MissingConfig_NoGlobal(t *testing.T) {
 	assert.NotContains(t, errStr, "POST:/auth/login")
 }
 
+// A credential route with no limit of its own is a gap even under a global
+// cap: the general limit is set for reading, not for guessing passwords.
 func TestVerify_MissingConfig_WithGlobal(t *testing.T) {
 	configs := map[string]PublicRateLimitConfig{
 		"POST:/auth/login": {Rate: 5, Burst: 10},
@@ -514,13 +516,16 @@ func TestVerify_MissingConfig_WithGlobal(t *testing.T) {
 
 	limiter.Wrap("POST", "/auth/login", http.HandlerFunc(okHandler))
 	limiter.Wrap("POST", "/auth/passwordless/request", http.HandlerFunc(okHandler))
+	limiter.Wrap("GET", "/api/v1/search/{schema}", http.HandlerFunc(okHandler))
 
 	err := limiter.Verify()
 	require.Error(t, err)
 
 	errStr := err.Error()
-	assert.Contains(t, errStr, "global cap present but no per-endpoint config")
+	assert.Contains(t, errStr, "credential route(s) have no per-endpoint config")
 	assert.Contains(t, errStr, "POST:/auth/passwordless/request")
+	assert.NotContains(t, errStr, "/api/v1/search", "a reading route on the general limit is not a gap")
+	assert.Equal(t, []string{"GET:/api/v1/search/{schema}"}, limiter.GeneralRoutes())
 }
 
 func TestVerify_NoWrappedRoutes(t *testing.T) {
