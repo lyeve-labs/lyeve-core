@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/debug"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -286,6 +288,51 @@ func TestMiddleware_XDebugReportIDHeader(t *testing.T) {
 	reportID := rec.Header().Get("X-Debug-Report-ID")
 	if reportID == "" {
 		t.Error("X-Debug-Report-ID header should be set")
+	}
+}
+
+// A query bound to NaN is a report JSON cannot encode, because JSON has no
+// number for it. The 500 that follows is the engine's error envelope, labeled
+// as the JSON it is.
+func TestMiddleware_UnencodableReportAnswersTheErrorEnvelope(t *testing.T) {
+	isAdmin := func(*http.Request) bool { return true }
+
+	handler := debug.Handler(true, isAdmin)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		debug.TracerFromCtx(r.Context()).Record("query-posts", debug.KindDBQuery, time.Millisecond, debug.DBQueryDetail{
+			SQL:  "SELECT id FROM posts WHERE score > $1",
+			Args: []any{math.NaN()},
+		})
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	req.Header.Set("X-Debug", "true")
+	req = req.WithContext(logging.WithRequestID(req.Context(), "req-unencodable-report"))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not the JSON envelope: %v\nBody: %s", err, rec.Body.String())
+	}
+	want := map[string]string{
+		"error":      "debug marshal failed",
+		"code":       "internal_error",
+		"request_id": "req-unencodable-report",
+	}
+	if len(body) != len(want) {
+		t.Errorf("body = %v, want exactly %v", body, want)
+	}
+	for k, v := range want {
+		if body[k] != v {
+			t.Errorf("body[%q] = %q, want %q", k, body[k], v)
+		}
 	}
 }
 

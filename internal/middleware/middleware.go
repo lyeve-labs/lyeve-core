@@ -223,7 +223,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 			}
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 				return
 			}
 			for _, n := range nets {
@@ -232,7 +232,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 					return
 				}
 			}
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 		})
 	}, nil
 }

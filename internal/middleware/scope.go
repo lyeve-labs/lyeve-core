@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 )
 
 // RequireScoped checks API key scopes against the requested endpoint. Only
@@ -57,7 +58,7 @@ func RequireScope(required func(*http.Request) (core.ScopePair, bool)) func(http
 				granted = core.ScopeGrants(claims.Scopes, want.Resource, want.Action)
 			}
 			if !granted {
-				http.Error(w, `{"error":"insufficient scope"}`, http.StatusForbidden)
+				httpx.ErrorReq(w, r, http.StatusForbidden, "insufficient scope")
 				return
 			}
 
