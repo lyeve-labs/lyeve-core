@@ -354,7 +354,9 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.store.BulkInsert(r.Context(), schemaName, body.Items)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), "bulk insert failed")
+		if !relationRefused(w, r, err) {
+			httpx.ErrorReq(w, r, httpStatus(err), "bulk insert failed")
+		}
 		return
 	}
 
@@ -565,6 +567,9 @@ func parseFilters(r *http.Request) (map[string]any, error) {
 // the caller as "failed to create content" and the operator as nothing at all:
 // a 503 in the access log with no line anywhere saying why.
 func storeError(w http.ResponseWriter, r *http.Request, err error, msg string) {
+	if relationRefused(w, r, err) {
+		return
+	}
 	// An install with no schema engine says so, on every route, rather than
 	// letting the absence read as a missing content type or an empty page.
 	if errors.Is(err, core.ErrNoSchemaEngine) {

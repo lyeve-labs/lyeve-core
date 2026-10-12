@@ -14,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	internalschema "github.com/lyeve-labs/lyeve-core/internal/schema"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -439,6 +440,23 @@ func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 	return s, true
+}
+
+// relationRefused answers a write the store refused because a relation names
+// no entry of the caller's tenant, as a validation error naming the field, and
+// reports whether it did. A row another tenant holds and a row nobody holds
+// get the same answer, so it says nothing about other tenants.
+func relationRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	var refused *core.RelationTargetError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	internalschema.ValidationErrors{{
+		Field: refused.Field,
+		Code:  i18n.CodeValidationRelationTarget,
+		Rule:  "relation",
+	}}.Respond(w, r, http.StatusUnprocessableEntity)
+	return true
 }
 
 func (h *ContentHandler) validateAgainst(w http.ResponseWriter, r *http.Request, s *domain.Schema, data map[string]any) bool {

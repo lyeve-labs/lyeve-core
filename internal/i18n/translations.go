@@ -237,6 +237,10 @@ var translations = map[Code]map[string]string{
 		"en": "The field {field} failed validation.",
 		"fr": "Le champ {field} n'a pas passé la validation.",
 	},
+	CodeValidationRelationTarget: {
+		"en": "The field {field} must name an existing entry.",
+		"fr": "Le champ {field} doit désigner une entrée existante.",
+	},
 
 	// Schema Validation
 	CodeSchemaValidationEmail: {

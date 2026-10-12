@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db/dialect"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/tenant"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Populate resolves relation fields listed in populateFields and attaches
@@ -943,6 +945,11 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 // SetRelations replaces all many_to_many pivot rows for (schemaName, id, field)
 // with the provided targetIDs, scoped to the calling tenant. Runs in a
 // transaction.
+//
+// Both ends are held to the tenant, because the pivot's keys are not: a
+// source row the tenant does not hold is domain.ErrNotFound, and a target it
+// does not hold refuses the whole set as a validation error naming the field.
+// Another tenant's row is refused exactly as a row nobody holds.
 func (s *ContentStore) SetRelations(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, targetIDs []uuid.UUID) error {
 	pivotName := f.RelationThrough
 	if pivotName == "" {
@@ -955,32 +962,39 @@ func (s *ContentStore) SetRelations(ctx context.Context, schemaName string, id u
 	aCol := strings.TrimPrefix(domain.TableName(schemaName), "_") + "_id"
 	bCol := strings.TrimPrefix(domain.TableName(f.RelationTo), "_") + "_id"
 
-	// tx is a raw *sql.Tx and bypasses the pool's placeholder rewrite, so the
-	// statements are rewritten here for the target engine before execution.
-	engine := s.pool.Engine()
-	d := dialect.Must(engine)
+	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("set relations begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // deferred rollback. Commit result takes precedence
-
-	delQ, delArgs := rewritePlaceholders(
-		fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), engine, []any{id, tenantID})
-	if _, err := tx.ExecContext(ctx, delQ, delArgs...); err != nil {
-		return fmt.Errorf("set relations delete: %w", err)
-	}
-
-	insBase := dialect.InsertDoNothing(d, pivotName, []string{TenantColumnName, aCol, bCol}, []string{aCol, bCol})
+	source := []core.RelationValue{{Field: f.Name, Target: schemaName, Value: id}}
+	targets := make([]core.RelationValue, 0, len(targetIDs))
 	for _, tid := range targetIDs {
-		insQ, insArgs := rewritePlaceholders(insBase, engine, []any{tenantID, id, tid})
-		if _, err := tx.ExecContext(ctx, insQ, insArgs...); err != nil {
-			return fmt.Errorf("set relations insert: %w", err)
-		}
+		targets = append(targets, core.RelationValue{Field: f.Name, Target: f.RelationTo, Value: tid})
 	}
-	return tx.Commit()
+	if err := s.ensureTargetTables(ctx, append(source, targets...)); err != nil {
+		return err
+	}
+	return WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {
+		if err := s.checkRelationTargets(ctx, source); err != nil {
+			if errors.Is(err, domain.ErrValidation) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if err := s.checkRelationTargets(ctx, targets); err != nil {
+			return err
+		}
+		if _, err := s.pool.Exec(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), id, tenantID); err != nil {
+			return fmt.Errorf("set relations delete: %w", err)
+		}
+		insert := dialect.InsertDoNothing(d, pivotName, []string{TenantColumnName, aCol, bCol}, []string{aCol, bCol})
+		for _, tid := range targetIDs {
+			if _, err := s.pool.Exec(ctx, insert, tenantID, id, tid); err != nil {
+				return fmt.Errorf("set relations insert: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // flattenContent merges Content.Data + id/created_at/updated_at into one map.
