@@ -134,8 +134,9 @@ var paramLocations = map[string]bool{"path": true, "query": true, "header": true
 
 // docFaults reports what in a route's Doc would publish a document a client
 // cannot use: a parameter in no place OpenAPI knows, a path parameter the
-// pattern does not hold, or a response under a number that is not an HTTP
-// status.
+// pattern does not hold, a response under a number that is not an HTTP
+// status, or a response media type the document leaves out, lists twice or
+// has no success response to put on.
 func docFaults(pattern string, d *core.RouteDoc) []string {
 	segments := map[string]bool{}
 	for _, seg := range strings.Split(pattern, "/") {
@@ -160,8 +161,37 @@ func docFaults(pattern string, d *core.RouteDoc) []string {
 			out = append(out, fmt.Sprintf("documents a response under %d, which is not an HTTP status", status))
 		}
 	}
+	seen := map[string]bool{}
+	for _, mt := range d.ResponseMediaTypes {
+		bare, ok := core.ParseResponseMediaType(mt.MediaType)
+		switch {
+		case !ok:
+			out = append(out, fmt.Sprintf("documents response media type %q, which is not type/subtype, so the document leaves it out", mt.MediaType))
+		case seen[bare]:
+			out = append(out, fmt.Sprintf("documents response media type %s twice", bare))
+		}
+		seen[bare] = true
+	}
+	if len(d.ResponseMediaTypes) > 0 && !documentsASuccessBody(d.Responses) {
+		out = append(out, "documents response media types, and none of its responses is a success that carries a body, so the document shows them nowhere")
+	}
 	sort.Strings(out)
 	return out
+}
+
+// documentsASuccessBody reports whether a Doc's responses hold a 2xx that
+// carries a body, the statuses its response media types describe. A Doc that
+// names no response is documented as a 200.
+func documentsASuccessBody(responses map[int]string) bool {
+	if len(responses) == 0 {
+		return true
+	}
+	for status := range responses {
+		if status >= 200 && status <= 299 && status != http.StatusNoContent && status != http.StatusResetContent {
+			return true
+		}
+	}
+	return false
 }
 
 // patternFault reports why a pattern is not one the router can mount, or "".

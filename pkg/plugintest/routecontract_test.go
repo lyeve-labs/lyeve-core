@@ -28,9 +28,10 @@ func good() []core.RouteDecl {
 		{Method: "GET", Pattern: "/api/admin/probe", Handler: ok, Group: core.GroupAdmin},
 		{Method: "POST", Pattern: "/api/admin/probe", Handler: ok, Group: core.GroupAdmin, MaxBodyBytes: 1 << 20},
 		{Method: "GET", Pattern: "/api/admin/probe/{id}", Handler: ok, Group: core.GroupAuth, Doc: &core.RouteDoc{
-			Summary:   "Read one probe",
-			Params:    []core.RouteParam{{Name: "id", In: "path", Format: "uuid"}, {Name: "expand", In: "query", Type: "boolean"}},
-			Responses: map[int]string{200: "OK", 404: "Not found"},
+			Summary:            "Read one probe",
+			Params:             []core.RouteParam{{Name: "id", In: "path", Format: "uuid"}, {Name: "expand", In: "query", Type: "boolean"}},
+			Responses:          map[int]string{200: "OK", 404: "Not found"},
+			ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "application/x-ndjson; charset=utf-8"}, {MediaType: "image/*"}},
 		}},
 		{Method: "POST", Pattern: "/api/v1/probe/hooks/{id}", Handler: ok, Group: core.GroupPublic, SelfScoping: true, RateLimit: &core.RouteRateLimit{Rate: 10, Burst: 20}},
 		{Method: "POST", Pattern: "/api/v1/probe/query", Handler: ok, Group: core.GroupAuth, Scope: "probe:read"},
@@ -68,6 +69,9 @@ func TestAssertRouteContract_EachRuleFires(t *testing.T) {
 		{"doc parameter unnamed", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Params: []core.RouteParam{{In: "query"}}}}, "with no name"},
 		{"doc path parameter missing", core.RouteDecl{Method: "GET", Pattern: "/api/x/{id}", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Params: []core.RouteParam{{Name: "slug", In: "path"}}}}, "the pattern does not hold"},
 		{"doc response not a status", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Responses: map[int]string{42: "odd"}}}, "not an HTTP status"},
+		{"doc media type not type/subtype", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "csv"}}}}, "not type/subtype"},
+		{"doc media type twice", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "text/csv; charset=utf-8"}}}}, "twice"},
+		{"doc media types with no body", core.RouteDecl{Method: "DELETE", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Responses: map[int]string{204: "Deleted", 404: "Not found"}, ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}}}}, "carries a body"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

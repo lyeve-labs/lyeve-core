@@ -61,6 +61,8 @@ func TestWarnUnmountableRoutes_SaysNothingAboutAGoodRoute(t *testing.T) {
 			core.RouteDecl{Method: http.MethodGet, Pattern: "/api/v1/regions", Group: core.GroupPublic},
 			core.RouteDecl{Method: http.MethodPost, Pattern: "/api/admin/regions", Group: core.GroupSuperAdmin},
 			core.RouteDecl{Method: http.MethodPost, Pattern: "/api/v1/regions/query", Group: core.GroupAuth, Scope: "regions:read"},
+			core.RouteDecl{Method: http.MethodGet, Pattern: "/api/admin/regions/export", Group: core.GroupAdmin,
+				Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "image/*"}}}},
 		))
 	})
 
@@ -88,4 +90,19 @@ func TestWarnUnmountableRoutes_NamesAScopeNoGroupReads(t *testing.T) {
 
 	require.Contains(t, out, "outside the authenticated group")
 	assert.Contains(t, out, "/api/v1/regions")
+}
+
+func TestWarnUnmountableRoutes_NamesAResponseMediaTypeTheDocumentLeavesOut(t *testing.T) {
+	out := captureWarnings(t, func() {
+		WarnUnmountableRoutes(routesOf(core.RouteDecl{
+			Method: http.MethodGet, Pattern: "/api/admin/regions/export", Group: core.GroupAdmin,
+			Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "csv"}}},
+		}))
+	})
+
+	require.Contains(t, out, "not type/subtype")
+	assert.Contains(t, out, "the API document leaves it out",
+		"the warning must say what happens, not just that it is wrong")
+	assert.Contains(t, out, "media_type=csv")
+	assert.NotContains(t, out, "text/csv", "a usable type is not named")
 }
