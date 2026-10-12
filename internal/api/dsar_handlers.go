@@ -124,7 +124,7 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 			"matched_tenants", result.MatchedTenants,
 		)
 	}
-	h.writeAudit(r, action, "gdpr_dsar", body.Identifier)
+	h.writeAudit(r, action, "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 
 	httpx.JSON(w, http.StatusOK, result)
 }
@@ -181,7 +181,7 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log.
-	h.writeAudit(r, "gdpr.erase", "gdpr_dsar", body.Identifier)
+	h.writeAudit(r, "gdpr.erase", "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 
 	httpx.JSON(w, http.StatusOK, resp)
 }
