@@ -175,14 +175,17 @@ func (s *ContentStore) FlushCaches(ctx context.Context) {
 }
 
 // Insert creates a new row in the collection table, tagged with the request's
-// tenant. Only keys matching defined (non-system) field names are written.
-// Unknown keys are ignored.
+// tenant. Only keys matching defined (non-system) field names are written,
+// with _status on a schema with draft and publish. Unknown keys are ignored.
 func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[string]any) (*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -241,6 +244,9 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -473,6 +479,16 @@ func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uu
 	return c, nil
 }
 
+// draftWhere returns the WHERE fragment that keeps a read to published rows,
+// or nothing when the schema has no draft and publish or the caller may read
+// drafts. A NULL status reads as published, the way the list filter treats it.
+func draftWhere(sc *domain.Schema, alias string, drafts bool) string {
+	if drafts || sc == nil || !sc.WithDraftPublish {
+		return ""
+	}
+	return fmt.Sprintf(" AND (%s._status = 'published' OR %s._status IS NULL)", alias, alias)
+}
+
 // softDeleteWhere returns an extra WHERE clause fragment when soft-delete is enabled.
 func softDeleteWhere(sc *domain.Schema) string {
 	if sc != nil && sc.WithSoftDelete {
@@ -512,6 +528,9 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 		return nil, err
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content update: %w", err)
+	}
 	sets, args := buildUpdate(sc, data, dialect.Must(s.pool.Engine()))
 	if len(sets) == 0 {
 		return s.GetByID(ctx, schemaName, id)
@@ -759,7 +778,12 @@ func (w *actionWalker) ids(q string, args ...any) ([]uuid.UUID, error) {
 // cursor-based (keyset) pagination for efficient large-dataset traversal.
 // cursor is the UUID of the last seen row. Pass "" for the first page.
 // Rows are returned in ascending id order.
-func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int) ([]*domain.Content, error) {
+//
+// A soft-deleted row is never served. An unpublished row is served only when
+// drafts is true, which the caller decides from who is asking: this list has
+// no filter, so it cannot follow the offset list's default of published
+// unless a status is named.
+func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int, drafts bool) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
@@ -775,6 +799,7 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 		limitClause = "OFFSET 0 ROWS FETCH NEXT $1 ROWS ONLY"
 	}
 	tenantID := tenant.ID(ctx)
+	visible := softDeleteWhere(sc) + draftWhere(sc, "r", drafts)
 
 	var (
 		query string
@@ -785,9 +810,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE tenant_id = $2
+			WHERE tenant_id = $2%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, tenantID}
 	} else {
 		cursorID, parseErr := uuid.Parse(cursor)
@@ -798,9 +823,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE id > $2 AND tenant_id = $3
+			WHERE id > $2 AND tenant_id = $3%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, cursorID, tenantID}
 	}
 
@@ -840,6 +865,9 @@ func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items 
 	tenantCol := dialect.Must(s.pool.Engine()).QuoteIdentifier(TenantColumnName)
 	results := make([]*domain.Content, 0, len(items))
 	for _, data := range items {
+		if _, _, err := contentStatus(sc, data); err != nil {
+			return nil, fmt.Errorf("bulk insert: %w", err)
+		}
 		cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
 		cols = append([]string{tenantCol}, cols...)
 		args = append([]any{tenantID}, args...)
@@ -1149,8 +1177,31 @@ func scanWrittenRow(engine string, row interface{ Scan(...any) error }, schemaNa
 	return c, nil
 }
 
+// contentStatus returns the publication status a write carries in the
+// _status key, and whether it carries one. Only a schema with draft and
+// publish has the column. On any other schema the key is ignored, because a
+// projection sends the status whatever the schema it writes into. A value the
+// read filters never match is domain.ErrValidation, so the row cannot be
+// stored in a state no read path can classify.
+func contentStatus(sc *domain.Schema, data map[string]any) (string, bool, error) {
+	if !sc.WithDraftPublish {
+		return "", false, nil
+	}
+	v, ok := data["_status"]
+	if !ok || v == nil {
+		return "", false, nil
+	}
+	status, isString := v.(string)
+	if !isString || !core.ValidContentStatus(status) {
+		return "", false, fmt.Errorf("%w: unknown status %v", domain.ErrValidation, v)
+	}
+	return status, true, nil
+}
+
 // buildInsert returns column names and argument values for an INSERT, using
-// only schema-defined non-system fields present in data.
+// the schema-defined non-system fields present in data and _status when the
+// schema has draft and publish. Callers check the status with contentStatus
+// first, which is where an invalid one is refused.
 // Column names come from the schema definition (server-controlled, never
 // from user input), so no SQL injection surface exists here.
 // For belongs_to relation fields the physical column is {name}_id. Data is
@@ -1188,6 +1239,13 @@ func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (col
 		cols = append(cols, qi(col))
 		args = append(args, bindContentValue(f, v))
 	}
+	// _status is a system column, so the field loop never sees it. Without
+	// this the column takes its default of published, and a write that asked
+	// for a draft makes the entry public.
+	if status, ok, _ := contentStatus(sc, data); ok {
+		cols = append(cols, qi("_status"))
+		args = append(args, status)
+	}
 	return
 }
 
@@ -1210,6 +1268,10 @@ func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (set
 			args = append(args, bindContentValue(f, v))
 			i++
 		}
+	}
+	if status, ok, _ := contentStatus(sc, data); ok {
+		sets = append(sets, fmt.Sprintf("%s = $%d", qi("_status"), i))
+		args = append(args, status)
 	}
 	return
 }

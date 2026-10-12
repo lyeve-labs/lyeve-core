@@ -77,9 +77,14 @@ func (s *tenantStreamWriter) events(t *testing.T) []map[string]any {
 // caller holding an editor role, and returns once it has registered its hooks.
 func openStream(t *testing.T, h *ContentHandler, tenantID, schema string) *tenantStreamWriter {
 	t.Helper()
-	ctx, cancel := context.WithCancel(tenant.WithID(context.Background(), tenantID))
 	claims := &auth.Claims{UserID: "00000000-0000-0000-0000-000000000001", Roles: []string{"editor"}}
-	ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
+	return openStreamAs(t, h, context.WithValue(tenant.WithID(context.Background(), tenantID), auth.ClaimsKey, claims), schema)
+}
+
+// openStreamAs starts the stream handler for schema as the caller on base.
+func openStreamAs(t *testing.T, h *ContentHandler, base context.Context, schema string) *tenantStreamWriter {
+	t.Helper()
+	ctx, cancel := context.WithCancel(base)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/content/"+schema+"/stream", nil)
 	r = chiCtx(r.WithContext(ctx), map[string]string{"schema": schema})
 

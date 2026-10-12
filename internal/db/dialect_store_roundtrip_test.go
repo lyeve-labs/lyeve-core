@@ -108,7 +108,7 @@ func TestContentStore_SetRelations_AllDialects(t *testing.T) {
 		if err := store.SetRelations(ctx, artName, art.ID, rel, []uuid.UUID{t1.ID, t2.ID}); err != nil {
 			t.Fatalf("SetRelations (2): %v", err)
 		}
-		items, _, err := store.ListRelated(ctx, artName, art.ID, rel, 50, 0)
+		items, _, err := store.ListRelated(ctx, artName, art.ID, rel, 50, 0, true)
 		if err != nil {
 			t.Fatalf("ListRelated after set-2: %v", err)
 		}
@@ -120,7 +120,7 @@ func TestContentStore_SetRelations_AllDialects(t *testing.T) {
 		if err := store.SetRelations(ctx, artName, art.ID, rel, []uuid.UUID{t1.ID}); err != nil {
 			t.Fatalf("SetRelations (1): %v", err)
 		}
-		items, _, err = store.ListRelated(ctx, artName, art.ID, rel, 50, 0)
+		items, _, err = store.ListRelated(ctx, artName, art.ID, rel, 50, 0, true)
 		if err != nil {
 			t.Fatalf("ListRelated after set-1: %v", err)
 		}

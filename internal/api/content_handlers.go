@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
@@ -56,6 +58,11 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	if !h.checkStatusFilter(w, r, schemaName, filters) {
+		return
+	}
+	h.draftResponse(w, r, schemaName)
 
 	items, err := h.store.List(r.Context(), schemaName, limit, offset, filters)
 	if err != nil {
@@ -110,6 +117,14 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	item, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
 		storeError(w, r, err, "failed to get content")
+		return
+	}
+	// The list leaves unpublished rows out, and a read by id has to agree,
+	// or an id learned from a webhook, a log or a guess reads a draft. The
+	// answer is the one a missing row gets, so the read does not confirm
+	// that the draft exists.
+	if drafts := h.draftResponse(w, r, schemaName); !drafts && !isPublished(item.Data) {
+		httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -208,6 +223,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	input.Data = withoutStatus(input.Data)
 
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
@@ -373,7 +389,7 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, err := h.store.ListCursor(r.Context(), schemaName, cursor, limit)
+	items, err := h.store.ListCursor(r.Context(), schemaName, cursor, limit, h.draftResponse(w, r, schemaName))
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
 		return
@@ -431,6 +447,57 @@ func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
 	}
 
 	return cfg
+}
+
+// withoutStatus returns data without the publication status. A status moves
+// through the publish and unpublish routes. An update body or a restored
+// revision that carried one would move it as a side effect: a client writing
+// back a body it read earlier republishes a row an editor has since
+// unpublished, and restoring an older revision publishes a draft. A create
+// keeps the key, so an entry can start as a draft.
+func withoutStatus(data map[string]any) map[string]any {
+	if _, ok := data[core.ContentStatusKey]; !ok {
+		return data
+	}
+	out := maps.Clone(data)
+	delete(out, core.ContentStatusKey)
+	return out
+}
+
+// isPublished reports whether a row is public. See core.ContentPublished.
+func isPublished(data map[string]any) bool {
+	return core.ContentPublished(data)
+}
+
+// canReadDrafts reports whether the caller may see unpublished rows of a
+// schema, on the terms core.CanReadDrafts sets for every transport.
+func (h *ContentHandler) canReadDrafts(r *http.Request, schema string) bool {
+	return core.CanReadDrafts(r.Context(), h.checker(), requestClaims(r), schema)
+}
+
+// draftResponse reports whether this response may carry drafts of schema,
+// and when it may, marks it private. A response that can hold drafts belongs
+// to the caller alone: served public with a max-age, a shared cache keyed on
+// anything but the session would hand an editor's drafts to the next reader.
+func (h *ContentHandler) draftResponse(w http.ResponseWriter, r *http.Request, schema string) bool {
+	if !h.canReadDrafts(r, schema) {
+		return false
+	}
+	w.Header().Set(apimw.PrivateResponseHeader, "1")
+	return true
+}
+
+// checkStatusFilter refuses a list filter on any status but published from a
+// caller who cannot read drafts, answering 403. The list serves only
+// published rows unless the filter names a status, so without this check
+// the filter is a way around that default.
+func (h *ContentHandler) checkStatusFilter(w http.ResponseWriter, r *http.Request, schema string, filters map[string]any) bool {
+	v, ok := filters["_status"]
+	if !ok || v == core.ContentStatusPublished || h.canReadDrafts(r, schema) {
+		return true
+	}
+	httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
+	return false
 }
 
 // parseFilters reads ?filters[col]=val query params into a map.

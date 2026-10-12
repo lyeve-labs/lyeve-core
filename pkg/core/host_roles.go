@@ -123,7 +123,8 @@ type ContentWriter interface {
 }
 
 // ContentReader pages through a schema's generated content table, every row
-// the tenant on ctx holds and every status, ordered by id. It is for
+// the tenant on ctx holds and every status, ordered by id. A soft-deleted row
+// is not read, since it is gone for every other reader too. It is for
 // a plugin that keeps its own record of entries and has to find the rows
 // another writer put in the table before it was listening, such as entries
 // created through the Content API.

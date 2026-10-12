@@ -40,6 +40,7 @@ var contentDefaultSchemas = map[string][]string{
 		"with_created_at": true,
 		"with_updated_at": true,
 		"with_draft_publish": true,
+		"with_soft_delete": true,
 		"fields": [
 			{"name": "title", "field_type": "text", "required": true}
 		]
@@ -131,6 +132,28 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "tags", "field_type": "relation", "relation_to": "labels", "relation_type": "many_to_many"}
 		]
 	}`},
+	// Three schemas with draft and publish, linked by a belongs_to and a
+	// many_to_many, for the reads that follow a relation.
+	"essays": {`{
+		"name": "authors",
+		"display_name": "Authors",
+		"with_draft_publish": true,
+		"fields": [{"name": "name", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "topics",
+		"display_name": "Topics",
+		"with_draft_publish": true,
+		"fields": [{"name": "name", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "essays",
+		"display_name": "Essays",
+		"with_draft_publish": true,
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "author", "field_type": "relation", "relation_to": "authors", "relation_type": "belongs_to"},
+			{"name": "topics", "field_type": "relation", "relation_to": "topics", "relation_type": "many_to_many"}
+		]
+	}`},
 }
 
 // forEachDialectWithSchemas posts the named schema sets on every dialect the
@@ -173,6 +196,9 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 					// pivot holds both sides of its relation.
 					if id == "articles" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("articles", "labels"))
+					}
+					if id == "essays" {
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("essays", "topics"))
 					}
 					for i := len(names) - 1; i >= 0; i-- {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+domain.TableName(names[i]))

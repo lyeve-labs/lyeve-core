@@ -159,7 +159,7 @@ func TestContentTenantIsolation_SharedSchemaNameIsolatedRows(t *testing.T) {
 			}
 
 			// Cursor pagination: scoped per tenant.
-			cursorA, err := store.ListCursor(ctxA, "articles", "", 20)
+			cursorA, err := store.ListCursor(ctxA, "articles", "", 20, true)
 			if err != nil {
 				t.Fatalf("cursor list A: %v", err)
 			}
@@ -305,14 +305,14 @@ func TestContentTenantIsolation_PivotRowsScopedToTenant(t *testing.T) {
 
 			// A sees its relation. B probing A's article id sees none and no
 			// inflated count.
-			relA, totalA, err := store.ListRelated(ctxA, "articles", articleA.ID, tagsField, 20, 0)
+			relA, totalA, err := store.ListRelated(ctxA, "articles", articleA.ID, tagsField, 20, 0, true)
 			if err != nil {
 				t.Fatalf("list related A: %v", err)
 			}
 			if len(relA) != 1 || relA[0].Data["label"] != "a-tag" || totalA != 1 {
 				t.Fatalf("tenant A relations wrong: rows=%d total=%d", len(relA), totalA)
 			}
-			relB, totalB, err := store.ListRelated(ctxB, "articles", articleA.ID, tagsField, 20, 0)
+			relB, totalB, err := store.ListRelated(ctxB, "articles", articleA.ID, tagsField, 20, 0, true)
 			if err != nil {
 				t.Fatalf("list related B: %v", err)
 			}
@@ -324,7 +324,7 @@ func TestContentTenantIsolation_PivotRowsScopedToTenant(t *testing.T) {
 			if err := store.SetRelations(ctxB, "articles", articleA.ID, tagsField, []uuid.UUID{tagB.ID}); err != nil {
 				t.Fatalf("set relations B: %v", err)
 			}
-			relA, _, err = store.ListRelated(ctxA, "articles", articleA.ID, tagsField, 20, 0)
+			relA, _, err = store.ListRelated(ctxA, "articles", articleA.ID, tagsField, 20, 0, true)
 			if err != nil {
 				t.Fatalf("list related A after B write: %v", err)
 			}
