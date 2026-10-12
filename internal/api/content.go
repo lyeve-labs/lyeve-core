@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -25,6 +27,17 @@ type ContentHandler struct {
 	perms     core.PermissionCheckerProvider   // nil = the kernel's role-only checker
 	localizer core.ContentLocalizerProvider    // nil = reads ignore any locale
 	revisions core.RecordRevisionStoreProvider // nil = no plugin keeps revisions
+
+	// streamHeartbeat is how often an idle change stream writes a comment.
+	// Zero is contentStreamHeartbeat. Each write moves the write deadline two
+	// heartbeats ahead, so it also sets how long a client that stops reading
+	// holds its connection.
+	streamHeartbeat time.Duration
+	// streamDeadlineWarn keeps the warning about a chain that cannot move the
+	// write deadline to one line, since every stream through it fails the
+	// same way. A pointer, so a copy of the handler shares it. Nil warns on
+	// every stream.
+	streamDeadlineWarn *sync.Once
 }
 
 // revisionStore resolves the store that keeps revision history, or answers

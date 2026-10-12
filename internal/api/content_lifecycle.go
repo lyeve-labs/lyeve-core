@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -200,6 +201,37 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	respond(w, http.StatusOK, item)
 }
 
+// contentStreamHeartbeat is how often a change stream with nothing to send
+// writes a comment line. It sits inside every timeout between the engine and
+// a browser: the API listener's 15 second write timeout and the 60 second
+// idle timeout most proxies and load balancers apply to a response that has
+// gone quiet.
+const contentStreamHeartbeat = 10 * time.Second
+
+// streamHeartbeatInterval is the handler's heartbeat, or the default when
+// none was set.
+func (h *ContentHandler) streamHeartbeatInterval() time.Duration {
+	if h.streamHeartbeat > 0 {
+		return h.streamHeartbeat
+	}
+	return contentStreamHeartbeat
+}
+
+// warnNoStreamDeadline logs that change streams cannot hold their own write
+// deadline. Every stream through the same chain fails the same way, so it is
+// said once.
+func (h *ContentHandler) warnNoStreamDeadline(err error) {
+	warn := func() {
+		slog.Warn("content: change streams cannot extend their write deadline, so each ends at the server's write timeout. A response writer in the middleware chain does not implement Unwrap.",
+			"err", err)
+	}
+	if h.streamDeadlineWarn == nil {
+		warn()
+		return
+	}
+	h.streamDeadlineWarn.Do(warn)
+}
+
 // Stream sends a Server-Sent Events stream of content change events for a schema.
 // GET /api/v1/content/{schema}/stream
 //
@@ -208,6 +240,11 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 // stream keeps only the events of the caller's own tenant, and each payload
 // goes through the field mask and the after-response hooks a read applies,
 // so the stream serves no field that GET would withhold from this caller.
+//
+// The server's write deadline is set once, when it reads the request, and the
+// first write after it fails and ends the stream. So every write moves the
+// deadline two heartbeats ahead first, and a comment line every heartbeat
+// keeps an idle stream inside it.
 func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
 	if !h.runBeforeRequest(w, r, schemaName, "list") {
@@ -280,19 +317,36 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	heartbeat := h.streamHeartbeatInterval()
+	deadline := httpx.NewStreamDeadline(w, 2*heartbeat, h.warnNoStreamDeadline)
+	if !deadline.Hold() {
+		return
+	}
 	_, _ = fmt.Fprintf(w, ": connected to %s stream\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
 	flusher.Flush()
+
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ticker.C:
+			if !deadline.Hold() {
+				return
+			}
+			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
+			flusher.Flush()
 		case c := <-ch:
 			data := mask(c.data)
 			h.runAfterResponse(r, schemaName, "list", data)
 			payload, err := jsonpool.MarshalJSON(map[string]any{"event": c.event, "schema": schemaName, "data": data})
 			if err != nil {
 				continue
+			}
+			if !deadline.Hold() {
+				return
 			}
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload) // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
