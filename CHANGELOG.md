@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [0.55.0] - 2026-10-12
 
+### Security
+
+- Reading entries with their related entries populated no longer writes into the copy of an entry the engine caches. Two readers populating the same entry at once could stop the engine, and a relation one reader populated could appear in another reader's plain read of that entry, past that reader's own access rules and field masks. Every reader now gets its own copy.
+- An audit entry written for a data subject's export or erasure names the subject by a SHA-256 digest of the identifier the request named, usually an email address, instead of the identifier itself. The log still proves each request happened, and anyone holding the identifier can find its entry. Entries written before this release are left as they are.
+
 ### Added
 
 - A plugin can give a public route on the general limit a limit of its own at runtime, through `core.RegisterPublicRouteLimitResolver`. The public limiter asks it on each request to such a route, and a limit it answers replaces the general per-address cap there, higher or lower. A route with a limit of its own, such as sign-in or the token endpoint, keeps that limit whatever a resolver answers, and so does every route under `/auth`, which guards a credential: `PUBLIC_RATE_LIMITS` stays the way to move them. A HEAD request follows its GET route's limit and shares its bucket.
@@ -18,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- A `json` field's default is copied into each new entry instead of shared with the schema, so a hook that edits the entry in place no longer edits the default.
+- `security.DiscoverOIDC` gives each caller its own copy of the cached issuer configuration.
 - An unchanged content entry carries the same `ETag` on every read, so `If-None-Match` answers `304` again. Content responses encode map keys in sorted order, and the entry's tag hashes those bytes. Before, an entry's fields were written in random order and its tag changed on almost every read.
 - Every boot logged a `public rate-limit config gap` ERROR for public routes with no limit of their own, although each runs on the general per-address cap, which is the intended limit for a route that guards no credential. Those routes are now listed once at Info. The ERROR remains for the cases it was written for: a route with no limit of its own and no general cap, which runs unlimited, and a route under `/auth` with no limit of its own, which guards a credential with only the general cap.
 
