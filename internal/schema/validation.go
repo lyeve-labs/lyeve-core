@@ -32,14 +32,31 @@ type ValidationErrors []ValidationError
 // Respond writes ValidationErrors as a JSON array of localized error objects to w,
 // using the Accept-Language resolved locale from the request context.
 func (ve ValidationErrors) Respond(w http.ResponseWriter, r *http.Request, status int) {
-	loc := i18n.LocaleFromCtx(r.Context())
 	type localized struct {
 		Field   string `json:"field"`
 		Message string `json:"message"`
 		Code    string `json:"code"`
 		Rule    string `json:"rule"`
 	}
-	out := make([]localized, len(ve))
+	errs := ve.Localized(i18n.LocaleFromCtx(r.Context()))
+	out := make([]localized, len(errs))
+	for i, e := range errs {
+		out[i] = localized{Field: e.Field, Message: e.Message, Code: e.Code, Rule: e.Rule}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"errors": out})
+}
+
+// Localized renders each error the way Respond writes it: the catalog's
+// message for its code in loc, with the field among the message parameters.
+// A writer outside the engine answers with these, so a refusal reads the
+// same whichever surface made it. Nil when there is nothing to report.
+func (ve ValidationErrors) Localized(loc i18n.Locale) []core.SchemaValidationError {
+	if len(ve) == 0 {
+		return nil
+	}
+	out := make([]core.SchemaValidationError, len(ve))
 	for i, e := range ve {
 		code := e.Code
 		if code == "" {
@@ -51,16 +68,16 @@ func (ve ValidationErrors) Respond(w http.ResponseWriter, r *http.Request, statu
 		} else if _, ok := params["field"]; !ok {
 			params["field"] = e.Field
 		}
-		out[i] = localized{
+		out[i] = core.SchemaValidationError{
 			Field:   e.Field,
-			Message: code.Error(loc, params),
 			Code:    string(code),
 			Rule:    e.Rule,
+			Value:   e.Value,
+			Message: code.Error(loc, params),
+			Params:  params,
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"errors": out})
+	return out
 }
 
 // typeMismatch reports the type a field expects when the value it was given
