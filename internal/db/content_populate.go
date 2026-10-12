@@ -228,8 +228,12 @@ const maxPopulateDepth = 10
 const maxBatchSize = 500
 
 // GetByIDs returns multiple content rows by their UUID primary keys in a single
-// query. Items found in the item cache are returned directly. Only uncached IDs
-// are fetched from the database. Results are written back to the item cache.
+// query. Items found in the item cache are served from it, and only uncached
+// IDs are fetched from the database and written back to the cache. Every row
+// returned is the caller's own copy, as GetByID's are: population writes the
+// related record into the row's Data, so a cached row handed out as it is
+// would carry one request's relations into every later read of that row, and
+// two requests writing it at once end the process. See content_clone.go.
 // Returns a map keyed by UUID for O(1) lookup. IDs that are not found are
 // silently omitted from the result map (same behavior as GetByID returning
 // ErrNotFound for a missing ID: the caller assigns nil to that field).
@@ -247,7 +251,7 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 		if s.itemCache != nil {
 			key := cacheItemKey(tenantID, schemaName, id)
 			if cached, ok := s.itemCache.Get(ctx, key); ok {
-				result[id] = cached
+				result[id] = cloneContent(cached)
 				continue
 			}
 		}
@@ -302,9 +306,8 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 				return nil, scanErr
 			}
 			result[c.ID] = c
-			// Write back to item cache.
 			if s.itemCache != nil {
-				_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, c.ID), c, 0)
+				_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, c.ID), cloneContent(c), 0) // err suppressed: cache is best-effort
 			}
 		}
 		if err := rows.Err(); err != nil {
