@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -222,6 +223,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	input.Data = withoutStatus(input.Data)
 
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
@@ -445,6 +447,21 @@ func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
 	}
 
 	return cfg
+}
+
+// withoutStatus returns data without the publication status. A status moves
+// through the publish and unpublish routes. An update body or a restored
+// revision that carried one would move it as a side effect: a client writing
+// back a body it read earlier republishes a row an editor has since
+// unpublished, and restoring an older revision publishes a draft. A create
+// keeps the key, so an entry can start as a draft.
+func withoutStatus(data map[string]any) map[string]any {
+	if _, ok := data[core.ContentStatusKey]; !ok {
+		return data
+	}
+	out := maps.Clone(data)
+	delete(out, core.ContentStatusKey)
+	return out
 }
 
 // isPublished reports whether a row is public. See core.ContentPublished.

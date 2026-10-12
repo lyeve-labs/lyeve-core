@@ -191,7 +191,7 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.snapshot(r, schemaName, id, existing.Data)
-	item, err := h.store.Update(r.Context(), schemaName, id, rev.Data, existing.UpdatedAt)
+	item, err := h.store.Update(r.Context(), schemaName, id, withoutStatus(rev.Data), existing.UpdatedAt)
 	if err != nil {
 		httpx.ErrorReq(w, r, httpStatus(err), "failed to restore revision")
 		return

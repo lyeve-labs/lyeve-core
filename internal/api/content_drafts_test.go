@@ -88,9 +88,8 @@ func TestContentHandler_DraftsStayUnpublished(t *testing.T) {
 		got = fx.send(t, writer, http.MethodGet, "/api/v1/content/drafts?filters[_status]=draft", params, nil, fx.content.List)
 		assert.Contains(t, listedIDs(t, got), id, "a writer cannot list its drafts")
 
-		got = fx.send(t, writer, http.MethodPut, "/api/v1/content/drafts/"+id, one,
-			map[string]any{"data": map[string]any{"_status": "published"}}, fx.content.Update)
-		require.Equal(t, http.StatusOK, got.Code, got.Body.String())
+		got = fx.send(t, writer, http.MethodPut, "/api/v1/content/drafts/"+id+"/publish", one, nil, fx.content.Publish)
+		require.Equal(t, http.StatusNoContent, got.Code, got.Body.String())
 		got = fx.send(t, reader, http.MethodGet, "/api/v1/content/drafts/"+id, one, nil, fx.content.Get)
 		assert.Equal(t, http.StatusOK, got.Code, "a published entry is hidden: %s", got.Body.String())
 		got = fx.send(t, reader, http.MethodGet, "/api/v1/content/drafts?filters[_status]=published", params, nil, fx.content.List)
