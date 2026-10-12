@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -107,7 +108,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	userStore := db.NewUserStore(pool)
 	// Auto-mounted via RoutesPlugin.
 
-	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions}
+	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once)}
 
 	secureCook := cfg.SecureCookie
 	authHandler := NewAuthHandler(userStore, o.mfaStore, pool, cfg.JWTSecret, cfg.JWTExpirySecs, secureCook)
