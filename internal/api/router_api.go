@@ -3,6 +3,7 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -94,26 +95,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	}
 	schemaPresent := func() bool { return !schemaEngineAbsent(contentSchemas) }
 
-	// The kernel's content caches stay in process memory whatever
-	// CACHE_DRIVER says. A shared backend would not help: a write flushes the
-	// list cache whole, which on a shared backend flushes every key in it.
-	// Replicas keep their memory caches coherent through the instance bus.
-	cacheCfg := cache.CacheConfig{
-		Driver:     "memory",
-		TTL:        cfg.CacheTTL,
-		MaxEntries: cfg.CacheMaxEntries,
-	}
-	itemCache, ierr := cache.New[*domain.Content](cacheCfg, "content:item")
-	if ierr != nil {
-		slog.Error("failed to init item cache; falling back to no-cache", "error", ierr)
-		itemCache = nil
-	}
-	listCache, lerr := cache.New[[]*domain.Content](cacheCfg, "content:list")
-	if lerr != nil {
-		slog.Error("failed to init list cache; falling back to no-cache", "error", lerr)
-		listCache = nil
-	}
-	contentStore := db.NewContentStoreWithCache(pool, contentSchemas, itemCache, listCache)
+	contentStore := newContentStore(pool, contentSchemas, cfg.CacheTTL, cfg.CacheMaxEntries)
 	// Hand the same instance to the plugin host: a plugin that writes content
 	// must invalidate the very caches these reads are served from.
 	if o.contentStoreSink != nil {
@@ -291,4 +273,32 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	})
 
 	return r, nil
+}
+
+// newContentStore builds the content store the API serves, with its item and
+// list read caches. The content handler tests build theirs here too, so they
+// read through the same caches an install does. A test over an uncached store
+// passes whatever the store does with a cached row.
+//
+// The kernel's content caches stay in process memory whatever CACHE_DRIVER
+// says. A shared backend would not help: a write flushes the list cache whole,
+// which on a shared backend flushes every key in it. Replicas keep their
+// memory caches coherent through the instance bus.
+func newContentStore(pool db.DB, schemas core.SchemaSource, ttl time.Duration, maxEntries int) *db.ContentStore {
+	cacheCfg := cache.CacheConfig{
+		Driver:     "memory",
+		TTL:        ttl,
+		MaxEntries: maxEntries,
+	}
+	itemCache, ierr := cache.New[*domain.Content](cacheCfg, "content:item")
+	if ierr != nil {
+		slog.Error("failed to init item cache; falling back to no-cache", "error", ierr)
+		itemCache = nil
+	}
+	listCache, lerr := cache.New[[]*domain.Content](cacheCfg, "content:list")
+	if lerr != nil {
+		slog.Error("failed to init list cache; falling back to no-cache", "error", lerr)
+		listCache = nil
+	}
+	return db.NewContentStoreWithCache(pool, schemas, itemCache, listCache)
 }
