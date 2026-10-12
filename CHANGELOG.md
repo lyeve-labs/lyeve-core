@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- A draft or archived entry is no longer readable on the public content reads. The list, the read by id, the cursor list, relations, populate, revisions and the change stream serve only published entries to a caller who may not read drafts, a status filter other than `published` answers `403` for that caller, and a response that can carry drafts is sent `private, no-store`. Reading drafts takes both the read and the update permission on the content type, and an API key without an admin role also needs the read and update scopes on it. A change event that carries no status on a content type with draft and publish is held back from readers.
 - Reading entries with their related entries populated no longer writes into the copy of an entry the engine caches. Two readers populating the same entry at once could stop the engine, and a relation one reader populated could appear in another reader's plain read of that entry, past that reader's own access rules and field masks. Every reader now gets its own copy.
 - An audit entry written for a data subject's export or erasure names the subject by a SHA-256 digest of the identifier the request named, usually an email address, instead of the identifier itself. The log still proves each request happened, and anyone holding the identifier can find its entry. Entries written before this release are left as they are.
 
@@ -18,11 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Creating an entry through the Content API writes the `_status` it is given on a content type with draft and publish, and a value other than `draft`, `published` or `archived` is a validation error. Updating or restoring an entry no longer changes its status: publish and unpublish through their own routes.
 - The deprecation `Link` header on an admin-role API key, and the README, point at the documentation's new address, lyeve.com/docs. The old host redirects there.
 - A release candidate image is published under its exact tag only, `X.Y.Z-rc.N`, and never as `latest` or the minor line, so an install that follows either tag never receives a candidate.
 
 ### Fixed
 
+- Through the plugin releases this engine pins: a draft saved in the admin console is no longer served as published on the Content API, GraphQL or gRPC, and drafts saved before this release are marked as drafts again in the background. A scheduled publish sends the same webhook and flow events a save does. Failed webhook deliveries are retried, the first retry waits the base delay, and a webhook's own retry fields apply when it has no retry policy. A realtime stream no longer ends at the server's write timeout. The IP masking rule masks IPv6 addresses as well as IPv4.
 - A `json` field's default is copied into each new entry instead of shared with the schema, so a hook that edits the entry in place no longer edits the default.
 - `security.DiscoverOIDC` gives each caller its own copy of the cached issuer configuration.
 - An unchanged content entry carries the same `ETag` on every read, so `If-None-Match` answers `304` again. Content responses encode map keys in sorted order, and the entry's tag hashes those bytes. Before, an entry's fields were written in random order and its tag changed on almost every read.
