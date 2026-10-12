@@ -276,12 +276,16 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			r.With(requireRole("editor", "admin", "super_admin")).Put("/content/{schema}/{id}/revisions/{rev_id}/restore", contentHandler.RestoreRevision)
 		})
 
-		// Verify every public route wrapped by the limiter has a matching
-		// config entry. Missing config means the route has NO per-endpoint
-		// rate limiting: a silent brute-force gap.
+		// A public route with no limit of its own runs on the general limit,
+		// the global cap, unless no global cap is set: then it runs unlimited,
+		// a silent brute-force gap, and Verify names it. The routes on the
+		// general limit are listed once, so an operator can see which an
+		// administrator may give a limit of their own.
 		if publicRL != nil {
 			if err := publicRL.Verify(); err != nil {
-				slog.Error("public rate-limit config gap: add missing entries or disable rate limiting explicitly", "err", err)
+				slog.Error("public rate-limit config gap: add missing entries or set a global cap", "err", err)
+			} else if general := publicRL.GeneralRoutes(); len(general) > 0 {
+				slog.Info("public routes on the general rate limit", "routes", general)
 			}
 		}
 	})

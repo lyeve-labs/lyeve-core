@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"net/http"
 	"sort"
 	"strings"
 
@@ -93,6 +94,54 @@ func publishEngineRateLimits(host core.Host, cfg *config.Config, routes []plugin
 	if !ok {
 		return
 	}
-	setter.WithEngineRateLimits(engineRateLimits(cfg.RateLimitRPS, cfg.RateLimitBurst,
-		cfg.RateLimitPerTenant, cfg.PublicRateLimits, cfg.PublicRateLimitGlobal, api.DeclaredPublicRateLimits(routes)))
+	limits := engineRateLimits(cfg.RateLimitRPS, cfg.RateLimitBurst,
+		cfg.RateLimitPerTenant, cfg.PublicRateLimits, cfg.PublicRateLimitGlobal, api.DeclaredPublicRateLimits(routes))
+	setter.WithEngineRateLimits(append(limits, generalRouteLimits(routes, limits)...))
+}
+
+// generalRouteLimits lists the public routes with no limit of their own, which
+// run on the general limit, each with that limit's values. These are the
+// routes an administrator may give a limit of their own through
+// core.RegisterPublicRouteLimitResolver. With no general limit there is none
+// to run on, and the list is empty.
+func generalRouteLimits(routes []plugin.PluginRoutes, limits []core.EngineRateLimit) []core.EngineRateLimit {
+	own := map[string]bool{}
+	var general *core.EngineRateLimit
+	for i, l := range limits {
+		if l.Scope != "public" {
+			continue
+		}
+		if l.Endpoint == "*" {
+			general = &limits[i]
+			continue
+		}
+		own[l.Endpoint] = true
+	}
+	if general == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []core.EngineRateLimit
+	for _, pr := range routes {
+		for _, rd := range pr.Routes {
+			endpoint := rd.Method + " " + rd.Pattern
+			// HEAD follows its GET route's limit, and a credential route
+			// never takes one from an administrator.
+			if rd.Group != plugin.GroupPublic || own[endpoint] || seen[endpoint] ||
+				rd.Method == http.MethodHead || apimw.CredentialRoute(rd.Pattern) {
+				continue
+			}
+			seen[endpoint] = true
+			out = append(out, core.EngineRateLimit{
+				Scope:    "general",
+				Endpoint: endpoint,
+				Rate:     general.Rate,
+				Burst:    general.Burst,
+				Source:   general.Source,
+				Setting:  "PUBLIC_RATE_LIMIT_GLOBAL",
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Endpoint < out[j].Endpoint })
+	return out
 }
