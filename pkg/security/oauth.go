@@ -66,12 +66,17 @@ const oidcDiscoveryTTL = 10 * time.Minute
 // DiscoverOIDC fetches (or returns cached) OIDC well-known configuration from
 // the given issuer URL. Results are cached in-process for 10 minutes to avoid
 // hammering the identity provider on every login.
+//
+// Every caller gets its own copy. The cached value serves every login against
+// that issuer, so a caller that set a field on a shared one would point the
+// other logins at its endpoint until the entry expired.
 func DiscoverOIDC(ctx context.Context, issuerURL string) (*OIDCConfig, error) {
 	oidcDiscoveryMu.RLock()
 	entry := oidcDiscoveryCache[issuerURL]
 	oidcDiscoveryMu.RUnlock()
 	if entry != nil && time.Since(entry.time) < oidcDiscoveryTTL {
-		return entry.cfg, nil
+		cfg := *entry.cfg
+		return &cfg, nil
 	}
 
 	u := strings.TrimRight(issuerURL, "/") + "/.well-known/openid-configuration"
@@ -93,8 +98,9 @@ func DiscoverOIDC(ctx context.Context, issuerURL string) (*OIDCConfig, error) {
 		return nil, fmt.Errorf("oidc discover: decode: %w", err)
 	}
 
+	cached := cfg
 	oidcDiscoveryMu.Lock()
-	oidcDiscoveryCache[issuerURL] = &oidcDiscoveryEntry{cfg: &cfg, time: time.Now()}
+	oidcDiscoveryCache[issuerURL] = &oidcDiscoveryEntry{cfg: &cached, time: time.Now()}
 	oidcDiscoveryMu.Unlock()
 	return &cfg, nil
 }
