@@ -11,8 +11,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin can give a public route on the general limit a limit of its own at runtime, through `core.RegisterPublicRouteLimitResolver`. The public limiter asks it on each request to such a route, and a limit it answers replaces the general per-address cap there, higher or lower. A route with a limit of its own, such as sign-in or the token endpoint, keeps that limit whatever a resolver answers, and so does every route under `/auth`, which guards a credential: `PUBLIC_RATE_LIMITS` stays the way to move them. A HEAD request follows its GET route's limit and shares its bucket.
 - `core.EngineRateLimitsProvider` lists every public route on the general limit that can take a limit of its own, as scope `general`, with the general limit's values. HEAD routes and routes under `/auth` are not listed.
 
+### Changed
+
+- The deprecation `Link` header on an admin-role API key, and the README, point at the documentation's new address, lyeve.com/docs. The old host redirects there.
+- A release candidate image is published under its exact tag only, `X.Y.Z-rc.N`, and never as `latest` or the minor line, so an install that follows either tag never receives a candidate.
+
 ### Fixed
 
+- An unchanged content entry carries the same `ETag` on every read, so `If-None-Match` answers `304` again. Content responses encode map keys in sorted order, and the entry's tag hashes those bytes. Before, an entry's fields were written in random order and its tag changed on almost every read.
 - Every boot logged a `public rate-limit config gap` ERROR for public routes with no limit of their own, although each runs on the general per-address cap, which is the intended limit for a route that guards no credential. Those routes are now listed once at Info. The ERROR remains for the cases it was written for: a route with no limit of its own and no general cap, which runs unlimited, and a route under `/auth` with no limit of its own, which guards a credential with only the general cap.
 
 ## [0.54.1] - 2026-10-11

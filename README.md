@@ -14,7 +14,7 @@ apps read and write content through a REST API. The admin console is
 | **Image** | `ghcr.io/lyeve-labs/lyeve-core` |
 | **Go module** | `github.com/lyeve-labs/lyeve-core` |
 | **Changelog** | [CHANGELOG.md](CHANGELOG.md) |
-| **Documentation** | [docs.lyeve.com](https://docs.lyeve.com) |
+| **Documentation** | [lyeve.com/docs](https://lyeve.com/docs/) |
 
 ## How LyEve fits together
 
@@ -27,7 +27,7 @@ LyEve runs as two services, each with its own repository and image.
 
 Put both behind one address. A proxy sends `/api/admin/*` to the engine's
 admin port, `/api/v1/*` to its content API, and every other path to the
-console. The [Docker Compose guide](https://docs.lyeve.com/deploy/docker-compose/)
+console. The [Docker Compose guide](https://lyeve.com/docs/deploy/docker-compose/)
 sets up the whole stack, TLS included, on one host.
 
 ## Features
@@ -50,7 +50,7 @@ sets up the whole stack, TLS included, on one host.
   and health probes. Migrations run on boot.
 
 Plugins in the official image add content types, translated reads, scheduled
-publishing, SAML and more. The [documentation](https://docs.lyeve.com) lists
+publishing, SAML and more. The [documentation](https://lyeve.com/docs/) lists
 them.
 
 ## Quick start
@@ -103,9 +103,9 @@ A Kubernetes starting point is in [`deploy/kubernetes.yaml`](deploy/kubernetes.y
 | `LYEVE_LICENSE_KEY` | no | A license key, which enables licensed plugins in the official image. |
 
 When a setting is missing, the boot error names it. The
-[configuration reference](https://docs.lyeve.com/reference/configuration/)
+[configuration reference](https://lyeve.com/docs/reference/configuration/)
 lists every variable, and the
-[production checklist](https://docs.lyeve.com/deploy/production-checklist/)
+[production checklist](https://lyeve.com/docs/deploy/production-checklist/)
 covers the rest of a deployment.
 
 Two optional modes:
@@ -115,7 +115,7 @@ Two optional modes:
   with fresh secrets to paste into your configuration.
 - **Stateless mode** (`LYEVE_MODE=stateless`). The engine runs with no
   database, for an install that relays webhooks and runs flows. See
-  [stateless mode](https://docs.lyeve.com/deploy/stateless-mode/).
+  [stateless mode](https://lyeve.com/docs/deploy/stateless-mode/).
 
 ## Working on the source
 
@@ -158,8 +158,8 @@ The official image adds plugins on top. They are licensed under the
 [Plugin EULA](https://lyeve.com/legal/eula) and are not published. A license
 key enables licensed plugins in the official image without a new image. Enter
 it in `LYEVE_LICENSE_KEY` or on the console's license page.
-[Licensing](https://docs.lyeve.com/concepts/licensing-and-tiers/) explains how.
-[Trust](https://docs.lyeve.com/trust/source-code/) shows how to check what the
+[Licensing](https://lyeve.com/docs/concepts/licensing-and-tiers/) explains how.
+[Trust](https://lyeve.com/docs/trust/source-code/) shows how to check what the
 image contains.
 
 ## Contributing
@@ -178,7 +178,7 @@ Please do not open a public issue for it.
 
 Passwords and API keys are stored hashed, and other secrets are encrypted at
 rest with AES-256-GCM. Personal data and secrets never appear in logs or in
-error messages. [Data protection](https://docs.lyeve.com/trust/data-protection/)
+error messages. [Data protection](https://lyeve.com/docs/trust/data-protection/)
 covers what the engine stores and for how long.
 
 ## License
