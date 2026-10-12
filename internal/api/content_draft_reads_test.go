@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
+	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/internal/tenant"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -228,6 +229,34 @@ func TestContentHandler_StreamHidesDrafts(t *testing.T) {
 		// of the published row in the buffer.
 		assert.Len(t, viewer.events(t), 1, viewer.String())
 		assert.NotContains(t, viewer.String(), "unreleased")
+	})
+}
+
+// A change that carries no status, such as an upsert that names only the
+// columns it wrote, may be a change to a draft. On a schema with draft and
+// publish a stream holds it back from a caller who may not read drafts, and
+// on a schema without draft and publish every caller gets it.
+func TestContentHandler_StreamHoldsBackChangesWithoutAStatus(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"drafts", "notes"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = fakeProvider{editorChecker{}}
+		viewer := openStreamAs(t, fx.content, asReader(fx.ctx), "drafts")
+		editor := openStreamAs(t, fx.content, asEditor(fx.ctx), "drafts")
+		plain := openStreamAs(t, fx.content, asReader(fx.ctx), "notes")
+
+		send := func(schema string, data map[string]any) {
+			t.Helper()
+			require.NoError(t, fx.content.hooks.Run(fx.ctx, hooks.Event{Type: hooks.AfterUpdate, Schema: schema, Data: data}))
+		}
+		send("drafts", map[string]any{"title": "partial"})
+		send("drafts", map[string]any{"title": "released", "_status": "published"})
+		send("notes", map[string]any{"title": "plain"})
+
+		require.Eventually(t, func() bool { return len(editor.events(t)) == 2 }, 5*time.Second, 10*time.Millisecond, editor.String())
+		require.Eventually(t, func() bool { return len(viewer.events(t)) >= 1 }, 5*time.Second, 10*time.Millisecond, viewer.String())
+		require.Eventually(t, func() bool { return len(plain.events(t)) == 1 }, 5*time.Second, 10*time.Millisecond, plain.String())
+		assert.Len(t, viewer.events(t), 1, viewer.String())
+		assert.NotContains(t, viewer.String(), "partial")
+		assert.Contains(t, plain.String(), "plain")
 	})
 }
 

@@ -15,6 +15,21 @@ func ContentPublished(data map[string]any) bool {
 	return !ok || status == ContentStatusPublished
 }
 
+// ContentEventPublished reports whether a content event's payload is
+// public, failing closed where ContentPublished fails open. On a schema with
+// draft and publish only a payload whose status reads published is public:
+// a writer that sends only the columns it changed sends no status, and that
+// change may be to a draft. On any other schema every payload is public. A
+// caller that cannot tell whether the schema has draft and publish passes
+// true.
+func ContentEventPublished(draftPublish bool, data map[string]any) bool {
+	if !draftPublish {
+		return true
+	}
+	status, ok := data[ContentStatusKey].(string)
+	return ok && status == ContentStatusPublished
+}
+
 // DraftPermissionChecker returns the checker that decides who may read
 // drafts on a host: the registered rule engine when there is one, and the
 // kernel's role-only checker otherwise, so a host without rules is closed

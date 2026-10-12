@@ -49,6 +49,17 @@ func TestCanReadDrafts_SessionsAndKeys(t *testing.T) {
 	}
 }
 
+// An event that carries no status fails closed on a schema with draft and
+// publish, where it may be a writer's partial payload about a draft, and is
+// public on any other schema.
+func TestContentEventPublished_FailsClosedOnDraftPublishSchemas(t *testing.T) {
+	for _, data := range []map[string]any{{"title": "partial"}, {"_status": nil}, {"_status": "draft"}, {"_status": "archived"}, {"_status": 1}} {
+		assert.False(t, ContentEventPublished(true, data), "%v", data)
+		assert.True(t, ContentEventPublished(false, data), "%v", data)
+	}
+	assert.True(t, ContentEventPublished(true, map[string]any{"_status": "published"}))
+}
+
 func TestContentPublished_ReadsTheStatusKey(t *testing.T) {
 	assert.True(t, ContentPublished(map[string]any{"title": "no status column"}))
 	assert.True(t, ContentPublished(map[string]any{"_status": nil}))

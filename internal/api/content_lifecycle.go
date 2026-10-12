@@ -240,6 +240,17 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// Decided once: a stream is one caller for its whole life, and a change
 	// to a draft goes only to a caller who may read drafts on the schema.
 	drafts := h.canReadDrafts(r, schemaName)
+	// On a schema with draft and publish a change without a status is held
+	// back from that caller too: a writer that sends only the columns it
+	// changed may be writing a draft. A schema the source cannot read is
+	// treated as having draft and publish. A handler built with no source
+	// at all has no schema that could have one.
+	draftPublish := h.schemas != nil
+	if h.schemas != nil {
+		if sc, err := h.schemas.GetByName(r.Context(), schemaName); err == nil && sc != nil {
+			draftPublish = sc.WithDraftPublish
+		}
+	}
 	ch := make(chan change, 16)
 
 	// The hook runs on the writer's goroutine, so it only filters and copies.
@@ -252,7 +263,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if ev.TenantID != callerTenant {
 				return nil
 			}
-			if !drafts && !isPublished(ev.Data) {
+			if !drafts && !core.ContentEventPublished(draftPublish, ev.Data) {
 				return nil
 			}
 			select {
