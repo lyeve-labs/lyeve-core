@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -184,10 +185,18 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 			src := eng.SchemaSource()
 			fn(t, schemaContentFixture{
 				ctx:     ctx,
-				content: &ContentHandler{store: db.NewContentStore(pool, src), schemas: src, hooks: hooks.NewRegistry()},
+				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, hooks: hooks.NewRegistry()},
 			})
 		})
 	}
+}
+
+// newTestContentStore is the store an install serves content from, read
+// caches included, at the default CACHE_TTL and CACHE_MAX_ENTRIES. A handler
+// test over an uncached store cannot see what a cached row does to a request
+// that shares it.
+func newTestContentStore(pool db.DB, src core.SchemaSource) *db.ContentStore {
+	return newContentStore(pool, src, 60*time.Second, 1000)
 }
 
 // create posts one document to the content route and returns the response.

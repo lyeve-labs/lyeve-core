@@ -33,7 +33,10 @@ func ApplyDefaults(sc *domain.Schema, data map[string]any) map[string]any {
 				continue
 			}
 		}
-		data[f.Name] = f.Default
+		// The schema registry hands one definition to every request, and a
+		// before-create hook may edit the entry in place, so a map or list
+		// default is copied rather than shared with the registry.
+		data[f.Name] = domain.CloneJSONValue(f.Default)
 	}
 	return data
 }
