@@ -241,6 +241,15 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // goes through the field mask and the after-response hooks a read applies,
 // so the stream serves no field that GET would withhold from this caller.
 //
+// The read grant, the draft grant, the mask and whether the schema has draft
+// and publish are asked again for every event, not held from the open. A
+// stream lives for hours, and an operator who revokes a read, takes away
+// draft access, hides a field or switches draft and publish on expects the
+// next event to obey it, not the next reconnect. A refused read ends the stream
+// after an error event, and so does a rule store that cannot answer, because
+// an event it cannot judge is not sent. A change that may be to a draft is
+// skipped while the caller may not read drafts, and the stream stays open.
+//
 // The server's write deadline is set once, when it reads the request, and the
 // first write after it fails and ends the stream. So every write moves the
 // deadline two heartbeats ahead first, and a comment line every heartbeat
@@ -253,8 +262,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
-	if !maskOK {
+	if _, ok := h.maskFor(w, r, schemaName); !ok {
 		return
 	}
 
@@ -274,20 +282,6 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		data  map[string]any
 	}
 	callerTenant := core.TenantIDFromCtx(r.Context())
-	// Decided once: a stream is one caller for its whole life, and a change
-	// to a draft goes only to a caller who may read drafts on the schema.
-	drafts := h.canReadDrafts(r, schemaName)
-	// On a schema with draft and publish a change without a status is held
-	// back from that caller too: a writer that sends only the columns it
-	// changed may be writing a draft. A schema the source cannot read is
-	// treated as having draft and publish. A handler built with no source
-	// at all has no schema that could have one.
-	draftPublish := h.schemas != nil
-	if h.schemas != nil {
-		if sc, err := h.schemas.GetByName(r.Context(), schemaName); err == nil && sc != nil {
-			draftPublish = sc.WithDraftPublish
-		}
-	}
 	ch := make(chan change, 16)
 
 	// The hook runs on the writer's goroutine, so it only filters and copies.
@@ -298,9 +292,6 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	for _, et := range []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete} {
 		id := h.hooks.RegisterDynamic(schemaName, et, func(_ context.Context, ev hooks.Event) error {
 			if ev.TenantID != callerTenant {
-				return nil
-			}
-			if !drafts && !core.ContentEventPublished(draftPublish, ev.Data) {
 				return nil
 			}
 			select {
@@ -339,6 +330,18 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		case c := <-ch:
+			mask, send, err := h.streamAccess(r, schemaName, c.data)
+			if err != nil {
+				if !deadline.Hold() {
+					return
+				}
+				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
+				flusher.Flush()
+				return
+			}
+			if !send {
+				continue
+			}
 			data := mask(c.data)
 			h.runAfterResponse(r, schemaName, "list", data)
 			payload, err := jsonpool.MarshalJSON(map[string]any{"event": c.event, "schema": schemaName, "data": data})
@@ -351,5 +354,60 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload) // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		}
+	}
+}
+
+// streamAccess asks whether the caller may still read schema and resolves
+// the mask that applies now. It is the open's checks without a response,
+// because by the time an event arrives the headers have been sent. send is
+// false for a change that may be to a draft when the caller may not read
+// drafts now, which skips that change without ending the stream.
+func (h *ContentHandler) streamAccess(r *http.Request, schema string, data map[string]any) (mask func(map[string]any) map[string]any, send bool, err error) {
+	if err := h.authorize(r, schema, "read"); err != nil {
+		return nil, false, err
+	}
+	if !core.ContentEventPublished(h.streamDraftPublish(r, schema), data) && !h.canReadDrafts(r, schema) {
+		return nil, false, nil
+	}
+	mask, err = h.fieldMask(r, schema)
+	if err != nil {
+		return nil, false, err
+	}
+	return mask, true, nil
+}
+
+// streamDraftPublish reports whether schema has draft and publish now. It is
+// asked for every event, because an operator can switch the mode on while a
+// stream is open and every change after that may be a draft. On a schema with
+// draft and publish a change without a status counts as one: a writer that
+// sends only the columns it changed may be writing a draft. A schema the
+// source cannot read is treated as having draft and publish, so a failed
+// lookup withholds a change rather than sending it. A handler built with no
+// source at all has no schema that could have one.
+func (h *ContentHandler) streamDraftPublish(r *http.Request, schema string) bool {
+	if h.schemas == nil {
+		return false
+	}
+	sc, err := h.schemas.GetByName(r.Context(), schema)
+	if err != nil || sc == nil {
+		return true
+	}
+	return sc.WithDraftPublish
+}
+
+// streamEndReason is the message the error event carries, in the words the
+// content routes answer with, and never the rule store's own text.
+func streamEndReason(err error) string {
+	switch {
+	case errors.Is(err, errNoCaller):
+		return "authentication required"
+	case errors.Is(err, errSchemaNotAllowed):
+		return "schema not allowed for this credential"
+	case errors.Is(err, errScopeDenied):
+		return "insufficient scope"
+	case errors.Is(err, errPermissionDenied):
+		return "permission denied"
+	default:
+		return "access could not be checked"
 	}
 }
