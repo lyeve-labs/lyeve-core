@@ -22,7 +22,9 @@ import (
 //
 // wrapperAuditExempt names wrappers that can never front a live connection,
 // each with the reason, keyed "dir::Type".
-var wrapperAuditExempt = map[string]string{}
+var wrapperAuditExempt = map[string]string{
+	"internal/api::discardResponse": "a content stream replays the key middleware against it to ask whether a key still admits its caller, and nothing written to it reaches a connection",
+}
 
 // A dot-prefixed directory is skipped too, by wrapperAuditSkipDir: those hold
 // caches and second copies of trees the walk already reaches at their real
