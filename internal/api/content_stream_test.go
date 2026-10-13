@@ -120,8 +120,15 @@ func openStreamAs(t *testing.T, h *ContentHandler, base context.Context, schema 
 // handler returns, so a test can see the stream end on its own.
 func openStreamDone(t *testing.T, h *ContentHandler, base context.Context, schema string) (*tenantStreamWriter, <-chan struct{}) {
 	t.Helper()
-	ctx, cancel := context.WithCancel(base)
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/content/"+schema+"/stream", nil)
+	return openStreamRequest(t, h, r.WithContext(base), schema)
+}
+
+// openStreamRequest is openStreamDone for a request the test built, such as
+// one that carries a credential in a header.
+func openStreamRequest(t *testing.T, h *ContentHandler, r *http.Request, schema string) (*tenantStreamWriter, <-chan struct{}) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(r.Context())
 	r = chiCtx(r.WithContext(ctx), map[string]string{"schema": schema})
 
 	w := newTenantStreamWriter()

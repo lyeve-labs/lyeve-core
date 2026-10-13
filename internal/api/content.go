@@ -38,6 +38,11 @@ type ContentHandler struct {
 	// same way. A pointer, so a copy of the handler shares it. Nil warns on
 	// every stream.
 	streamDeadlineWarn *sync.Once
+	// streamCredential asks whether the credential a change stream opened
+	// with still admits its caller, before each event. The router sets it
+	// from the checks every request passes. Nil asks nothing, which is a
+	// handler built outside the router.
+	streamCredential func(*http.Request) error
 }
 
 // revisionStore resolves the store that keeps revision history, or answers

@@ -250,6 +250,11 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // an event it cannot judge is not sent. A change that may be to a draft is
 // skipped while the caller may not read drafts, and the stream stays open.
 //
+// The credential is held to the same terms for as long as the stream lives.
+// A token ends the stream when it expires, and each event first asks whether
+// the credential still admits the caller, so a sign-out, a password a super
+// admin sets, an erasure or a revoked key ends it at the next event.
+//
 // The server's write deadline is set once, when it reads the request, and the
 // first write after it fails and ends the stream. So every write moves the
 // deadline two heartbeats ahead first, and a comment line every heartbeat
@@ -313,6 +318,21 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !deadline.Hold() {
 		return
 	}
+	// end sends the error event that says why the stream stops. The caller
+	// returns after it.
+	end := func(err error) {
+		if !deadline.Hold() {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
+		flusher.Flush()
+	}
+	var expired <-chan time.Time
+	if c := claimsFromCtx(r); c != nil && c.ExpiresAt != nil {
+		expiry := time.NewTimer(time.Until(c.ExpiresAt.Time))
+		defer expiry.Stop()
+		expired = expiry.C
+	}
 	_, _ = fmt.Fprintf(w, ": connected to %s stream\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
 	flusher.Flush()
 
@@ -329,14 +349,13 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			}
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
+		case <-expired:
+			end(errCredentialEnded)
+			return
 		case c := <-ch:
 			mask, send, err := h.streamAccess(r, schemaName, c.data)
 			if err != nil {
-				if !deadline.Hold() {
-					return
-				}
-				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
-				flusher.Flush()
+				end(err)
 				return
 			}
 			if !send {
@@ -363,6 +382,11 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 // false for a change that may be to a draft when the caller may not read
 // drafts now, which skips that change without ending the stream.
 func (h *ContentHandler) streamAccess(r *http.Request, schema string, data map[string]any) (mask func(map[string]any) map[string]any, send bool, err error) {
+	if h.streamCredential != nil {
+		if err := h.streamCredential(r); err != nil {
+			return nil, false, err
+		}
+	}
 	if err := h.authorize(r, schema, "read"); err != nil {
 		return nil, false, err
 	}
@@ -399,6 +423,8 @@ func (h *ContentHandler) streamDraftPublish(r *http.Request, schema string) bool
 // content routes answer with, and never the rule store's own text.
 func streamEndReason(err error) string {
 	switch {
+	case errors.Is(err, errCredentialEnded):
+		return "credential expired or revoked"
 	case errors.Is(err, errNoCaller):
 		return "authentication required"
 	case errors.Is(err, errSchemaNotAllowed):
