@@ -2,8 +2,8 @@
 // integration tests. Each helper returns a db.DB backed by a fresh database
 // within a shared container (one per dialect per test binary). The container
 // is started once via sync.Once. Each test gets its own database for
-// isolation. Postgres uses TEMPLATE for instant DB creation, while MySQL/MSSQL
-// create + migrate per test.
+// isolation. Postgres uses TEMPLATE for instant DB creation, while MySQL and
+// MSSQL create and migrate each one, a few ahead of the tests that take them.
 package testdb
 
 import (
@@ -271,11 +271,12 @@ func postgresWithDSN(t *testing.T, maxConns int) (db.DB, string) {
 // MySQL
 
 var mysqlShared struct {
-	once sync.Once
-	ctr  *mysql.MySQLContainer
-	host string
-	port string
-	err  error
+	once  sync.Once
+	ctr   *mysql.MySQLContainer
+	host  string
+	port  string
+	err   error
+	ready readyQueue
 }
 
 func ensureMySQL(t *testing.T) {
@@ -392,42 +393,58 @@ func mysqlWithDSN(t *testing.T, maxConns int) (db.DB, string) {
 		maxConns = DefaultMaxConns
 	}
 	ctx := context.Background()
-	dbName := nextDBName("mysqltest")
-
-	adminDB, err := sql.Open("mysql", mysqlRootDSN(""))
-	if err != nil {
-		t.Fatalf("mysql admin open: %v", err)
+	r := mysqlShared.ready.take(prepareMySQL)
+	dbName := r.name
+	if dbName != "" {
+		t.Cleanup(func() {
+			d, err2 := sql.Open("mysql", mysqlRootDSN(""))
+			if err2 != nil {
+				return
+			}
+			defer d.Close()
+			_, _ = d.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+dbName) // err suppressed: best-effort test cleanup
+		})
 	}
-	defer adminDB.Close()
-	if _, err := adminDB.ExecContext(ctx, "CREATE DATABASE "+dbName); err != nil {
-		t.Fatalf("mysql CREATE DATABASE %s: %v", dbName, err)
+	if r.err != nil {
+		t.Fatal(r.err)
 	}
-	t.Cleanup(func() {
-		d, err2 := sql.Open("mysql", mysqlRootDSN(""))
-		if err2 != nil {
-			return
-		}
-		defer d.Close()
-		_, _ = d.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+dbName) // err suppressed: best-effort test cleanup
-	})
 
 	d, err := db.Connect(ctx, mysqlRootDSN(dbName), int32(maxConns))
 	if err != nil {
 		t.Fatalf("connect to mysql %s: %v", dbName, err)
 	}
 	t.Cleanup(func() { d.Close() })
+	t.Logf("mysql %s: applied %d migrations", dbName, r.migrations)
 
-	n, err := db.Migrate(mysqlMigrateDSN(dbName), migrationsRoot(), nil)
-	if err != nil {
-		t.Fatalf("migrate mysql %s: %v", dbName, err)
-	}
-	t.Logf("mysql %s: applied %d migrations", dbName, n)
-
-	if _, err := applyRegisteredDDL(ctx, d.SQLDB(), "mysql", 0); err != nil {
+	// Anything registered after the database was prepared goes on it now.
+	if _, err := applyRegisteredDDL(ctx, d.SQLDB(), "mysql", r.ddl); err != nil {
 		t.Fatal(err)
 	}
 
 	return d, mysqlRootDSN(dbName)
+}
+
+// prepareMySQL creates a test database on the shared container, runs core
+// migrations and the registered DDL in it, and returns it for a test to take.
+func prepareMySQL() readyDB {
+	dbName := nextDBName("mysqltest")
+	adminDB, err := sql.Open("mysql", mysqlRootDSN(""))
+	if err != nil {
+		return readyDB{err: fmt.Errorf("mysql admin open: %w", err)}
+	}
+	defer adminDB.Close()
+	if _, err := adminDB.ExecContext(context.Background(), "CREATE DATABASE "+dbName); err != nil {
+		return readyDB{err: fmt.Errorf("mysql CREATE DATABASE %s: %w", dbName, err)}
+	}
+	n, err := db.Migrate(mysqlMigrateDSN(dbName), migrationsRoot(), nil)
+	if err != nil {
+		return readyDB{name: dbName, err: fmt.Errorf("migrate mysql %s: %w", dbName, err)}
+	}
+	ddl, err := applyRegisteredDDLAt("mysql", mysqlRootDSN(dbName), "mysql")
+	if err != nil {
+		return readyDB{name: dbName, err: err}
+	}
+	return readyDB{name: dbName, migrations: n, ddl: ddl}
 }
 
 // MSSQL
@@ -439,6 +456,7 @@ var mssqlShared struct {
 	port     string
 	adminDSN string // DSN to master (no database specified)
 	err      error
+	ready    readyQueue
 }
 
 func ensureMSSQL(t *testing.T) {
@@ -511,27 +529,24 @@ func mssqlWithDSN(t *testing.T, maxConns int) (db.DB, string) {
 		maxConns = DefaultMaxConns
 	}
 	ctx := context.Background()
-	dbName := nextDBName("mssqltest")
-
-	adminDB, err := sql.Open("sqlserver", mssqlShared.adminDSN)
-	if err != nil {
-		t.Fatalf("mssql admin open: %v", err)
+	r := mssqlShared.ready.take(prepareMSSQL)
+	dbName := r.name
+	if dbName != "" {
+		t.Cleanup(func() {
+			d, err2 := sql.Open("sqlserver", mssqlShared.adminDSN)
+			if err2 != nil {
+				return
+			}
+			defer d.Close()
+			_, _ = d.ExecContext(context.Background(), // err suppressed: best-effort test cleanup
+				fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName))
+			_, _ = d.ExecContext(context.Background(), // err suppressed: best-effort test cleanup
+				fmt.Sprintf("DROP DATABASE [%s]", dbName))
+		})
 	}
-	defer adminDB.Close()
-	if _, err := adminDB.ExecContext(ctx, fmt.Sprintf("CREATE DATABASE [%s]", dbName)); err != nil {
-		t.Fatalf("mssql CREATE DATABASE %s: %v", dbName, err)
+	if r.err != nil {
+		t.Fatal(r.err)
 	}
-	t.Cleanup(func() {
-		d, err2 := sql.Open("sqlserver", mssqlShared.adminDSN)
-		if err2 != nil {
-			return
-		}
-		defer d.Close()
-		_, _ = d.ExecContext(context.Background(), // err suppressed: best-effort test cleanup
-			fmt.Sprintf("ALTER DATABASE [%s] SET SINGLE_USER WITH ROLLBACK IMMEDIATE", dbName))
-		_, _ = d.ExecContext(context.Background(), // err suppressed: best-effort test cleanup
-			fmt.Sprintf("DROP DATABASE [%s]", dbName))
-	})
 
 	testDSN := mssqlDSN(dbName)
 	d, err := db.Connect(ctx, testDSN, int32(maxConns))
@@ -539,16 +554,36 @@ func mssqlWithDSN(t *testing.T, maxConns int) (db.DB, string) {
 		t.Fatalf("connect to mssql %s: %v", dbName, err)
 	}
 	t.Cleanup(func() { d.Close() })
+	t.Logf("mssql %s: applied %d migrations", dbName, r.migrations)
 
-	n, err := db.Migrate(testDSN, migrationsRoot(), nil)
-	if err != nil {
-		t.Fatalf("migrate mssql %s: %v", dbName, err)
-	}
-	t.Logf("mssql %s: applied %d migrations", dbName, n)
-
-	if _, err := applyRegisteredDDL(ctx, d.SQLDB(), "mssql", 0); err != nil {
+	// Anything registered after the database was prepared goes on it now.
+	if _, err := applyRegisteredDDL(ctx, d.SQLDB(), "mssql", r.ddl); err != nil {
 		t.Fatal(err)
 	}
 
 	return d, testDSN
+}
+
+// prepareMSSQL creates a test database on the shared container, runs core
+// migrations and the registered DDL in it, and returns it for a test to take.
+func prepareMSSQL() readyDB {
+	dbName := nextDBName("mssqltest")
+	adminDB, err := sql.Open("sqlserver", mssqlShared.adminDSN)
+	if err != nil {
+		return readyDB{err: fmt.Errorf("mssql admin open: %w", err)}
+	}
+	defer adminDB.Close()
+	if _, err := adminDB.ExecContext(context.Background(), fmt.Sprintf("CREATE DATABASE [%s]", dbName)); err != nil {
+		return readyDB{err: fmt.Errorf("mssql CREATE DATABASE %s: %w", dbName, err)}
+	}
+	testDSN := mssqlDSN(dbName)
+	n, err := db.Migrate(testDSN, migrationsRoot(), nil)
+	if err != nil {
+		return readyDB{name: dbName, err: fmt.Errorf("migrate mssql %s: %w", dbName, err)}
+	}
+	ddl, err := applyRegisteredDDLAt("sqlserver", testDSN, "mssql")
+	if err != nil {
+		return readyDB{name: dbName, err: err}
+	}
+	return readyDB{name: dbName, migrations: n, ddl: ddl}
 }
