@@ -241,6 +241,47 @@ func TestContentHandler_Stream_RechecksAccessPerEvent(t *testing.T) {
 	})
 }
 
+// draftRules lets every role read and lets editor update until the grant is
+// taken away, so a test can revoke draft access from an open stream. It
+// exempts super_admin, so the test's writer is never the one refused.
+type draftRules struct{ update atomic.Bool }
+
+func (c *draftRules) Allowed(_ context.Context, roles []string, _, action string) (bool, error) {
+	if slices.Contains(roles, core.RoleSuperAdmin) {
+		return true, nil
+	}
+	if action == core.ActionUpdate {
+		return c.update.Load(), nil
+	}
+	return action == core.ActionRead, nil
+}
+
+// Draft access is asked for every change, like the read grant and the mask.
+// It was decided once when the stream opened, so an editor whose update grant
+// was taken away kept receiving every draft until the client reconnected.
+func TestContentHandler_Stream_RechecksDraftAccessPerEvent(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"drafts"}, func(t *testing.T, fx schemaContentFixture) {
+		rules := &draftRules{}
+		rules.update.Store(true)
+		fx.content.perms = fakeProvider{rules}
+		editor := openStreamAs(t, fx.content, asEditor(fx.ctx), "drafts")
+
+		fx.createStatus(t, "drafts", "draft", map[string]any{"title": "before the revoke"})
+		require.Eventually(t, func() bool { return len(editor.events(t)) == 1 },
+			5*time.Second, 10*time.Millisecond, "the first draft never arrived")
+
+		rules.update.Store(false)
+		fx.createStatus(t, "drafts", "draft", map[string]any{"title": "after the revoke"})
+		fx.createStatus(t, "drafts", "published", map[string]any{"title": "released"})
+		require.Eventually(t, func() bool { return strings.Contains(editor.String(), "released") },
+			5*time.Second, 10*time.Millisecond, "the published row never arrived")
+		// The draft was written first, so had it been sent it would be ahead
+		// of the published row.
+		assert.Len(t, editor.events(t), 2, editor.String())
+		assert.NotContains(t, editor.String(), "after the revoke")
+	})
+}
+
 // The error event that ends a stream names the refusal in the words the
 // content routes answer with, and a rule store's failure never reaches the
 // client as its own text.

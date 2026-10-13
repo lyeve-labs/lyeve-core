@@ -241,11 +241,13 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // goes through the field mask and the after-response hooks a read applies,
 // so the stream serves no field that GET would withhold from this caller.
 //
-// The read grant and the mask are asked again for every event, not held from
-// the open. A stream lives for hours, and an operator who revokes a read or
-// hides a field expects the next event to obey it, not the next reconnect. A
-// refused read ends the stream after an error event, and so does a rule store
-// that cannot answer, because an event it cannot judge is not sent.
+// The read grant, the draft grant and the mask are asked again for every
+// event, not held from the open. A stream lives for hours, and an operator who
+// revokes a read, takes away draft access or hides a field expects the next
+// event to obey it, not the next reconnect. A refused read ends the stream
+// after an error event, and so does a rule store that cannot answer, because
+// an event it cannot judge is not sent. A change that may be to a draft is
+// skipped while the caller may not read drafts, and the stream stays open.
 //
 // The server's write deadline is set once, when it reads the request, and the
 // first write after it fails and ends the stream. So every write moves the
@@ -275,18 +277,17 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 
 	type change struct {
-		event string
-		data  map[string]any
+		event     string
+		data      map[string]any
+		published bool
 	}
 	callerTenant := core.TenantIDFromCtx(r.Context())
-	// Decided once: a stream is one caller for its whole life, and a change
-	// to a draft goes only to a caller who may read drafts on the schema.
-	drafts := h.canReadDrafts(r, schemaName)
-	// On a schema with draft and publish a change without a status is held
-	// back from that caller too: a writer that sends only the columns it
-	// changed may be writing a draft. A schema the source cannot read is
-	// treated as having draft and publish. A handler built with no source
-	// at all has no schema that could have one.
+	// A change to a draft goes only to a caller who may read drafts on the
+	// schema. On a schema with draft and publish a change without a status
+	// counts as one: a writer that sends only the columns it changed may be
+	// writing a draft. A schema the source cannot read is treated as having
+	// draft and publish. A handler built with no source at all has no schema
+	// that could have one.
 	draftPublish := h.schemas != nil
 	if h.schemas != nil {
 		if sc, err := h.schemas.GetByName(r.Context(), schemaName); err == nil && sc != nil {
@@ -305,11 +306,9 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			if ev.TenantID != callerTenant {
 				return nil
 			}
-			if !drafts && !core.ContentEventPublished(draftPublish, ev.Data) {
-				return nil
-			}
+			published := core.ContentEventPublished(draftPublish, ev.Data)
 			select {
-			case ch <- change{event: string(ev.Type), data: maps.Clone(ev.Data)}:
+			case ch <- change{event: string(ev.Type), data: maps.Clone(ev.Data), published: published}:
 			default: // drop if buffer full: client is too slow
 			}
 			return nil
@@ -344,7 +343,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, ": heartbeat\n\n") // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		case c := <-ch:
-			mask, err := h.streamAccess(r, schemaName)
+			mask, send, err := h.streamAccess(r, schemaName, c.published)
 			if err != nil {
 				if !deadline.Hold() {
 					return
@@ -352,6 +351,9 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 				_, _ = fmt.Fprintf(w, "event: error\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
 				flusher.Flush()
 				return
+			}
+			if !send {
+				continue
 			}
 			data := mask(c.data)
 			h.runAfterResponse(r, schemaName, "list", data)
@@ -370,12 +372,21 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 // streamAccess asks whether the caller may still read schema and resolves
 // the mask that applies now. It is the open's checks without a response,
-// because by the time an event arrives the headers have been sent.
-func (h *ContentHandler) streamAccess(r *http.Request, schema string) (func(map[string]any) map[string]any, error) {
+// because by the time an event arrives the headers have been sent. send is
+// false for a change that may be to a draft when the caller may not read
+// drafts now, which skips that change without ending the stream.
+func (h *ContentHandler) streamAccess(r *http.Request, schema string, published bool) (mask func(map[string]any) map[string]any, send bool, err error) {
 	if err := h.authorize(r, schema, "read"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return h.fieldMask(r, schema)
+	if !published && !h.canReadDrafts(r, schema) {
+		return nil, false, nil
+	}
+	mask, err = h.fieldMask(r, schema)
+	if err != nil {
+		return nil, false, err
+	}
+	return mask, true, nil
 }
 
 // streamEndReason is the message the error event carries, in the words the
