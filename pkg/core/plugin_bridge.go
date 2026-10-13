@@ -183,6 +183,33 @@ type RouteDecl struct {
 	// does not open it to a cross-site form.
 	MediaTypes []string
 
+	// ExposeHeaders names response headers this route sets that a script on
+	// another origin has to be able to read. A browser shows such a script the
+	// CORS-safelisted headers and the ones Access-Control-Expose-Headers
+	// names, and nothing else, so a header the route answers with, such as the
+	// id of an operation the caller wants to follow, is invisible to it
+	// otherwise.
+	//
+	// The engine adds the names to the CORS_EXPOSE_HEADERS list every router
+	// sends, because the CORS answer is given before the request is routed.
+	// Naming a header that a response does not carry exposes nothing, and the
+	// origin check is unchanged: only an origin the operator allowed is told
+	// anything. A name that is not a header field name, and the wildcard, are
+	// logged and ignored.
+	ExposeHeaders []string
+
+	// AllowHeaders names request headers this route reads that a script on
+	// another origin has to be able to send. A browser sends such a script's
+	// header outside the CORS-safelisted set only after a preflight answer
+	// names it in Access-Control-Allow-Headers, so a route that reads one,
+	// such as the id a caller gives an operation in order to follow it, is
+	// closed to that script otherwise.
+	//
+	// The engine adds the names to the CORS_ALLOW_HEADERS list every router's
+	// preflight answers with, for the reason ExposeHeaders gives, and ignores
+	// the same names it does.
+	AllowHeaders []string
+
 	// SelfScoping says this route carries the tenant it is for inside the
 	// request itself, in something the engine issued and verifies, and so must
 	// not be refused for arriving on a hostname that resolves no tenant.

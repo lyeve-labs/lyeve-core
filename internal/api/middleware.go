@@ -120,14 +120,17 @@ type CORSConfig struct {
 	AllowCredentials bool
 	PreflightMaxAge  int    // seconds, default 3600 (1 hour)
 	AllowMethods     string // comma-separated, default "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-	AllowHeaders     string // comma-separated, default "Content-Type, Authorization, X-API-Key, X-Tenant-ID, X-Correlation-ID"
+	// AllowHeaders is comma-separated. The routers pass CORS_ALLOW_HEADERS
+	// with every header a declared route reads added to it.
+	AllowHeaders string
 
 	// ExposeHeaders names the response headers a cross-origin script is
 	// allowed to read. The Fetch Standard exposes only the CORS-safelisted
 	// ones by default, so without this a browser client cannot read the
 	// request id it needs for a bug report, nor the rate-limit values it
 	// needs to back off with, even though both are on the response.
-	// Read from CORS_EXPOSE_HEADERS. Empty omits the header entirely.
+	// The routers pass CORS_EXPOSE_HEADERS with every header a declared
+	// route exposes added to it. Empty omits the header entirely.
 	ExposeHeaders string // comma-separated
 
 	// AllowedDomains is a suffix allowlist for dynamic CORS origins supplied
