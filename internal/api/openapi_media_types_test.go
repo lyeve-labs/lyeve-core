@@ -34,13 +34,20 @@ import (
 )
 
 // documentedOperation is what a client reads from one operation of the
-// document: its parameters and the media types of its responses.
+// document: its parameters, the credentials and roles it asks for, its
+// request body and the media types of its responses.
 type documentedOperation struct {
 	Parameters []struct {
 		Name   string         `json:"name"`
 		In     string         `json:"in"`
 		Schema map[string]any `json:"schema"`
 	} `json:"parameters"`
+	Security    []map[string][]string `json:"security"`
+	Roles       []string              `json:"x-roles"`
+	RequestBody *struct {
+		Required bool                       `json:"required"`
+		Content  map[string]json.RawMessage `json:"content"`
+	} `json:"requestBody"`
 	Responses map[string]struct {
 		Description string                     `json:"description"`
 		Content     map[string]json.RawMessage `json:"content"`
@@ -238,6 +245,13 @@ func (h *schemaHost) Schema() core.SchemaEngine { return h.engine }
 // later requests see, and every engine write answers JSON, so an operation
 // other than GET may declare no other media type.
 func TestOpenAPI_MediaTypesMatchWhatTheRoutesServe(t *testing.T) {
+	forEachProbeDialect(t, probeDocumentedMediaTypes)
+}
+
+// forEachProbeDialect runs probe against a database of each dialect the run
+// selects.
+func forEachProbeDialect(t *testing.T, probe func(*testing.T, db.DB)) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("needs a database")
 	}
@@ -253,12 +267,28 @@ func TestOpenAPI_MediaTypesMatchWhatTheRoutesServe(t *testing.T) {
 			if !testdb.ShouldTest(d.name) {
 				t.Skipf("CI_DIALECT != %s", d.name)
 			}
-			probeDocumentedMediaTypes(t, d.open(t))
+			probe(t, d.open(t))
 		})
 	}
 }
 
-func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
+// documentProbe is an install whose documented routes a test requests: both
+// routers over one database, a schema engine holding a collection with one
+// record, and the document the admin router serves to a super admin.
+type documentProbe struct {
+	cfg     *config.Config
+	users   *db.UserStore
+	servers map[string]*httptest.Server
+	served  map[string]map[string]bool
+	values  map[string]string
+	doc     documentedPaths
+	// token is a super admin's session.
+	token string
+}
+
+// newDocumentProbe builds the install. opts reach both routers.
+func newDocumentProbe(t *testing.T, pool db.DB, opts ...RouterOption) *documentProbe {
+	t.Helper()
 	ctx := context.Background()
 	eng := schemaengine.New(testhost.New(pool))
 	require.NoError(t, eng.Apply(ctx, "notes", json.RawMessage(
@@ -274,38 +304,67 @@ func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
 		MaxJSONBodyBytes: 1 << 20,
 		CacheTTL:         60 * time.Second,
 	}
-	adminRouter, err := NewAdminRouter(pool, cfg, WithLifetime(testLifetime(t)),
-		WithSchemaSource(eng.SchemaSource()), WithScalingHost(&schemaHost{Host: testhost.New(pool), engine: eng}))
+	adminRouter, err := NewAdminRouter(pool, cfg, append([]RouterOption{WithLifetime(testLifetime(t)),
+		WithSchemaSource(eng.SchemaSource()), WithScalingHost(&schemaHost{Host: testhost.New(pool), engine: eng})}, opts...)...)
 	require.NoError(t, err)
-	apiRouter, err := NewAPIRouter(pool, cfg, nil, WithLifetime(testLifetime(t)), WithSchemaSource(eng.SchemaSource()))
+	apiRouter, err := NewAPIRouter(pool, cfg, nil, append([]RouterOption{WithLifetime(testLifetime(t)),
+		WithSchemaSource(eng.SchemaSource())}, opts...)...)
 	require.NoError(t, err)
-	servers := map[string]*httptest.Server{"admin": httptest.NewServer(adminRouter), "api": httptest.NewServer(apiRouter)}
-	for _, s := range servers {
+	p := &documentProbe{
+		cfg:     cfg,
+		users:   db.NewUserStore(pool),
+		servers: map[string]*httptest.Server{"admin": httptest.NewServer(adminRouter), "api": httptest.NewServer(apiRouter)},
+		served:  map[string]map[string]bool{"admin": collectRoutes(t, adminRouter), "api": collectRoutes(t, apiRouter)},
+	}
+	for _, s := range p.servers {
 		t.Cleanup(s.Close)
 	}
-	served := map[string]map[string]bool{"admin": collectRoutes(t, adminRouter), "api": collectRoutes(t, apiRouter)}
+	p.token = p.session(t, "super_admin")
 
-	user, err := db.NewUserStore(pool).Create(ctx, "probe@example.com", "$2a$10$placeholder-hash-for-test", []string{"super_admin"}, "")
-	require.NoError(t, err)
-	token, err := auth.Sign(cfg.JWTSecret, cfg.JWTExpirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion)
-	require.NoError(t, err)
-
-	status, _, body := sendProbe(t, http.MethodPost, servers["api"].URL+"/api/v1/content/notes", token, "", `{"data":{"title":"probe"}}`)
+	status, _, body := sendProbe(t, http.MethodPost, p.servers["api"].URL+"/api/v1/content/notes", p.token, "", `{"data":{"title":"probe"}}`)
 	require.Equal(t, http.StatusCreated, status, string(body))
 	var record struct {
 		ID string `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &record))
 
-	status, _, body = sendProbe(t, http.MethodGet, servers["admin"].URL+"/api/admin/openapi.json", token, "", "")
+	status, _, body = sendProbe(t, http.MethodGet, p.servers["admin"].URL+"/api/admin/openapi.json", p.token, "", "")
 	require.Equal(t, http.StatusOK, status, string(body))
-	var doc documentedPaths
-	require.NoError(t, json.Unmarshal(body, &doc))
+	require.NoError(t, json.Unmarshal(body, &p.doc))
 
-	values := map[string]string{
+	p.values = map[string]string{
 		"schema": "notes", "name": "notes", "id": record.ID, "field": "title",
 		"rev_id": uuid.NewString(), "user_code": "ABCD-EFGH", "tenant": "acme",
 	}
+	return p
+}
+
+// session signs a session for a new account holding roles. Each call is a new
+// account, so a request that ends its caller's sessions ends no other.
+func (p *documentProbe) session(t *testing.T, roles ...string) string {
+	t.Helper()
+	email := "probe-" + uuid.NewString() + "@example.com"
+	user, err := p.users.Create(context.Background(), email, "$2a$10$placeholder-hash-for-test", roles, "")
+	require.NoError(t, err)
+	token, err := auth.Sign(p.cfg.JWTSecret, p.cfg.JWTExpirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion)
+	require.NoError(t, err)
+	return token
+}
+
+// serverFor names the router that serves the operation, or "" when neither
+// does.
+func (p *documentProbe) serverFor(method, path string) string {
+	for _, name := range []string{"admin", "api"} {
+		if p.served[name][strings.ToUpper(method)+" "+path] {
+			return name
+		}
+	}
+	return ""
+}
+
+func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
+	install := newDocumentProbe(t, pool)
+	doc, servers, token := install.doc, install.servers, install.token
 	probed := 0
 	for _, path := range slices.Sorted(maps.Keys(doc.Paths)) {
 		for _, method := range slices.Sorted(maps.Keys(doc.Paths[path])) {
@@ -322,19 +381,13 @@ func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
 				}
 				continue
 			}
-			server := ""
-			for _, name := range []string{"admin", "api"} {
-				if served[name]["GET "+path] {
-					server = name
-					break
-				}
-			}
+			server := install.serverFor(method, path)
 			if server == "" {
 				t.Errorf("the document lists GET %s and neither router serves it", path)
 				continue
 			}
 			probed++
-			target := servers[server].URL + fillPathParams(path, values)
+			target := servers[server].URL + fillPathParams(path, install.values)
 			answered := map[string]bool{}
 			for _, p := range probesFor(op) {
 				status, contentType, _ := sendProbe(t, http.MethodGet, target+p.query, token, p.accept, "")
@@ -444,10 +497,26 @@ func fillPathParams(path string, values map[string]string) string {
 	return strings.Join(segments, "/")
 }
 
-// sendProbe makes one request and returns the status, the Content-Type and
+// sendProbe makes one request, with token as its bearer credential unless it
+// is empty and a body as JSON, and returns the status, the Content-Type and
 // the body. The body of an event stream is never read: the request ends once
 // the headers have arrived.
 func sendProbe(t *testing.T, method, target, token, accept, body string) (int, string, []byte) {
+	t.Helper()
+	contentType := ""
+	if body != "" {
+		contentType = "application/json"
+	}
+	return sendProbeRequest(t, method, target, token, accept, contentType, body)
+}
+
+// sendTypedProbe is sendProbe for a body of another media type.
+func sendTypedProbe(t *testing.T, method, target, token, contentType, body string) (int, string, []byte) {
+	t.Helper()
+	return sendProbeRequest(t, method, target, token, "", contentType, body)
+}
+
+func sendProbeRequest(t *testing.T, method, target, token, accept, contentType, body string) (int, string, []byte) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -457,9 +526,11 @@ func sendProbe(t *testing.T, method, target, token, accept, body string) (int, s
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target, reader)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+token)
-	if body != "" {
-		req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 	if accept != "" {
 		req.Header.Set("Accept", accept)
@@ -467,12 +538,12 @@ func sendProbe(t *testing.T, method, target, token, accept, body string) (int, s
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err, "%s %s", method, target)
 	defer func() { _ = resp.Body.Close() }()
-	contentType := resp.Header.Get("Content-Type")
-	mediaType, _, _ := mime.ParseMediaType(contentType)
+	answered := resp.Header.Get("Content-Type")
+	mediaType, _, _ := mime.ParseMediaType(answered)
 	if mediaType == "text/event-stream" {
-		return resp.StatusCode, contentType, nil
+		return resp.StatusCode, answered, nil
 	}
 	out, err := io.ReadAll(resp.Body)
 	require.NoError(t, err, "%s %s", method, target)
-	return resp.StatusCode, contentType, out
+	return resp.StatusCode, answered, out
 }

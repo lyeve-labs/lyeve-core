@@ -31,6 +31,11 @@ import (
 // limit otherwise.
 const maxBundleBytes = 4 << 20
 
+// schemaImportMediaTypes are the media types the import reads besides JSON.
+// An export is YAML by default, and the router admits these on the import's
+// path alone, so the document declares exactly what a caller may send.
+var schemaImportMediaTypes = []string{"application/yaml", "application/x-yaml", "text/yaml"}
+
 // schemaExportHandler writes every content type as a portable bundle.
 // GET /api/admin/schemas/export?format=yaml|json
 func schemaExportHandler(host core.Host) http.HandlerFunc {

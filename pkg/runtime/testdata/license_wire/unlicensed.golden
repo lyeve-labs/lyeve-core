@@ -275,6 +275,11 @@ body (json, newline):
         "in": "cookie",
         "name": "__Host-sys_session",
         "type": "apiKey"
+      },
+      "metricsToken": {
+        "description": "The token the operator set in METRICS_TOKEN, sent as Authorization: Bearer <token>. Only GET /api/admin/metrics reads it.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -730,6 +735,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -743,6 +751,9 @@ body (json, newline):
         "summary": "Report every setting and the layer it comes from",
         "tags": [
           "Admin / Configuration"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       },
       "put": {
@@ -755,6 +766,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           },
           "409": {
             "description": "Every submitted key is pinned by a higher layer"
@@ -774,6 +788,9 @@ body (json, newline):
         "summary": "Store engine settings in the admin layer",
         "tags": [
           "Admin / Configuration"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -863,6 +880,12 @@ body (json, newline):
           },
           "400": {
             "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -876,6 +899,9 @@ body (json, newline):
         "summary": "Erase or anonymize a data subject's data (Art.17 right to erasure)",
         "tags": [
           "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -901,6 +927,12 @@ body (json, newline):
           },
           "400": {
             "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -914,6 +946,9 @@ body (json, newline):
         "summary": "Export all data for a data subject (Art.15/20 portable bundle)",
         "tags": [
           "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -923,10 +958,21 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
           "503": {
             "description": "Database unreachable"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Liveness probe - is the process alive?",
         "tags": [
           "System"
@@ -935,6 +981,7 @@ body (json, newline):
     },
     "/api/admin/metrics": {
       "get": {
+        "description": "A scraper presents the metrics token and needs no account. A super admin's session reaches the route too. While METRICS_TOKEN is set, any other bearer token is refused, so that session has to come from the cookie.",
         "responses": {
           "200": {
             "content": {
@@ -946,11 +993,31 @@ body (json, newline):
               }
             },
             "description": "The Prometheus text format, version 0.0.4, or the delimited protobuf format when the Accept header asks for it"
+          },
+          "401": {
+            "description": "No credential, or a bearer token other than the metrics token while one is set"
+          },
+          "403": {
+            "description": "A session without the super_admin role"
           }
         },
+        "security": [
+          {
+            "metricsToken": []
+          },
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Prometheus metrics",
         "tags": [
           "System"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -959,6 +1026,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -972,6 +1045,10 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -980,6 +1057,9 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "403": {
             "description": "Not a super admin"
@@ -996,6 +1076,9 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification of the /api/admin routes",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -1004,6 +1087,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1017,6 +1106,10 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification of the content API and every route outside /api/admin",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -1257,6 +1350,12 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
           "503": {
             "description": "Pool unhealthy"
           }
@@ -1272,6 +1371,10 @@ body (json, newline):
         "summary": "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -1281,10 +1384,21 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
           "503": {
             "description": "Not ready"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Readiness probe - is the server ready to serve traffic?",
         "tags": [
           "System"
@@ -1327,6 +1441,9 @@ body (json, newline):
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "503": {
             "description": "Schema engine unavailable"
           }
@@ -1346,7 +1463,11 @@ body (json, newline):
         "tags": [
           "Admin / Content Types"
         ],
-        "x-admin-grant": "schemas:read"
+        "x-admin-grant": "schemas:read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
       }
     },
     "/api/admin/schemas/import": {
@@ -1380,6 +1501,46 @@ body (json, newline):
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "schemas": [
+                    {
+                      "display_name": "Notes",
+                      "fields": [
+                        {
+                          "field_type": "text",
+                          "name": "title"
+                        }
+                      ],
+                      "name": "notes"
+                    }
+                  ],
+                  "version": 1
+                }
+              }
+            },
+            "application/x-yaml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "application/yaml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "A bundle as GET /api/admin/schemas/export writes it, or the definitions of the system the from parameter names, in YAML or JSON.",
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -1390,11 +1551,20 @@ body (json, newline):
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "409": {
             "description": "References cannot be satisfied; nothing was applied"
           },
+          "413": {
+            "description": "The definitions are larger than the request body limit"
+          },
           "422": {
             "description": "Definitions could not be read"
+          },
+          "503": {
+            "description": "Schema engine unavailable"
           }
         },
         "security": [
@@ -1408,6 +1578,9 @@ body (json, newline):
         "summary": "Import content types from a bundle or another system",
         "tags": [
           "Admin / Content Types"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -1496,6 +1669,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1509,6 +1688,9 @@ body (json, newline):
         "summary": "List all users",
         "tags": [
           "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       },
       "post": {
@@ -1532,6 +1714,12 @@ body (json, newline):
         "responses": {
           "201": {
             "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1545,6 +1733,9 @@ body (json, newline):
         "summary": "Create a user",
         "tags": [
           "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -2735,8 +2926,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server liveness probe",
         "tags": [
           "System"
@@ -2748,8 +2947,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server readiness probe",
         "tags": [
           "System"
@@ -2870,6 +3077,11 @@ body (json, newline):
         "in": "cookie",
         "name": "__Host-sys_session",
         "type": "apiKey"
+      },
+      "metricsToken": {
+        "description": "The token the operator set in METRICS_TOKEN, sent as Authorization: Bearer <token>. Only GET /api/admin/metrics reads it.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -3811,8 +4023,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server liveness probe",
         "tags": [
           "System"
@@ -3824,8 +4044,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server readiness probe",
         "tags": [
           "System"

@@ -54,8 +54,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// A declared route may name further media types for itself, as a SAML
 	// assertion consumer does for the form its identity provider posts.
 	r.Use(apimw.RequireJSONContentType(declaredMediaTypes(r, o.declaredRouteSets()),
-		apimw.AllowMediaTypes("/api/admin/schemas/import",
-			"application/yaml", "application/x-yaml", "text/yaml")))
+		apimw.AllowMediaTypes("/api/admin/schemas/import", schemaImportMediaTypes...)))
 	// Locale detection: parse Accept-Language and stash on context.
 	// Runs early so all downstream handlers see the resolved locale.
 	r.Use(apimw.Locale)
