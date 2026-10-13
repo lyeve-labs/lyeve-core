@@ -73,6 +73,10 @@ type schemaImportResponse struct {
 	Notes   []schemaimport.Note `json:"notes,omitempty"`
 }
 
+// bundleTooLarge is the import's answer to a body over maxBundleBytes, whether
+// the size was declared or found while reading.
+const bundleTooLarge = "content type definitions are too large"
+
 // schemaImportHandler reads a bundle, or a definition from another system, and
 // reports or applies what it would change.
 //
@@ -88,9 +92,18 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 			return
 		}
 
+		// The router leaves this refusal to the handler, so a body declared
+		// over the limit is refused here before any of it is read, as the
+		// engine's body guards refuse one. The connection closes rather than
+		// draining an upload that has already been refused.
+		if r.ContentLength > maxBundleBytes {
+			w.Header().Set("Connection", "close")
+			httpx.ErrorReq(w, r, http.StatusRequestEntityTooLarge, bundleTooLarge)
+			return
+		}
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBundleBytes))
 		if err != nil {
-			httpx.ErrorReq(w, r, http.StatusRequestEntityTooLarge, "content type definitions are too large")
+			httpx.ErrorReq(w, r, http.StatusRequestEntityTooLarge, bundleTooLarge)
 			return
 		}
 		if len(body) == 0 {
