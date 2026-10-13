@@ -31,6 +31,8 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/testhost"
 	"github.com/lyeve-labs/lyeve-core/internal/testsupply/schemaengine"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 )
 
 // documentedOperation is what a client reads from one operation of the
@@ -362,8 +364,50 @@ func (p *documentProbe) serverFor(method, path string) string {
 	return ""
 }
 
+// mediaPluginRoutes are a plugin's routes that name what they answer through
+// RouteDoc, so the probe holds a declaration to the handler behind it as it
+// holds an engine route: a stream, an export answering CSV or NDJSON as the
+// Accept header asks, a stored image declared by its range, and JSON with a
+// schema.
+func mediaPluginRoutes() []plugin.PluginRoutes {
+	stream := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, ": open\n\n")
+	})
+	export := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Accept") == "application/x-ndjson" {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			_, _ = io.WriteString(w, `{"id":1}`+"\n")
+			return
+		}
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		_, _ = io.WriteString(w, "id\n1\n")
+	})
+	picture := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\n"))
+	})
+	report := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpx.JSON(w, http.StatusOK, map[string]any{"total": 1})
+	})
+	types := func(mediaTypes ...core.RouteMediaType) *core.RouteDoc {
+		return &core.RouteDoc{ResponseMediaTypes: mediaTypes}
+	}
+	return []plugin.PluginRoutes{{Name: "doc-media", Routes: []core.RouteDecl{
+		{Method: http.MethodGet, Pattern: "/api/admin/doc-media/events", Group: core.GroupAdmin, Handler: stream,
+			Doc: types(core.RouteMediaType{MediaType: "text/event-stream"})},
+		{Method: http.MethodGet, Pattern: "/api/admin/doc-media/export", Group: core.GroupAdmin, Handler: export,
+			Doc: types(core.RouteMediaType{MediaType: "text/csv"}, core.RouteMediaType{MediaType: "application/x-ndjson"})},
+		{Method: http.MethodGet, Pattern: "/api/v1/doc-media/picture", Group: core.GroupAuth, Handler: picture,
+			Doc: types(core.RouteMediaType{MediaType: "image/*"})},
+		{Method: http.MethodGet, Pattern: "/api/v1/doc-media/report", Group: core.GroupAuth, Handler: report,
+			Doc: types(core.RouteMediaType{MediaType: "application/json", Schema: map[string]any{"type": "object"}})},
+	}}}
+}
+
 func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
-	install := newDocumentProbe(t, pool)
+	install := newDocumentProbe(t, pool, WithPluginRoutes(mediaPluginRoutes()))
 	doc, servers, token := install.doc, install.servers, install.token
 	probed := 0
 	for _, path := range slices.Sorted(maps.Keys(doc.Paths)) {
@@ -405,11 +449,12 @@ func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
 				if len(want) == 0 {
 					want = map[string]bool{"application/json": true}
 				}
-				if !want[got] {
+				covered, ok := coveringMediaType(want, got)
+				if !ok {
 					t.Errorf("GET %s%s answered %d as %q, and the document declares %v for it",
 						path, p, status, contentType, slices.Sorted(maps.Keys(want)))
 				}
-				answered[key+" "+got] = true
+				answered[key+" "+covered] = true
 			}
 			for status, types := range declared {
 				for mediaType := range types {
@@ -422,6 +467,21 @@ func probeDocumentedMediaTypes(t *testing.T, pool db.DB) {
 	}
 	require.Positive(t, probed, "no operation was requested")
 	t.Logf("requested %d GET operations of the served document", probed)
+}
+
+// coveringMediaType finds the declared media type an answered one falls under:
+// the type itself, or the range type/* or */* that holds it.
+func coveringMediaType(declared map[string]bool, got string) (string, bool) {
+	if declared[got] {
+		return got, true
+	}
+	if typ, _, ok := strings.Cut(got, "/"); ok && declared[typ+"/*"] {
+		return typ + "/*", true
+	}
+	if declared["*/*"] {
+		return "*/*", true
+	}
+	return "", false
 }
 
 // documentedResponseTypes lists, by status, the media types an operation

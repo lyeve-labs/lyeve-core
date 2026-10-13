@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -535,6 +536,36 @@ func applyRouteDoc(op *openAPIOperation, pattern string, d *core.RouteDoc) {
 		for status, description := range d.Responses {
 			op.Responses[strconv.Itoa(status)] = map[string]any{"description": description}
 		}
+	}
+	documentResponseMediaTypes(op, d.ResponseMediaTypes)
+}
+
+// documentResponseMediaTypes writes the media types a Doc names as the
+// content of each success response that carries a body, every 2xx but 204
+// and 205. An error is the engine's JSON envelope whatever the route serves,
+// so no other response takes them. A type ParseResponseMediaType refuses is
+// left out rather than published, and with none left the responses stay as
+// they were.
+func documentResponseMediaTypes(op *openAPIOperation, types []core.RouteMediaType) {
+	content := map[string]openAPIMediaType{}
+	for _, mt := range types {
+		if _, ok := core.ParseResponseMediaType(mt.MediaType); ok {
+			content[mt.MediaType] = openAPIMediaType{Schema: mt.Schema}
+		}
+	}
+	if len(content) == 0 {
+		return
+	}
+	for status, response := range op.Responses {
+		code, err := strconv.Atoi(status)
+		if err != nil || code < 200 || code > 299 || code == http.StatusNoContent || code == http.StatusResetContent {
+			continue
+		}
+		description := ""
+		if r, ok := response.(map[string]any); ok {
+			description, _ = r["description"].(string)
+		}
+		op.Responses[status] = openAPIResponse{Description: description, Content: content}
 	}
 }
 

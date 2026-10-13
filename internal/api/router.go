@@ -837,6 +837,14 @@ func WarnUnmountableRoutes(pluginRoutes []plugin.PluginRoutes) {
 						"plugin", pr.Name, "method", rd.Method, "pattern", rd.Pattern, "scope", rd.Scope)
 				}
 			}
+			if rd.Doc != nil {
+				for _, mt := range rd.Doc.ResponseMediaTypes {
+					if _, ok := core.ParseResponseMediaType(mt.MediaType); !ok {
+						slog.Warn("plugin route documents a response media type that is not type/subtype: the API document leaves it out",
+							"plugin", pr.Name, "method", rd.Method, "pattern", rd.Pattern, "media_type", mt.MediaType)
+					}
+				}
+			}
 			if rd.RateLimit != nil && !appliedRateLimit(rd) {
 				slog.Warn("plugin route declares a rate limit the public limiter will not apply: it wraps only public routes, and both the rate and the burst must be positive",
 					"plugin", pr.Name, "method", rd.Method, "pattern", rd.Pattern, "group", rd.Group,

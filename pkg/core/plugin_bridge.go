@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"mime"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -313,6 +315,41 @@ type RouteDoc struct {
 	RequestExample any
 	// Responses maps each status the route answers to its description.
 	Responses map[int]string
+	// ResponseMediaTypes names what the route's success body is served as:
+	// text/event-stream for a stream, text/csv for an export, image/* for a
+	// stored image, or application/json with a schema worth publishing. A
+	// route that picks one by a query parameter or the Accept header lists
+	// each. They describe every 2xx status Responses names that carries a
+	// body, which is all of them but 204 and 205, or the 200 the document
+	// writes when Responses names none. Left empty, no response names a
+	// media type.
+	ResponseMediaTypes []RouteMediaType
+}
+
+// RouteMediaType is one media type a route's success body is served as.
+type RouteMediaType struct {
+	// MediaType is what the response's Content-Type names, parameters
+	// optional. A range, type/* or */*, stands for a body whose exact type
+	// is the stored file's own. One that ParseResponseMediaType refuses is
+	// left out of the document.
+	MediaType string
+	// Schema is the JSON Schema of the body served as this type, or nil.
+	Schema map[string]any
+}
+
+// ParseResponseMediaType reads a RouteMediaType's MediaType. It returns the
+// type without its parameters and reports whether it can name a body: a type
+// and a subtype, where the only ranges are type/* and */*.
+func ParseResponseMediaType(s string) (string, bool) {
+	mediaType, _, err := mime.ParseMediaType(s)
+	if err != nil {
+		return "", false
+	}
+	typ, sub, ok := strings.Cut(mediaType, "/")
+	if !ok || typ == "" || sub == "" || (typ == "*" && sub != "*") {
+		return "", false
+	}
+	return mediaType, true
 }
 
 // RouteParam is one documented parameter. In is "path", "query", "header"
