@@ -282,6 +282,107 @@ func TestContentHandler_Stream_RechecksDraftAccessPerEvent(t *testing.T) {
 	})
 }
 
+// enableDraftPublish switches draft and publish on for a live schema, the way
+// an operator's schema update does. The table gains a status column whose
+// default is published, so every row already there stays public, and the
+// definition the content path reads gains the flag.
+func (fx schemaContentFixture) enableDraftPublish(t *testing.T, schema string) {
+	t.Helper()
+	add, col := "ADD COLUMN", "VARCHAR(255)"
+	if fx.pool.Engine() == "mssql" {
+		add, col = "ADD", "NVARCHAR(255)"
+	}
+	_, err := fx.pool.Exec(context.Background(), fmt.Sprintf(
+		"ALTER TABLE %s %s _status %s NOT NULL DEFAULT 'published'", core.TableName(schema), add, col))
+	require.NoError(t, err)
+
+	sc, err := fx.eng.GetByName(fx.ctx, schema)
+	require.NoError(t, err)
+	next := *sc
+	next.WithDraftPublish = true
+	def, err := json.Marshal(next)
+	require.NoError(t, err)
+	require.NoError(t, fx.eng.Apply(fx.ctx, schema, def))
+}
+
+// Whether the schema has draft and publish is asked for every change, like
+// the grants. It was decided once when the stream opened, so after an
+// operator switched the mode on, every change still read as published and a
+// caller who may not read drafts received each draft written afterwards.
+func TestContentHandler_Stream_RechecksDraftModePerEvent(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"posts"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = fakeProvider{editorChecker{}}
+		readers := map[string]*tenantStreamWriter{
+			"viewer":        openStreamAs(t, fx.content, asReader(fx.ctx), "posts"),
+			"read-only key": openStreamAs(t, fx.content, asKey("content.posts:read"), "posts"),
+		}
+		editor := openStreamAs(t, fx.content, asEditor(fx.ctx), "posts")
+
+		createdID(t, fx.create(t, "posts", map[string]any{"title": "before the switch"}))
+		fx.enableDraftPublish(t, "posts")
+		fx.createStatus(t, "posts", "draft", map[string]any{"title": "draft after the switch"})
+		fx.createStatus(t, "posts", "published", map[string]any{"title": "published after the switch"})
+
+		// The editor may read drafts, so its stream shows the draft was
+		// written as one and reached the hooks.
+		require.Eventually(t, func() bool { return len(editor.events(t)) == 3 },
+			5*time.Second, 10*time.Millisecond, editor.String())
+		assert.Contains(t, editor.String(), "draft after the switch")
+
+		for name, stream := range readers {
+			require.Eventually(t, func() bool { return strings.Contains(stream.String(), "published after the switch") },
+				5*time.Second, 10*time.Millisecond, "%s: the published row never arrived", name)
+			// The draft was written first, so had it been sent it would be
+			// ahead of the published row.
+			assert.Len(t, stream.events(t), 2, "%s: %s", name, stream.String())
+			assert.NotContains(t, stream.String(), "draft after the switch", name)
+		}
+	})
+}
+
+// failingSchemas is a schema source that stops answering on demand, the way
+// a schema store does when its database goes away while a stream is open.
+type failingSchemas struct {
+	core.SchemaSource
+	down atomic.Bool
+}
+
+func (s *failingSchemas) GetByName(ctx context.Context, name string) (*core.Schema, error) {
+	if s.down.Load() {
+		return nil, errors.New("schema store unavailable")
+	}
+	return s.SchemaSource.GetByName(ctx, name)
+}
+
+// A schema whose definition cannot be read counts as having draft and
+// publish, so a change without a status is withheld from a caller who may not
+// read drafts rather than sent on the mode the stream saw when it opened.
+func TestContentHandler_Stream_UnreadableSchemaWithholdsChanges(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"posts"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = fakeProvider{editorChecker{}}
+		// The writer reads the schema from the store itself, so only the
+		// stream's lookup fails.
+		writer := fx
+		writer.content = &ContentHandler{store: fx.content.store, schemas: fx.content.schemas, hooks: fx.content.hooks, perms: fx.content.perms}
+		src := &failingSchemas{SchemaSource: fx.content.schemas}
+		fx.content.schemas = src
+		viewer := openStreamAs(t, fx.content, asReader(fx.ctx), "posts")
+		editor := openStreamAs(t, fx.content, asEditor(fx.ctx), "posts")
+
+		src.down.Store(true)
+		createdID(t, writer.create(t, "posts", map[string]any{"title": "while the schema is unreadable"}))
+		require.Eventually(t, func() bool { return len(editor.events(t)) == 1 },
+			5*time.Second, 10*time.Millisecond, editor.String())
+
+		src.down.Store(false)
+		createdID(t, writer.create(t, "posts", map[string]any{"title": "once the schema reads again"}))
+		require.Eventually(t, func() bool { return strings.Contains(viewer.String(), "once the schema reads again") },
+			5*time.Second, 10*time.Millisecond, viewer.String())
+		assert.Len(t, viewer.events(t), 1, viewer.String())
+		assert.NotContains(t, viewer.String(), "while the schema is unreadable")
+	})
+}
+
 // The error event that ends a stream names the refusal in the words the
 // content routes answer with, and a rule store's failure never reaches the
 // client as its own text.

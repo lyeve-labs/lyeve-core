@@ -28,6 +28,8 @@ import (
 type schemaContentFixture struct {
 	ctx     context.Context
 	content *ContentHandler
+	eng     *schemaengine.Engine
+	pool    db.DB
 }
 
 // contentDefaultSchemas are the content models the tests below post, spelled
@@ -151,6 +153,17 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "reviewer", "field_type": "relation", "relation_to": "writers", "relation_type": "belongs_to", "relation_fk_name": "checked_by"}
 		]
 	}`},
+	// A schema that starts without draft and publish, for a test that
+	// switches the mode on while a stream is open.
+	"posts": {`{
+		"name": "posts",
+		"display_name": "Posts",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true}
+		]
+	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
 	// many_to_many, for the reads that follow a relation.
 	"essays": {`{
@@ -231,6 +244,8 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 			fn(t, schemaContentFixture{
 				ctx:     ctx,
 				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, hooks: hooks.NewRegistry()},
+				eng:     eng,
+				pool:    pool,
 			})
 		})
 	}
