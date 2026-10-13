@@ -21,9 +21,7 @@ func MigratePlugin(ctx context.Context, host core.Host, migrationsFS fs.FS, tabl
 func AssertMigrationTable(t T, ctx context.Context, host core.Host, tableName string) {
 	t.Helper()
 	var count int
-	row, err := host.Querier(ctx).QueryRow(ctx,
-		`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = $1`,
-		tableName)
+	row, err := host.Querier(ctx).QueryRow(ctx, tableCountQuery(host.Dialect()), tableName)
 	if err != nil {
 		t.Fatalf("AssertMigrationTable: query information_schema: %v", err)
 	}

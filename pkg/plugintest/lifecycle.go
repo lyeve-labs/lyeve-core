@@ -225,15 +225,13 @@ func StartPlugin(t *testing.T, ctx context.Context, host core.Host, p core.Plugi
 	})
 }
 
-// AssertTablesExist fails if any named table does not exist. Queries
-// information_schema.tables for dialect portability.
+// AssertTablesExist fails if any named table does not exist in the test's
+// database. Queries information_schema.tables for dialect portability.
 func AssertTablesExist(t T, ctx context.Context, host core.Host, tables ...string) {
 	t.Helper()
 	for _, table := range tables {
 		var count int
-		row, err := host.Querier(ctx).QueryRow(ctx,
-			`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = $1`,
-			table)
+		row, err := host.Querier(ctx).QueryRow(ctx, tableCountQuery(host.Dialect()), table)
 		if err != nil {
 			t.Fatalf("check table %s: %v", table, err)
 		}
