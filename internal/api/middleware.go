@@ -127,7 +127,8 @@ type CORSConfig struct {
 	// ones by default, so without this a browser client cannot read the
 	// request id it needs for a bug report, nor the rate-limit values it
 	// needs to back off with, even though both are on the response.
-	// Read from CORS_EXPOSE_HEADERS. Empty omits the header entirely.
+	// The routers pass CORS_EXPOSE_HEADERS with every header a declared
+	// route exposes added to it. Empty omits the header entirely.
 	ExposeHeaders string // comma-separated
 
 	// AllowedDomains is a suffix allowlist for dynamic CORS origins supplied

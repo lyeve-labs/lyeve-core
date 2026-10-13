@@ -65,7 +65,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		PreflightMaxAge:  cfg.CORSPreflightMaxAge,
 		AllowMethods:     cfg.CORSAllowMethods,
 		AllowHeaders:     cfg.CORSAllowHeaders,
-		ExposeHeaders:    cfg.CORSExposeHeaders,
+		ExposeHeaders:    exposedHeaders(cfg.CORSExposeHeaders, o.declaredRouteSets()),
 		AllowedDomains:   cfg.CORSAllowedDomains,
 	}))
 	// Pre-auth middleware: a plugin implementing
