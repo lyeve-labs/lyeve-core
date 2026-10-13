@@ -22,11 +22,20 @@ import (
 )
 
 // seatEntitlements is a licensing implementation that states one ceiling on
-// admin seats, where 0 is the unlimited ceiling.
+// admin seats, where 0 is the unlimited ceiling, and names link as where that
+// ceiling is lifted.
 type seatEntitlements struct {
 	unlicensedEntitlements
 	limit int
 	state string
+	link  string
+}
+
+func (e seatEntitlements) CeilingURL(cap string) string {
+	if cap != core.CapAdminSeats {
+		return ""
+	}
+	return e.link
 }
 
 func (e seatEntitlements) Snapshot() licensing.Snapshot {
@@ -93,7 +102,14 @@ func (s *seatRouter) setRoles(t *testing.T, id string, roles ...string) *httptes
 	return s.do(t, http.MethodPut, "/api/admin/users/"+id+"/roles", fmt.Sprintf(`{"roles":%s}`, rolesJSON))
 }
 
+// requireSeatRefusal checks the seat refusal carries no link, which is what
+// the engine sends when the licensing implementation names none.
 func requireSeatRefusal(t *testing.T, rr *httptest.ResponseRecorder, limit, current int) {
+	t.Helper()
+	requireSeatRefusalLink(t, rr, limit, current, "")
+}
+
+func requireSeatRefusalLink(t *testing.T, rr *httptest.ResponseRecorder, limit, current int, link string) {
 	t.Helper()
 	require.Equal(t, http.StatusPaymentRequired, rr.Code, rr.Body.String())
 	var body map[string]any
@@ -102,6 +118,8 @@ func requireSeatRefusal(t *testing.T, rr *httptest.ResponseRecorder, limit, curr
 	assert.Equal(t, core.CapAdminSeats, body["cap"])
 	assert.EqualValues(t, limit, body["limit"])
 	assert.EqualValues(t, current, body["current"])
+	assert.Equal(t, link, body["upgrade_url"])
+	assert.Equal(t, link, rr.Header().Get("X-Upgrade-URL"))
 }
 
 func userID(t *testing.T, rr *httptest.ResponseRecorder) string {
@@ -133,6 +151,27 @@ func TestAdminRouter_AdminSeats_RefusesTheSeatPastTheCeiling(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, s.setRoles(t, second, "editor").Code)
 	require.Equal(t, http.StatusOK, s.setRoles(t, editor, "admin").Code, "a demotion frees the seat for the next admin")
+}
+
+// The seat refusal carries the link the licensing implementation names for
+// the ceiling, on a new account and on a role change alike, so a console can
+// offer the way forward beside the count. The engine adds nothing to it.
+func TestAdminRouter_AdminSeats_RefusalCarriesTheLicensingLink(t *testing.T) {
+	link := "https://shop.example.com/pricing?plan=basic&utm_source=admin&utm_medium=product&utm_campaign=admin.seats"
+	s := newSeatRouter(t, seatEntitlements{limit: 2, state: "free", link: link})
+
+	userID(t, s.createUser(t, "second@seats.test", "admin"))
+	requireSeatRefusalLink(t, s.createUser(t, "third@seats.test", "admin"), 2, 2, link)
+
+	editor := userID(t, s.createUser(t, "editor@seats.test", "editor"))
+	requireSeatRefusalLink(t, s.setRoles(t, editor, "admin"), 2, 2, link)
+}
+
+// A console renders the link, so one the licensing implementation names in
+// another scheme is left out rather than relayed.
+func TestAdminRouter_AdminSeats_RefusalDropsALinkThatIsNotHTTPS(t *testing.T) {
+	s := newSeatRouter(t, seatEntitlements{limit: 1, state: "free", link: "javascript:alert(1)"})
+	requireSeatRefusal(t, s.createUser(t, "second@seats.test", "admin"), 1, 1)
 }
 
 func TestAdminRouter_AdminSeats_UnlimitedCeilingAdmitsEverySeat(t *testing.T) {

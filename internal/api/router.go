@@ -20,6 +20,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
+	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
@@ -530,6 +531,14 @@ func (o *routerOptions) adminSeats(users *db.UserStore) *db.AdminSeatGuard {
 	return db.NewAdminSeatGuard(users,
 		func() int { return o.entitlements.Snapshot().Caps[core.CapAdminSeats] },
 		func() core.MembershipReader { return o.memberships })
+}
+
+// ceilingURL is where the licensing implementation sends an operator to lift
+// the ceiling named cap, asked of the manager at each refusal so a renewed
+// license answers at once. The engine names no destination of its own, so a
+// build whose licensing offers none refuses with no link.
+func (o *routerOptions) ceilingURL(cap string) string {
+	return licensing.CeilingURL(o.entitlements, cap)
 }
 
 // applyAccessLogging registers the middleware that must observe every request,
