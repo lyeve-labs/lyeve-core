@@ -132,6 +132,25 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "tags", "field_type": "relation", "relation_to": "labels", "relation_type": "many_to_many"}
 		]
 	}`},
+	// Two belongs_to relations into one schema, one stored in the default
+	// column and one in a column its definition names, for the field mask.
+	"bylines": {`{
+		"name": "writers",
+		"display_name": "Writers",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [{"name": "name", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "pieces",
+		"display_name": "Pieces",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "author", "field_type": "relation", "relation_to": "writers", "relation_type": "belongs_to"},
+			{"name": "reviewer", "field_type": "relation", "relation_to": "writers", "relation_type": "belongs_to", "relation_fk_name": "checked_by"}
+		]
+	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
 	// many_to_many, for the reads that follow a relation.
 	"essays": {`{

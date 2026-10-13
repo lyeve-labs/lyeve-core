@@ -511,7 +511,7 @@ func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Requ
 	if len(filters) == 0 {
 		return true
 	}
-	hidden, err := core.ContentHiddenFields(r.Context(), h.checker(), requestClaims(r), schema)
+	hidden, err := h.hiddenFields(r, schema)
 	switch {
 	case errors.Is(err, errNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
