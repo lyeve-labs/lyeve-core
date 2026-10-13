@@ -937,7 +937,15 @@ body (json, newline):
       "get": {
         "responses": {
           "200": {
-            "description": "Prometheus text format"
+            "content": {
+              "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited": {},
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The Prometheus text format, version 0.0.4, or the delimited protobuf format when the Accept header asks for it"
           }
         },
         "summary": "Prometheus metrics",
@@ -1302,7 +1310,19 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The bundle: a YAML file to download, or JSON when format is json"
           },
           "401": {
             "description": "Unauthorized"
@@ -2086,7 +2106,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
             "description": "Collection name, as listed by GET /api/v1/schemas.",
@@ -2100,7 +2120,82 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "application/x-ndjson"
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "description": "One event. A change sends only its data line, and comment lines are not events. The event that ends the stream also names itself.",
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The record after the change, or as it was before a delete, without the fields a read withholds from the caller.",
+                                "properties": {
+                                  "id": {
+                                    "format": "uuid",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id"
+                                ],
+                                "type": "object"
+                              },
+                              "event": {
+                                "enum": [
+                                  "after_create",
+                                  "after_update",
+                                  "after_delete"
+                                ],
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The collection the record belongs to.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "schema",
+                              "data"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "error": {
+                                "description": "Why the stream stopped, for example that the credential expired or was revoked.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "error"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "enum": [
+                        "error"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The stream, open until the client disconnects"
           },
           "401": {
             "description": "Unauthorized"
@@ -2114,7 +2209,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream records",
+        "summary": "Stream changes to the collection",
         "tags": [
           "Content API / Content"
         ]
@@ -2721,6 +2816,13 @@ body (json, newline):
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
         "responses": {
           "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "description": "A robots.txt disallowing every path"
           }
         },
@@ -3080,7 +3182,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
             "description": "Collection name, as listed by GET /api/v1/schemas.",
@@ -3094,7 +3196,82 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "application/x-ndjson"
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "description": "One event. A change sends only its data line, and comment lines are not events. The event that ends the stream also names itself.",
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The record after the change, or as it was before a delete, without the fields a read withholds from the caller.",
+                                "properties": {
+                                  "id": {
+                                    "format": "uuid",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id"
+                                ],
+                                "type": "object"
+                              },
+                              "event": {
+                                "enum": [
+                                  "after_create",
+                                  "after_update",
+                                  "after_delete"
+                                ],
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The collection the record belongs to.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "schema",
+                              "data"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "error": {
+                                "description": "Why the stream stopped, for example that the credential expired or was revoked.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "error"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "enum": [
+                        "error"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The stream, open until the client disconnects"
           },
           "401": {
             "description": "Unauthorized"
@@ -3108,7 +3285,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream records",
+        "summary": "Stream changes to the collection",
         "tags": [
           "Content API / Content"
         ]
@@ -3715,6 +3892,13 @@ body (json, newline):
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
         "responses": {
           "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "description": "A robots.txt disallowing every path"
           }
         },

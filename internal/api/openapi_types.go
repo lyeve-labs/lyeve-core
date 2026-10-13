@@ -83,6 +83,14 @@ type openAPIMediaType struct {
 	Schema map[string]any `json:"schema,omitempty"`
 }
 
+// openAPIResponse is a response that names the media types of its body. A
+// client reads the media type from content and nowhere else, so a response
+// that is not JSON says what it is here rather than in its description.
+type openAPIResponse struct {
+	Description string                      `json:"description"`
+	Content     map[string]openAPIMediaType `json:"content,omitempty"`
+}
+
 type openAPIComponents struct {
 	SecuritySchemes map[string]any `json:"securitySchemes,omitempty"`
 }
