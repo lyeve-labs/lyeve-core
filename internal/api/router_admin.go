@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -37,7 +38,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// Built-in middleware (rate limiter, response time, etc.). The caller's
 	// address is resolved ahead of it, so the per-address limiter and the IP
 	// allowlist see the client rather than the proxy in front of the engine.
-	applyBuiltinMiddleware(r, cfg, pluginBodyOverrides(o.declaredRouteSets()),
+	applyBuiltinMiddleware(r, cfg, withBodyLimits(pluginBodyOverrides(o.declaredRouteSets()), engineBodyLimits),
 		apimw.CSPNonce(), apimw.SecurityHeaders(cfg.SecureCookie),
 		apimw.StripUntrustedProxyHeaders(o.trustedProxies),
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
@@ -329,7 +330,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			r.Use(requireAuth)
 			r.Use(tokenVersionCheck(tokenVersionGetter(userStore)))
 			r.Use(apimw.CSRFCheck)
-			r.Use(apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes))
+			r.Use(withEngineBodyLimits(apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes)))
 			// API key scope enforcement: gates X-API-Key requests by their
 			// scopes. JWT requests pass through. Mirrors the API router.
 			r.Use(apimw.RequireScoped)
@@ -557,4 +558,55 @@ func exceptTenantLifecycle(mw func(http.Handler) http.Handler) func(http.Handler
 			guarded.ServeHTTP(w, r)
 		})
 	}
+}
+
+// engineBodyLimits are the routes this router serves whose handler takes a
+// larger body than the group's JSON limit, keyed by method and pattern the
+// way the body guards key them. A plugin route says the same with
+// RouteDecl.MaxBodyBytes. A pattern here is literal, because the global guard
+// runs before routing and can match only a path.
+//
+// Both guards ahead of the handler have to admit the larger body, or the
+// limit the route documents is one no caller can reach. The global guard
+// takes these as overrides. The group's JSON guard holds the route to its own
+// limit instead, and leaves refusing a body declared past it to the handler,
+// which answers in the words its documentation gives.
+var engineBodyLimits = map[string]int64{
+	apimw.BodyLimitKey(http.MethodPost, "/api/admin/schemas/import"): maxBundleBytes,
+}
+
+// withEngineBodyLimits applies jsonGuard to every route but the ones
+// engineBodyLimits names. Those read through a reader bounded at their own
+// limit, and their handler refuses a body declared past it before reading
+// any of it. It runs after routing, so it reads the pattern the request is
+// served under rather than its path, and a path that only resembles one of
+// those routes keeps the JSON guard.
+func withEngineBodyLimits(jsonGuard func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		guarded := jsonGuard(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			limit, ok := engineBodyLimits[apimw.BodyLimitKey(r.Method, chi.RouteContext(r.Context()).RoutePattern())]
+			if !ok {
+				guarded.ServeHTTP(w, r)
+				return
+			}
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// withBodyLimits adds limits to the overrides the global body guard matches,
+// keeping the larger figure where both name a route.
+func withBodyLimits(overrides, limits map[string]int64) map[string]int64 {
+	out := make(map[string]int64, len(overrides)+len(limits))
+	maps.Copy(out, overrides)
+	for key, n := range limits {
+		if n > out[key] {
+			out[key] = n
+		}
+	}
+	return out
 }
