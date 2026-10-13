@@ -55,7 +55,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 		AllowCredentials: false,
 		PreflightMaxAge:  cfg.CORSPreflightMaxAge,
 		AllowMethods:     cfg.CORSAllowMethods,
-		AllowHeaders:     cfg.CORSAllowHeaders,
+		AllowHeaders:     allowedHeaders(cfg.CORSAllowHeaders, o.declaredRouteSets()),
 		ExposeHeaders:    exposedHeaders(cfg.CORSExposeHeaders, o.declaredRouteSets()),
 		AllowedDomains:   cfg.CORSAllowedDomains,
 	}))

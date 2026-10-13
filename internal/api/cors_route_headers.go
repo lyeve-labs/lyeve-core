@@ -57,3 +57,10 @@ func exposedHeaders(configured string, sets []plugin.PluginRoutes) string {
 	return withDeclaredHeaders(configured, "ExposeHeaders", sets,
 		func(rd plugin.RouteDecl) []string { return rd.ExposeHeaders })
 }
+
+// allowedHeaders is the Access-Control-Allow-Headers list a router's preflight
+// answers with: CORS_ALLOW_HEADERS, and every header a declared route reads.
+func allowedHeaders(configured string, sets []plugin.PluginRoutes) string {
+	return withDeclaredHeaders(configured, "AllowHeaders", sets,
+		func(rd plugin.RouteDecl) []string { return rd.AllowHeaders })
+}

@@ -198,6 +198,18 @@ type RouteDecl struct {
 	// logged and ignored.
 	ExposeHeaders []string
 
+	// AllowHeaders names request headers this route reads that a script on
+	// another origin has to be able to send. A browser sends such a script's
+	// header outside the CORS-safelisted set only after a preflight answer
+	// names it in Access-Control-Allow-Headers, so a route that reads one,
+	// such as the id a caller gives an operation in order to follow it, is
+	// closed to that script otherwise.
+	//
+	// The engine adds the names to the CORS_ALLOW_HEADERS list every router's
+	// preflight answers with, for the reason ExposeHeaders gives, and ignores
+	// the same names it does.
+	AllowHeaders []string
+
 	// SelfScoping says this route carries the tenant it is for inside the
 	// request itself, in something the engine issued and verifies, and so must
 	// not be refused for arriving on a hostname that resolves no tenant.

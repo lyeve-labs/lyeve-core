@@ -96,7 +96,7 @@ func NewStatelessRouter(cfg *config.Config, mode StatelessMode, opts ...RouterOp
 		AllowCredentials: false,
 		PreflightMaxAge:  cfg.CORSPreflightMaxAge,
 		AllowMethods:     cfg.CORSAllowMethods,
-		AllowHeaders:     cfg.CORSAllowHeaders,
+		AllowHeaders:     allowedHeaders(cfg.CORSAllowHeaders, o.declaredRouteSets()),
 		ExposeHeaders:    exposedHeaders(cfg.CORSExposeHeaders, o.declaredRouteSets()),
 		AllowedDomains:   cfg.CORSAllowedDomains,
 	}))
