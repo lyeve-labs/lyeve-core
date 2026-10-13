@@ -28,9 +28,11 @@ type EmailSenderProvider interface {
 	EmailSender() EmailSender
 }
 
-// EmailSenderRegistrar is implemented by the engine Host.
+// EmailSenderRegistrar is implemented by the engine Host. Through ScopedHost a
+// registration needs CapEmailSender, and only the plugin that registered the
+// sender may replace or clear it. A refusal comes back as the error.
 type EmailSenderRegistrar interface {
-	RegisterEmailSender(s EmailSender)
+	RegisterEmailSender(s EmailSender) error
 }
 
 // RefreshTokenRevoker is an optional interface the engine Host implements.

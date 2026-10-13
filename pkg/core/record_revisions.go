@@ -51,9 +51,11 @@ var ErrRecordRevisionNotFound = errors.New("record revision not found")
 // RecordRevisionStoreRegistrar is implemented by the engine host. The plugin
 // that owns the rows calls it when it starts and again with nil when it
 // stops, so the registration follows the plugin's lifecycle, not the
-// process.
+// process. Through ScopedHost a registration needs CapRecordRevisionStore,
+// and only the plugin that registered the store may replace or clear it. A
+// refusal comes back as the error.
 type RecordRevisionStoreRegistrar interface {
-	RegisterRecordRevisionStore(s RecordRevisionStore)
+	RegisterRecordRevisionStore(s RecordRevisionStore) error
 }
 
 // RecordRevisionStoreProvider is implemented by the engine host and

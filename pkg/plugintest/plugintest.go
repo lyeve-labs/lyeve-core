@@ -148,6 +148,10 @@ type testHost struct {
 	// configuration section in, as it does on the engine host.
 	configSections core.ConfigSectionRegistry
 
+	// roleHolders records which plugin holds each host role, as the engine
+	// host does, for a scoped host wrapping this one.
+	roleHolders core.HostRoleRegistry
+
 	// Created on first cached read. Several constructors build a testHost
 	// literal, so this cannot be a constructor field.
 	cacheOnce  sync.Once
@@ -253,7 +257,10 @@ func (h *testHost) HookPublisher() core.HookPublisher {
 func (h *testHost) Storage() core.Storage { return h.storage }
 
 // SetStorage injects a storage backend for tests (e.g. in-memory memStorage).
-func (h *testHost) SetStorage(s core.Storage) { h.storage = s }
+func (h *testHost) SetStorage(s core.Storage) error {
+	h.storage = s
+	return nil
+}
 
 // Schema returns the configured SchemaEngine, or nil.
 func (h *testHost) Schema() core.SchemaEngine { return h.schema }
@@ -266,7 +273,18 @@ func (h *testHost) Schema() core.SchemaEngine { return h.schema }
 // outright, and every other plugin's suite would run against a host that
 // cannot accept an engine while production can. A double that implements less
 // than the real thing sends every suite down a path production does not take.
-func (h *testHost) RegisterSchemaEngine(e core.SchemaEngine) { h.schema = e }
+func (h *testHost) RegisterSchemaEngine(e core.SchemaEngine) error {
+	h.schema = e
+	return nil
+}
+
+// RegisterOwnedRole implements core.HostRoleOwnerRegistrar, which a scoped
+// host wrapping this one passes every role registration through, as it does
+// on the engine host. Without it an activator over this host would refuse
+// every role a plugin registers.
+func (h *testHost) RegisterOwnedRole(owner string, role core.HostRole, clear bool, set func() error) error {
+	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
+}
 
 // SchemaSource implements core.SchemaSourceProvider, answering the registry
 // the content path reads. It is whatever engine was registered or supplied,
@@ -279,8 +297,10 @@ func (h *testHost) SchemaSource() core.SchemaSource {
 }
 
 var (
-	_ core.SchemaEngineRegistrar = (*testHost)(nil)
-	_ core.SchemaSourceProvider  = (*testHost)(nil)
+	_ core.SchemaEngineRegistrar  = (*testHost)(nil)
+	_ core.SchemaSourceProvider   = (*testHost)(nil)
+	_ core.StorageSetter          = (*testHost)(nil)
+	_ core.HostRoleOwnerRegistrar = (*testHost)(nil)
 )
 
 // Tracer returns a no-op tracer.

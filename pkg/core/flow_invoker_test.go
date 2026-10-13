@@ -40,11 +40,15 @@ var _ FlowInvoker = (*fakeInvoker)(nil)
 // host does once the plugin that runs flows has registered one.
 type invokerHost struct {
 	*stubHost
+	HostRoleRegistry
 	invoker FlowInvoker
 }
 
-func (h *invokerHost) RegisterFlowInvoker(inv FlowInvoker) { h.invoker = inv }
-func (h *invokerHost) FlowInvoker() FlowInvoker            { return h.invoker }
+func (h *invokerHost) RegisterFlowInvoker(inv FlowInvoker) error {
+	h.invoker = inv
+	return nil
+}
+func (h *invokerHost) FlowInvoker() FlowInvoker { return h.invoker }
 
 // The plugin that runs flows registers its invoker through its scoped host
 // and a transport plugin fetches the same one through its own. The arguments

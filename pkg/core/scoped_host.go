@@ -135,6 +135,65 @@ func (h *ScopedHost) warnUnavailable(op string) {
 	lg.Warn("plugin host service unavailable", "plugin", h.name, "op", op)
 }
 
+// registerRole is the decision every role registrar makes before anything
+// reaches the inner host. The plugin must hold need, the inner host must take
+// the role (supported) and keep a record of its holder, and that record must
+// accept the plugin: a role another plugin holds is refused for a clear as
+// well as a registration, and so is a clear from a plugin that holds nothing.
+// set runs only for a change the record accepts.
+//
+// A refusal is logged as well as returned. A plugin built before the
+// registrars answered discards the result, and then the log line is the only
+// trace that its role went unserved.
+func (h *ScopedHost) registerRole(role HostRole, op string, need Capability, supported, clear bool, set func() error) error {
+	if !h.has(need) {
+		h.warnDenied(op, string(role), need)
+		return fmt.Errorf("%s: %w: plugin %s does not hold %s", op, ErrCapDenied, h.name, capName(need))
+	}
+	if !supported {
+		err := fmt.Errorf("%s: %w: the host takes no %s", op, ErrHostRoleUnsupported, role)
+		h.warnRoleRefused(op, role, err)
+		return err
+	}
+	owners, ok := h.inner.(HostRoleOwnerRegistrar)
+	if !ok {
+		err := fmt.Errorf("%s: %w: the host keeps no record of who holds the %s", op, ErrHostRoleUnsupported, role)
+		h.warnRoleRefused(op, role, err)
+		return err
+	}
+	if err := owners.RegisterOwnedRole(h.name, role, clear, set); err != nil {
+		err = fmt.Errorf("%s: %w", op, err)
+		h.warnRoleRefused(op, role, err)
+		return err
+	}
+	return nil
+}
+
+// warnRoleRefused logs a role registration the host refused for a reason
+// other than the grant, once per distinct refusal, so a plugin that retries
+// on a hot path cannot flood the log.
+func (h *ScopedHost) warnRoleRefused(op string, role HostRole, err error) {
+	if h == nil || h.inner == nil {
+		return
+	}
+	key := op + "\x00" + err.Error()
+	h.mu.Lock()
+	if h.warned == nil {
+		h.warned = make(map[string]bool)
+	}
+	seen := h.warned[key]
+	h.warned[key] = true
+	h.mu.Unlock()
+	if seen {
+		return
+	}
+	lg := h.inner.Logger(context.Background())
+	if lg == nil {
+		return
+	}
+	lg.Warn("plugin host role refused", "plugin", h.name, "op", op, "role", string(role), "err", err)
+}
+
 // capName renders a Capability as the constant name a plugin author would
 // recognize. A bitmask value in the log tells an operator nothing about which
 // grant to add.
@@ -162,6 +221,20 @@ func capName(c Capability) string {
 		return "CapMetrics"
 	case CapConfigSectionsRead:
 		return "CapConfigSectionsRead"
+	case CapPermissionChecker:
+		return "CapPermissionChecker"
+	case CapEmailSender:
+		return "CapEmailSender"
+	case CapContentLocalizer:
+		return "CapContentLocalizer"
+	case CapContentEntryWriter:
+		return "CapContentEntryWriter"
+	case CapRecordRevisionStore:
+		return "CapRecordRevisionStore"
+	case CapStorage:
+		return "CapStorage"
+	case CapUserProvisioner:
+		return "CapUserProvisioner"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -395,11 +468,14 @@ func (h *ScopedHost) Storage() Storage {
 	return nil
 }
 
-// SetStorage forwards to inner if it implements StorageSetter.
-func (h *ScopedHost) SetStorage(s Storage) {
-	if p, ok := h.inner.(StorageSetter); ok {
-		p.SetStorage(s)
-	}
+// SetStorage forwards to inner if it implements StorageSetter, for a plugin
+// holding CapStorage. Every plugin's uploads land in the backend it sets, so
+// no other plugin may replace the backend or take it away. A refusal is
+// logged and returned.
+func (h *ScopedHost) SetStorage(s Storage) error {
+	p, ok := h.inner.(StorageSetter)
+	return h.registerRole(HostRoleStorage, "SetStorage", CapStorage, ok, s == nil,
+		func() error { return p.SetStorage(s) })
 }
 
 // AdminQuerier forwards to inner if CapAdmin is held and inner
@@ -453,11 +529,15 @@ func (h *ScopedHost) EmailSender() EmailSender {
 	return nil
 }
 
-// RegisterEmailSender forwards to inner if it implements EmailSenderRegistrar.
-func (h *ScopedHost) RegisterEmailSender(s EmailSender) {
-	if p, ok := h.inner.(EmailSenderRegistrar); ok {
-		p.RegisterEmailSender(s)
-	}
+// RegisterEmailSender forwards to inner if it implements
+// EmailSenderRegistrar, for a plugin holding CapEmailSender. Every
+// transactional mail, sign-in links and password resets among them, goes out
+// through the sender, so no other plugin may replace it or take it away. A
+// refusal is logged and returned.
+func (h *ScopedHost) RegisterEmailSender(s EmailSender) error {
+	p, ok := h.inner.(EmailSenderRegistrar)
+	return h.registerRole(HostRoleEmailSender, "RegisterEmailSender", CapEmailSender, ok, s == nil,
+		func() error { return p.RegisterEmailSender(s) })
 }
 
 // FlowDefinitionValidator forwards to inner if it implements
@@ -476,11 +556,13 @@ func (h *ScopedHost) FlowDefinitionValidator() FlowDefinitionValidator {
 }
 
 // RegisterFlowDefinitionValidator forwards to inner if it implements
-// FlowDefinitionValidatorRegistrar.
-func (h *ScopedHost) RegisterFlowDefinitionValidator(v FlowDefinitionValidator) {
-	if p, ok := h.inner.(FlowDefinitionValidatorRegistrar); ok {
-		p.RegisterFlowDefinitionValidator(v)
-	}
+// FlowDefinitionValidatorRegistrar, for a plugin holding CapFlowRegistry,
+// which only the plugin that runs flows holds. A refusal is logged and
+// returned.
+func (h *ScopedHost) RegisterFlowDefinitionValidator(v FlowDefinitionValidator) error {
+	p, ok := h.inner.(FlowDefinitionValidatorRegistrar)
+	return h.registerRole(HostRoleFlowDefinitionValidator, "RegisterFlowDefinitionValidator", CapFlowRegistry, ok, v == nil,
+		func() error { return p.RegisterFlowDefinitionValidator(v) })
 }
 
 // FlowInvoker forwards to inner if it implements FlowInvokerProvider. Nil,
@@ -497,11 +579,13 @@ func (h *ScopedHost) FlowInvoker() FlowInvoker {
 }
 
 // RegisterFlowInvoker forwards to inner if it implements
-// FlowInvokerRegistrar.
-func (h *ScopedHost) RegisterFlowInvoker(inv FlowInvoker) {
-	if p, ok := h.inner.(FlowInvokerRegistrar); ok {
-		p.RegisterFlowInvoker(inv)
-	}
+// FlowInvokerRegistrar, for a plugin holding CapFlowRegistry. Every
+// transport runs flows through the invoker, so no other plugin may replace
+// it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) RegisterFlowInvoker(inv FlowInvoker) error {
+	p, ok := h.inner.(FlowInvokerRegistrar)
+	return h.registerRole(HostRoleFlowInvoker, "RegisterFlowInvoker", CapFlowRegistry, ok, inv == nil,
+		func() error { return p.RegisterFlowInvoker(inv) })
 }
 
 // PermissionChecker forwards to inner if it implements
@@ -520,12 +604,16 @@ func (h *ScopedHost) PermissionChecker() PermissionChecker {
 }
 
 // RegisterPermissionChecker forwards to inner if it implements
-// PermissionCheckerRegistrar. This is how the plugin that owns the rules
-// supplies them: with its checker in Start and with nil in Stop.
-func (h *ScopedHost) RegisterPermissionChecker(c PermissionChecker) {
-	if p, ok := h.inner.(PermissionCheckerRegistrar); ok {
-		p.RegisterPermissionChecker(c)
-	}
+// PermissionCheckerRegistrar, for a plugin holding CapPermissionChecker. This
+// is how the plugin that owns the rules supplies them: with its checker in
+// Start and with nil in Stop. The checker decides every access rule, so a
+// plugin without the grant could let every request through, and clearing it
+// would drop the install to role-only checks. A refusal is logged and
+// returned.
+func (h *ScopedHost) RegisterPermissionChecker(c PermissionChecker) error {
+	p, ok := h.inner.(PermissionCheckerRegistrar)
+	return h.registerRole(HostRolePermissionChecker, "RegisterPermissionChecker", CapPermissionChecker, ok, c == nil,
+		func() error { return p.RegisterPermissionChecker(c) })
 }
 
 // ContentLocalizer forwards to inner if it implements
@@ -575,19 +663,24 @@ func (h *ScopedHost) SchemaSource() SchemaSource {
 }
 
 // RegisterSchemaEngine forwards to inner if it implements
-// SchemaEngineRegistrar.
-func (h *ScopedHost) RegisterSchemaEngine(e SchemaEngine) {
-	if p, ok := h.inner.(SchemaEngineRegistrar); ok {
-		p.RegisterSchemaEngine(e)
-	}
+// SchemaEngineRegistrar, for a plugin holding CapSchema. Every content read
+// and write goes through the engine. More than one plugin holds CapSchema
+// for its DDL, so the holder record is what stops one of them replacing or
+// clearing the engine another registered. A refusal is logged and returned.
+func (h *ScopedHost) RegisterSchemaEngine(e SchemaEngine) error {
+	p, ok := h.inner.(SchemaEngineRegistrar)
+	return h.registerRole(HostRoleSchemaEngine, "RegisterSchemaEngine", CapSchema, ok, e == nil,
+		func() error { return p.RegisterSchemaEngine(e) })
 }
 
 // RegisterContentLocalizer forwards to inner if it implements
-// ContentLocalizerRegistrar.
-func (h *ScopedHost) RegisterContentLocalizer(l ContentLocalizer) {
-	if p, ok := h.inner.(ContentLocalizerRegistrar); ok {
-		p.RegisterContentLocalizer(l)
-	}
+// ContentLocalizerRegistrar, for a plugin holding CapContentLocalizer. The
+// localizer rewrites every content read that names a locale, so no other
+// plugin may replace it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) RegisterContentLocalizer(l ContentLocalizer) error {
+	p, ok := h.inner.(ContentLocalizerRegistrar)
+	return h.registerRole(HostRoleContentLocalizer, "RegisterContentLocalizer", CapContentLocalizer, ok, l == nil,
+		func() error { return p.RegisterContentLocalizer(l) })
 }
 
 // RegisterConfigSection forwards to inner, under this plugin's name, if
@@ -640,11 +733,13 @@ func (h *ScopedHost) ContentEntryWriter() ContentEntryWriter {
 }
 
 // RegisterContentEntryWriter forwards to inner if it implements
-// ContentEntryWriterRegistrar.
-func (h *ScopedHost) RegisterContentEntryWriter(w ContentEntryWriter) {
-	if p, ok := h.inner.(ContentEntryWriterRegistrar); ok {
-		p.RegisterContentEntryWriter(w)
-	}
+// ContentEntryWriterRegistrar, for a plugin holding CapContentEntryWriter. An
+// import saves every entry through the writer, so no other plugin may
+// replace it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) RegisterContentEntryWriter(w ContentEntryWriter) error {
+	p, ok := h.inner.(ContentEntryWriterRegistrar)
+	return h.registerRole(HostRoleContentEntryWriter, "RegisterContentEntryWriter", CapContentEntryWriter, ok, w == nil,
+		func() error { return p.RegisterContentEntryWriter(w) })
 }
 
 // RecordRevisionStore forwards to inner if it implements
@@ -662,11 +757,13 @@ func (h *ScopedHost) RecordRevisionStore() RecordRevisionStore {
 }
 
 // RegisterRecordRevisionStore forwards to inner if it implements
-// RecordRevisionStoreRegistrar.
-func (h *ScopedHost) RegisterRecordRevisionStore(s RecordRevisionStore) {
-	if p, ok := h.inner.(RecordRevisionStoreRegistrar); ok {
-		p.RegisterRecordRevisionStore(s)
-	}
+// RecordRevisionStoreRegistrar, for a plugin holding CapRecordRevisionStore.
+// The store keeps and serves the content API's revisions, so no other plugin
+// may replace it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) RegisterRecordRevisionStore(s RecordRevisionStore) error {
+	p, ok := h.inner.(RecordRevisionStoreRegistrar)
+	return h.registerRole(HostRoleRecordRevisionStore, "RegisterRecordRevisionStore", CapRecordRevisionStore, ok, s == nil,
+		func() error { return p.RegisterRecordRevisionStore(s) })
 }
 
 // MetricsGatherer forwards to inner if CapMetrics is held and inner
@@ -702,6 +799,10 @@ var (
 	_ ContentEntryWriterRegistrar      = (*ScopedHost)(nil)
 	_ RecordRevisionStoreProvider      = (*ScopedHost)(nil)
 	_ RecordRevisionStoreRegistrar     = (*ScopedHost)(nil)
+	_ SchemaEngineRegistrar            = (*ScopedHost)(nil)
+	_ EmailSenderRegistrar             = (*ScopedHost)(nil)
+	_ StorageSetter                    = (*ScopedHost)(nil)
+	_ UserProvisionerSetter            = (*ScopedHost)(nil)
 	_ MetricsGathererProvider          = (*ScopedHost)(nil)
 	_ GoroutineTunablesProvider        = (*ScopedHost)(nil)
 	_ LogRingProvider                  = (*ScopedHost)(nil)

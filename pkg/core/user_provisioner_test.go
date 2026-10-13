@@ -17,11 +17,15 @@ func (p *namedProvisioner) FindOrCreateUser(context.Context, uuid.UUID, string, 
 // userProvisionerHost keeps the provisioner slot.
 type userProvisionerHost struct {
 	stubHost
+	HostRoleRegistry
 	p UserProvisioner
 }
 
-func (h *userProvisionerHost) SetUserProvisioner(p UserProvisioner) { h.p = p }
-func (h *userProvisionerHost) UserProvisioner() UserProvisioner     { return h.p }
+func (h *userProvisionerHost) SetUserProvisioner(p UserProvisioner) error {
+	h.p = p
+	return nil
+}
+func (h *userProvisionerHost) UserProvisioner() UserProvisioner { return h.p }
 
 func TestScopedHost_UserProvisioner_ForwardsToInner(t *testing.T) {
 	inner := &userProvisionerHost{}

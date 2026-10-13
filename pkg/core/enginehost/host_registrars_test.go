@@ -52,7 +52,7 @@ func TestEngineHost_ContentLocalizer_RegisteredByPlugin(t *testing.T) {
 		t.Fatalf("ContentLocalizer() before any registration = %v, want nil", got)
 	}
 	l := stubLocalizer{}
-	owner := core.NewScopedHost(h, "localization", core.CapDBWrite|core.CapRoutes)
+	owner := core.NewScopedHost(h, "localization", core.CapDBWrite|core.CapRoutes|core.CapContentLocalizer)
 	consumer := core.NewScopedHost(h, "graphql", core.CapRoutes)
 	owner.RegisterContentLocalizer(l)
 	if got := provider.ContentLocalizer(); got != core.ContentLocalizer(l) {
