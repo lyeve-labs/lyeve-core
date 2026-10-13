@@ -26,6 +26,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // Benchmark infrastructure: standalone PG container for benchmarks
@@ -33,6 +34,7 @@ import (
 // tbDB spins up a postgres container, migrates, and returns a connected db.DB.
 func tbDB(tb testing.TB) db.DB {
 	tb.Helper()
+	testdialect.Require(tb, "postgres")
 
 	ctx := context.Background()
 	ctr, err := postgres.Run(

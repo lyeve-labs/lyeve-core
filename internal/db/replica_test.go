@@ -10,6 +10,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // Unit: QuerierRO routes to an explicitly-set replica
@@ -21,6 +23,7 @@ func TestQuerierRO_RoutesToReplicaWhenConfigured(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
+	testdialect.Require(t, "postgres")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()

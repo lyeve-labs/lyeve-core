@@ -26,6 +26,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	enginedb "github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	_ "github.com/microsoft/go-mssqldb"
 
@@ -69,6 +70,7 @@ var rtPg struct {
 
 func rtEnsurePG(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "postgres")
 	rtPg.once.Do(func() {
 		ctx := context.Background()
 		var err error
@@ -147,6 +149,7 @@ var rtMySQL struct {
 
 func rtEnsureMySQL(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "mysql")
 	rtMySQL.once.Do(func() {
 		ctx := context.Background()
 		var err error
@@ -228,6 +231,7 @@ var rtMSSQL struct {
 
 func rtEnsureMSSQL(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "mssql")
 	rtMSSQL.once.Do(func() {
 		ctx := context.Background()
 		var err error
