@@ -320,9 +320,10 @@ func TestContentTenantIsolation_PivotRowsScopedToTenant(t *testing.T) {
 				t.Fatalf("tenant B saw A's relations: rows=%d total=%d", len(relB), totalB)
 			}
 
-			// B writing relations onto A's article id must not destroy A's rows.
-			if err := store.SetRelations(ctxB, "articles", articleA.ID, tagsField, []uuid.UUID{tagB.ID}); err != nil {
-				t.Fatalf("set relations B: %v", err)
+			// B writing relations onto A's article id is refused as a row B
+			// does not hold, and must not destroy A's rows.
+			if err := store.SetRelations(ctxB, "articles", articleA.ID, tagsField, []uuid.UUID{tagB.ID}); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("set relations B on A's article: want ErrNotFound, got %v", err)
 			}
 			relA, _, err = store.ListRelated(ctxA, "articles", articleA.ID, tagsField, 20, 0, true)
 			if err != nil {

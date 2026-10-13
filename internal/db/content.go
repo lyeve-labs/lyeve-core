@@ -186,6 +186,22 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 	if _, _, err := contentStatus(sc, data); err != nil {
 		return nil, fmt.Errorf("content insert: %w", err)
 	}
+	var result *domain.Content
+	err = s.writeChecked(ctx, insertRelationValues(sc, data), func(ctx context.Context) error {
+		var werr error
+		result, werr = s.insertRow(ctx, sc, schemaName, table, data)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, result.ID)
+	return result, nil
+}
+
+// insertRow writes one new row under an id the database or the dialect
+// mints and reads it back.
+func (s *ContentStore) insertRow(ctx context.Context, sc *domain.Schema, schemaName, table string, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -203,12 +219,7 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 		if qErr != nil {
 			return nil, fmt.Errorf("content insert: %w", qErr)
 		}
-		result, err := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-		if err != nil {
-			return nil, err
-		}
-		s.invalidateSchema(ctx, schemaName, result.ID)
-		return result, nil
+		return scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 	}
 
 	// MySQL / MSSQL: generate UUID in Go, INSERT with explicit id, then SELECT.
@@ -230,7 +241,6 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 	if err != nil {
 		return nil, fmt.Errorf("content insert select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, result.ID)
 	return result, nil
 }
 
@@ -247,6 +257,21 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 	if _, _, err := contentStatus(sc, data); err != nil {
 		return nil, fmt.Errorf("content insert: %w", err)
 	}
+	var result *domain.Content
+	err = s.writeChecked(ctx, insertRelationValues(sc, data), func(ctx context.Context) error {
+		var werr error
+		result, werr = s.insertRowWithID(ctx, sc, schemaName, table, id, data)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, result.ID)
+	return result, nil
+}
+
+// insertRowWithID writes one new row under id and reads it back.
+func (s *ContentStore) insertRowWithID(ctx context.Context, sc *domain.Schema, schemaName, table string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -263,12 +288,7 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 		if qErr != nil {
 			return nil, fmt.Errorf("content insert: %w", qErr)
 		}
-		result, err := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-		if err != nil {
-			return nil, err
-		}
-		s.invalidateSchema(ctx, schemaName, result.ID)
-		return result, nil
+		return scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 	}
 
 	// MySQL / MSSQL: no RETURNING. Read back the row just written.
@@ -286,7 +306,6 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 	if err != nil {
 		return nil, fmt.Errorf("content insert select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, result.ID)
 	return result, nil
 }
 
@@ -536,6 +555,21 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 		return s.GetByID(ctx, schemaName, id)
 	}
 
+	var c *domain.Content
+	err = s.writeChecked(ctx, core.RelationValues(sc.Fields, data), func(ctx context.Context) error {
+		var werr error
+		c, werr = s.updateRow(ctx, sc, schemaName, table, id, sets, args, expectedUpdatedAt)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, id)
+	return c, nil
+}
+
+// updateRow writes sets to one row of the caller's tenant and reads it back.
+func (s *ContentStore) updateRow(ctx context.Context, sc *domain.Schema, schemaName, table string, id uuid.UUID, sets []string, args []any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 
@@ -565,7 +599,6 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 		if err != nil {
 			return nil, err
 		}
-		s.invalidateSchema(ctx, schemaName, id)
 		return c, nil
 	}
 
@@ -593,7 +626,6 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 	if err != nil {
 		return nil, fmt.Errorf("content update select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, id)
 	return c, nil
 }
 
@@ -848,69 +880,74 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 
 // BulkInsert inserts multiple rows in a single transaction.
 // Returns the inserted records. If any row fails the whole batch is rolled back.
+// A relation in any row that names no row of the caller's tenant refuses the
+// whole batch before a row is written.
 func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items []map[string]any) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin bulk insert tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // deferred rollback. Commit result takes precedence
-
-	isPG := s.pool.Engine() == "postgres"
-	tenantID := tenant.ID(ctx)
-	tenantCol := dialect.Must(s.pool.Engine()).QuoteIdentifier(TenantColumnName)
-	results := make([]*domain.Content, 0, len(items))
+	var values []core.RelationValue
 	for _, data := range items {
 		if _, _, err := contentStatus(sc, data); err != nil {
 			return nil, fmt.Errorf("bulk insert: %w", err)
 		}
-		cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
-		cols = append([]string{tenantCol}, cols...)
-		args = append([]any{tenantID}, args...)
-		if isPG {
-			ph := placeholders(len(args))
-			row := tx.QueryRowContext(ctx,
-				fmt.Sprintf(`INSERT INTO %s AS r (%s) VALUES (%s) RETURNING %s`,
-					table, strings.Join(cols, ", "), ph, writtenRowColumns(s.pool.Engine(), sc)),
-				args...,
-			)
-			c, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-			if scanErr != nil {
-				return nil, fmt.Errorf("bulk insert row scan: %w", scanErr)
+		values = append(values, insertRelationValues(sc, data)...)
+	}
+
+	isPG := s.pool.Engine() == "postgres"
+	tenantID := tenant.ID(ctx)
+	tenantCol := dialect.Must(s.pool.Engine()).QuoteIdentifier(TenantColumnName)
+	var results []*domain.Content
+	err = s.inTransactionChecked(ctx, values, func(ctx context.Context) error {
+		results = make([]*domain.Content, 0, len(items))
+		for _, data := range items {
+			cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
+			cols = append([]string{tenantCol}, cols...)
+			args = append([]any{tenantID}, args...)
+			if isPG {
+				ph := placeholders(len(args))
+				row, qErr := s.pool.QueryRow(ctx,
+					fmt.Sprintf(`INSERT INTO %s AS r (%s) VALUES (%s) RETURNING %s`,
+						table, strings.Join(cols, ", "), ph, writtenRowColumns(s.pool.Engine(), sc)),
+					args...,
+				)
+				if qErr != nil {
+					return fmt.Errorf("bulk insert row: %w", qErr)
+				}
+				c, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
+				if scanErr != nil {
+					return fmt.Errorf("bulk insert row scan: %w", scanErr)
+				}
+				results = append(results, c)
+				continue
 			}
-			results = append(results, c)
-		} else {
 			// MySQL / MSSQL: generate UUID in Go, INSERT with explicit id, then SELECT.
 			newID := uuid.New()
 			cols = append([]string{"id"}, cols...)
 			args = append([]any{newID}, args...)
 			ph := placeholders(len(args))
-
-			insertSQL, insertArgs := rewritePlaceholders(
+			if _, execErr := s.pool.Exec(ctx,
 				fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, table, strings.Join(cols, ", "), ph),
-				s.pool.Engine(), args,
-			)
-			if _, execErr := tx.ExecContext(ctx, insertSQL, insertArgs...); execErr != nil {
-				return nil, fmt.Errorf("bulk insert row: %w", execErr)
+				args...,
+			); execErr != nil {
+				return fmt.Errorf("bulk insert row: %w", execErr)
 			}
-			selectSQL, selectArgs := rewritePlaceholders(
-				writtenRowSelect(s.pool.Engine(), sc, table),
-				s.pool.Engine(), []any{newID, tenantID},
-			)
-			result, scanErr := scanWrittenRow(s.pool.Engine(), tx.QueryRowContext(ctx, selectSQL, selectArgs...), schemaName, sc)
+			row, qErr := s.pool.QueryRow(ctx, writtenRowSelect(s.pool.Engine(), sc, table), newID, tenantID)
+			if qErr != nil {
+				return fmt.Errorf("bulk insert row select: %w", qErr)
+			}
+			result, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 			if scanErr != nil {
-				return nil, fmt.Errorf("bulk insert row select: %w", scanErr)
+				return fmt.Errorf("bulk insert row select: %w", scanErr)
 			}
 			results = append(results, result)
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit bulk insert: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return results, nil
 }
