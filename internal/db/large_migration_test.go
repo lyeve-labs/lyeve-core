@@ -184,9 +184,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 
 		// Verify index was created
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count, "index should exist")
 
 		// The read runs after index creation. The lock test below covers
@@ -206,9 +206,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 		t.Logf("PG CREATE INDEX CONCURRENTLY: %v", concDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count)
 	})
 
@@ -224,9 +224,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 
 		// Verify column exists and has correct default
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE status = 'active'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have status='active'")
 	})
 
@@ -395,9 +395,9 @@ func TestLargeMigration_ConcurrentAccess_Postgres(t *testing.T) {
 
 	// Verify data integrity
 	var catCount int
-	db.QueryRowContext(context.Background(),
+	require.NoError(t, db.QueryRowContext(context.Background(),
 		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE category = 'general'", tableName),
-	).Scan(&catCount)
+	).Scan(&catCount))
 	assert.Equal(t, rows, catCount, "all rows should have category='general'")
 }
 
@@ -457,10 +457,10 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 		t.Logf("MySQL CREATE INDEX: %v", idxDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM information_schema.statistics WHERE index_name = ?`,
 			indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Greater(t, count, 0, "index should exist")
 	})
 
@@ -475,9 +475,9 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 		t.Logf("MySQL ADD COLUMN with default: %v", addColDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE status = 'active'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have status='active'")
 	})
 
@@ -647,9 +647,9 @@ func TestLargeMigration_ConcurrentAccess_MySQL(t *testing.T) {
 	assert.LessOrEqual(t, writeErrs, totalWrites/10, "write errors < 10%%")
 
 	var catCount int
-	db.QueryRowContext(context.Background(),
+	require.NoError(t, db.QueryRowContext(context.Background(),
 		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE region = 'us-east-1'", tableName),
-	).Scan(&catCount)
+	).Scan(&catCount))
 	assert.Equal(t, rows, catCount, "all rows should have region='us-east-1'")
 }
 
@@ -699,10 +699,10 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 		t.Logf("MSSQL CREATE INDEX (offline): %v", idxDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM sys.indexes WHERE name = @p1`,
 			indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count, "index should exist")
 	})
 
@@ -756,9 +756,9 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 		t.Logf("MSSQL ADD COLUMN + UPDATE + DEFAULT: %v", colDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE category = 'general'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have category='general'")
 	})
 }
