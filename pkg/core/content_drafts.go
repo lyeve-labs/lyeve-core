@@ -31,16 +31,10 @@ func ContentEventPublished(draftPublish bool, data map[string]any) bool {
 }
 
 // DraftPermissionChecker returns the checker that decides who may read
-// drafts on a host: the registered rule engine when there is one, and the
-// kernel's role-only checker otherwise, so a host without rules is closed
-// rather than open.
+// drafts on a host. Drafts are judged by the same rules as every other
+// content access, so it is PermissionCheckerOf.
 func DraftPermissionChecker(host any) PermissionChecker {
-	if p, ok := host.(PermissionCheckerProvider); ok {
-		if c := p.PermissionChecker(); c != nil {
-			return c
-		}
-	}
-	return RoleOnlyPermissionChecker{}
+	return PermissionCheckerOf(host)
 }
 
 // CanReadDrafts reports whether the caller on ctx may see unpublished rows

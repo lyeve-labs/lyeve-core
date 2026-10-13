@@ -70,14 +70,21 @@ type FlowNodeSpec struct {
 // The tenant travels in ctx, set with WithTenantID, and a node reads it with
 // TenantIDFromCtx. It is never in Config: a flow runs as its tenant, and a
 // node that could name another one would be a way across the boundary.
+//
+// Publisher is the user who published the version being run, with the roles
+// they hold in the run's tenant now. A node that reads or writes content under
+// the access rules acts as the publisher, never as whoever started the run
+// and never with more than the publisher holds. Nil means the runner does not
+// know who published, and such a node refuses to run rather than guess.
 type FlowInvocation struct {
-	TenantID string
-	NodeID   string
-	Config   map[string]any
-	Inputs   map[string][]any
-	DryRun   bool
-	Eval     func(expr string, extra map[string]any) (any, error)
-	Log      func(level, msg string, fields map[string]any)
+	TenantID  string
+	NodeID    string
+	Config    map[string]any
+	Inputs    map[string][]any
+	DryRun    bool
+	Eval      func(expr string, extra map[string]any) (any, error)
+	Log       func(level, msg string, fields map[string]any)
+	Publisher *AuthClaims
 }
 
 // FlowResult carries a node's outputs, keyed by output port.

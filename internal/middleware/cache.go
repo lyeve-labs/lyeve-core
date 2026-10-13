@@ -79,11 +79,13 @@ var DefaultDashboardPolicy = CachePolicy{
 	NoTransform:          true,
 }
 
-// DefaultSchemaPolicy is for rarely-changed schema definitions.
+// DefaultSchemaPolicy is for rarely-changed schema definitions. It is
+// private: the catalog lists only what the caller may read, so two callers
+// get different answers, and a session cookie is not in Vary, so a shared
+// cache would hand one caller's list to the next.
 var DefaultSchemaPolicy = CachePolicy{
 	MaxAge:               300 * time.Second,
 	StaleWhileRevalidate: 3600 * time.Second,
-	Public:               true,
 }
 
 // ImmutablePolicy is for immutable resources such as hashed assets and versioned APIs.
@@ -277,11 +279,13 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 			}
 
 			// Vary: Authorization prevents CDNs from serving cached authenticated
-			// responses to unauthenticated callers. The handler and the middleware
-			// before it may each have added their own value (Origin from CORS,
-			// Accept-Language from a localized read), so every value is merged
-			// rather than only the first one Get would return.
-			ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization"))
+			// responses to unauthenticated callers. X-API-Key does the same for
+			// keys, which answer differently from one another because each is
+			// held to its own schema list, scopes and roles. The handler and
+			// the middleware before it may each have added their own value
+			// (Origin from CORS, Accept-Language from a localized read), so every
+			// value is merged rather than only the first one Get would return.
+			ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization", "X-API-Key"))
 
 			if ew.statusCode == 0 {
 				ew.statusCode = http.StatusOK
