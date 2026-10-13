@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Through the multitenant plugin release this engine pins: a backup restore test no longer deletes the tenant's data. It restored the newest backup over the tenant itself, so every change since that backup was lost. It now checks the backup without writing anything. Scheduled backups and restore tests also run on their schedules, which nothing did before.
 - Through the plugin releases this engine pins: a draft saved in the admin console is no longer served as published on the Content API, GraphQL or gRPC, and drafts saved before this release are marked as drafts again in the background. A scheduled publish sends the same webhook and flow events a save does. Failed webhook deliveries are retried, the first retry waits the base delay, and a webhook's own retry fields apply when it has no retry policy. A realtime stream no longer ends at the server's write timeout. The IP masking rule masks IPv6 addresses as well as IPv4.
 - A `json` field's default is copied into each new entry instead of shared with the schema, so a hook that edits the entry in place no longer edits the default.
 - `security.DiscoverOIDC` gives each caller its own copy of the cached issuer configuration.
