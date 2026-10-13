@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -91,48 +92,35 @@ func seedLargeTable(t *testing.T, db *sql.DB, dialect string, rows int) (tableNa
 		}
 		insertDuration = time.Since(start)
 	} else {
-		// MySQL and MSSQL: insert in batches.
-		// MSSQL limits to 1000 rows per INSERT; MySQL handles up to ~10K comfortably.
+		// MySQL and SQL Server insert in batches. SQL Server takes at most
+		// 1,000 rows in one VALUES list, and MySQL handles 10,000 comfortably.
 		start := time.Now()
 		batchSize := 10_000
 		if dialect == "mssql" {
 			batchSize = 1_000
 		}
-		batches := rows / batchSize
-		for b := 0; b < batches; b++ {
-			var batchSQL string
-			switch dialect {
-			case "mysql":
-				batchSQL = fmt.Sprintf(`INSERT INTO %s (data, num) VALUES `, tableName)
-			case "mssql":
-				batchSQL = fmt.Sprintf(`INSERT INTO %s (data, num) VALUES `, tableName)
+		for _, batch := range seedBatches(rows, batchSize) {
+			values := make([]string, 0, batch.last-batch.first+1)
+			for idx := batch.first; idx <= batch.last; idx++ {
+				values = append(values, fmt.Sprintf("('row-%d-data', %d)", idx, idx))
 			}
-			values := make([]string, 0, batchSize)
-			for i := 0; i < batchSize; i++ {
-				idx := b*batchSize + i + 1
-				if dialect == "mysql" {
-					values = append(values, fmt.Sprintf("('%s', %d)", fmt.Sprintf("row-%d-data", idx), idx))
-				} else {
-					values = append(values, fmt.Sprintf("('%s', %d)", fmt.Sprintf("row-%d-data", idx), idx))
-				}
-			}
-			for i, v := range values {
-				if i > 0 {
-					batchSQL += ","
-				}
-				batchSQL += v
-			}
+			batchSQL := fmt.Sprintf(`INSERT INTO %s (data, num) VALUES %s`, tableName, strings.Join(values, ","))
 			if _, err := db.ExecContext(ctx, batchSQL); err != nil {
-				t.Fatalf("batch insert %d (%s): %v", b, dialect, err)
+				t.Fatalf("insert rows %d to %d (%s): %v", batch.first, batch.last, dialect, err)
 			}
 		}
 		insertDuration = time.Since(start)
 	}
 
-	// Verify row count
+	// A table seeded short fails here. Later it would read as a wrong count
+	// after the ALTER, or as errors from the concurrent readers, which both
+	// point away from the seeding.
 	var count int
 	if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count); err != nil {
 		t.Fatalf("count seed rows: %v", err)
+	}
+	if count != rows {
+		t.Fatalf("seeded %s with %d rows, asked for %d", tableName, count, rows)
 	}
 	t.Logf("seeded %s with %d rows in %v", tableName, count, insertDuration.Round(time.Millisecond))
 
