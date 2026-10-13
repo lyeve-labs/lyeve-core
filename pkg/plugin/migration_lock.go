@@ -2,7 +2,9 @@ package plugin
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // MD5 names a lock
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"time"
@@ -34,7 +36,7 @@ const (
 //
 // An engine with no advisory-lock primitive gets a no-op rather than a hang.
 func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func(), error) {
-	if db == nil || lockSQLFor(dialect) == "" {
+	if db == nil || lockSQLFor(dialect, migrationLockName) == "" {
 		return func() {}, nil
 	}
 
@@ -50,7 +52,12 @@ func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func
 			return nil, fmt.Errorf("plugin migrate: lock connection: %w", err)
 		}
 
-		locked, err := tryLock(ctx, conn, dialect)
+		key, err := lockKey(ctx, conn, dialect)
+		if err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("plugin migrate: lock key: %w", err)
+		}
+		locked, err := tryLock(ctx, conn, dialect, key)
 		if err != nil {
 			_ = conn.Close()
 			return nil, fmt.Errorf("plugin migrate: acquire lock: %w", err)
@@ -62,7 +69,7 @@ func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func
 			// that same pooled connection waits out the full timeout against
 			// itself.
 			return func() {
-				if q := unlockSQLFor(dialect); q != "" {
+				if q := unlockSQLFor(dialect, key); q != "" {
 					if _, err := conn.ExecContext(context.WithoutCancel(ctx), q); err != nil {
 						slog.Warn("plugin migrate: releasing the migration lock failed",
 							"dialect", dialect, "err", err)
@@ -88,42 +95,59 @@ func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func
 	}
 }
 
-// lockSQLFor returns the engine's single-statement try-acquire, or "" when the
-// engine has no advisory lock.
-func lockSQLFor(dialect string) string {
+// lockKey returns the resource the lock names on this connection. On MySQL,
+// GET_LOCK names are server-wide, so the key carries a digest of the current
+// schema: two databases on one server must not block each other. The digest is
+// the lowercase hex MD5 the server's MD5(DATABASE()) gave, taken here because
+// MySQL 9 has no MD5 function, so an engine that still asks the server for it
+// takes the same lock during an upgrade. Hex after a fixed prefix is safe to
+// inline in SQL.
+func lockKey(ctx context.Context, conn *sql.Conn, dialect string) (string, error) {
+	if dialect != "mysql" {
+		return migrationLockName, nil
+	}
+	var schema sql.NullString
+	if err := conn.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&schema); err != nil {
+		return "", fmt.Errorf("read current schema: %w", err)
+	}
+	sum := md5.Sum([]byte(schema.String)) //nolint:gosec // a lock key, not a security control
+	return migrationLockName + "_" + hex.EncodeToString(sum[:]), nil
+}
+
+// lockSQLFor returns the engine's single-statement try-acquire of key, or ""
+// when the engine has no advisory lock.
+func lockSQLFor(dialect, key string) string {
 	switch dialect {
 	case "postgres", "postgresql":
-		return "SELECT pg_try_advisory_lock(hashtext('" + migrationLockName + "'))"
+		return "SELECT pg_try_advisory_lock(hashtext('" + key + "'))"
 	case "mysql":
-		// GET_LOCK names are server-wide, so the key includes a digest of the
-		// current schema: two databases on one server must not block each other.
-		return "SELECT GET_LOCK(CONCAT('" + migrationLockName + "_', MD5(DATABASE())), 0)"
+		return "SELECT GET_LOCK('" + key + "', 0)"
 	case "mssql", "sqlserver":
-		return "DECLARE @r INT; EXEC @r = sp_getapplock @Resource='" + migrationLockName +
+		return "DECLARE @r INT; EXEC @r = sp_getapplock @Resource='" + key +
 			"', @LockMode='Exclusive', @LockOwner='Session', @LockTimeout=0; SELECT @r"
 	default:
 		return ""
 	}
 }
 
-// unlockSQLFor returns the engine's release statement, or "" when the engine
-// has no advisory lock. It must mirror lockSQLFor's key exactly.
-func unlockSQLFor(dialect string) string {
+// unlockSQLFor returns the engine's release of key, or "" when the engine has
+// no advisory lock. It must mirror lockSQLFor exactly.
+func unlockSQLFor(dialect, key string) string {
 	switch dialect {
 	case "postgres", "postgresql":
-		return "SELECT pg_advisory_unlock(hashtext('" + migrationLockName + "'))"
+		return "SELECT pg_advisory_unlock(hashtext('" + key + "'))"
 	case "mysql":
-		return "SELECT RELEASE_LOCK(CONCAT('" + migrationLockName + "_', MD5(DATABASE())))"
+		return "SELECT RELEASE_LOCK('" + key + "')"
 	case "mssql", "sqlserver":
-		return "EXEC sp_releaseapplock @Resource='" + migrationLockName + "', @LockOwner='Session'"
+		return "EXEC sp_releaseapplock @Resource='" + key + "', @LockOwner='Session'"
 	default:
 		return ""
 	}
 }
 
 // tryLock runs one non-blocking acquire, reporting whether it was granted.
-func tryLock(ctx context.Context, conn *sql.Conn, dialect string) (bool, error) {
-	q := lockSQLFor(dialect)
+func tryLock(ctx context.Context, conn *sql.Conn, dialect, key string) (bool, error) {
+	q := lockSQLFor(dialect, key)
 	if q == "" {
 		return true, nil
 	}
