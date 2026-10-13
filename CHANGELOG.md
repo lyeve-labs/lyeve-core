@@ -17,11 +17,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A content read that a session cookie may have authenticated is marked private and never stored, so a shared cache in front of the engine can no longer hand one signed-in user's view to another caller. Reads authenticated by a token or a key stay cacheable and vary on the header that carries the credential.
 - An open content stream checks every event against the caller's current access, field mask and draft rules, and ends with a short reason when access is withdrawn. It used to check once, when it opened.
 - An open content stream ends when its token expires, and before each event it checks that the session or API key still holds. A sign-out, a password an administrator set, a disabled or deleted account, an erasure, or a revoked or narrowed key ends it. Clients reconnect and authenticate again.
+- A relation can no longer point at an entry that belongs to another tenant. Every write of a relation checks, inside the same transaction, that the target belongs to the caller's tenant, and refuses another tenant's entry exactly as it refuses one that does not exist, so the answer no longer tells a caller which ids exist elsewhere.
 
 ### Added
 
 - A plugin can give a public route on the general limit a limit of its own at runtime, through `core.RegisterPublicRouteLimitResolver`. The public limiter asks it on each request to such a route, and a limit it answers replaces the general per-address cap there, higher or lower. A route with a limit of its own, such as sign-in or the token endpoint, keeps that limit whatever a resolver answers, and so does every route under `/auth`, which guards a credential: `PUBLIC_RATE_LIMITS` stays the way to move them. A HEAD request follows its GET route's limit and shares its bucket.
 - `core.EngineRateLimitsProvider` lists every public route on the general limit that can take a limit of its own, as scope `general`, with the general limit's values. HEAD routes and routes under `/auth` are not listed.
+- A plugin route can declare the media types it answers in, such as a stream, CSV or a file, through `MediaTypes` on its `core.RouteDecl`, and the API description shows them. A route that declares nothing is described as before.
+- A plugin route can declare the response headers a page on another origin may read and the request headers it accepts, through `ExposeHeaders` and `AllowHeaders` on its `core.RouteDecl`. The engine adds them to the CORS lists every router sends, and the origin check is unchanged.
+- The `contentrules` package gives a plugin that writes content the field defaults and validation rules the Content API applies: `PrepareCreate` for a new entry and `ValidatePatch` for a partial update.
 
 ### Changed
 
@@ -29,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The deprecation `Link` header on an admin-role API key, and the README, point at the documentation's new address, lyeve.com/docs. The old host redirects there.
 - A release candidate image is published under its exact tag only, `X.Y.Z-rc.N`, and never as `latest` or the minor line, so an install that follows either tag never receives a candidate.
 - A key that holds only schema read access also needs content read access to see a schema, and asking for a content type the caller may not read answers `403` whether or not it exists.
+- The MySQL and SQL Server hosts in `plugintest` get each test's database ready ahead of the test, and the MySQL one keeps its data in memory, so a plugin's tests on those dialects wait far less for database setup.
 
 ### Fixed
 
@@ -39,6 +44,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - `security.DiscoverOIDC` gives each caller its own copy of the cached issuer configuration.
 - An unchanged content entry carries the same `ETag` on every read, so `If-None-Match` answers `304` again. Content responses encode map keys in sorted order, and the entry's tag hashes those bytes. Before, an entry's fields were written in random order and its tag changed on almost every read.
 - Every boot logged a `public rate-limit config gap` ERROR for public routes with no limit of their own, although each runs on the general per-address cap, which is the intended limit for a route that guards no credential. Those routes are now listed once at Info. The ERROR remains for the cases it was written for: a route with no limit of its own and no general cap, which runs unlimited, and a route under `/auth` with no limit of its own, which guards a credential with only the general cap.
+- The schema import accepts bundles up to its documented 4 MiB. A general 1 MiB limit refused larger ones first. Every other admin route keeps its limit.
+- Six guard refusals now answer with the JSON error shape and content type every other refusal uses. Their body was JSON labeled as plain text, so a client that trusted the label could not read it. Status and message are unchanged.
+- The API description names the format each route answers in, including the content change stream, which serves Server-Sent Events and was described as newline-delimited JSON. It also names the role or token each admin route requires and the schema import's request body.
 
 ## [0.54.1] - 2026-10-11
 
