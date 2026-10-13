@@ -76,3 +76,48 @@ func TestAuthorizeContent_ScopeRefusalPrecedesTheRules(t *testing.T) {
 	assert.Zero(t, asked, "the rules were asked about a schema the key's scopes refuse")
 	assert.ErrorIs(t, AuthorizeContent(context.Background(), failingRules{}, claims, "authors", ActionRead), ErrScopeDenied)
 }
+
+// A rule may hide a belongs_to relation by its field name or by its column,
+// and either one hides both forms once the set has read the schema. The
+// column a definition names is found as well as the default one, and a
+// field that is not a belongs_to relation is never widened.
+func TestHiddenFields_WithRelationsHidesBothForms(t *testing.T) {
+	fields := []SchemaField{
+		{Name: "title", FieldType: "text"},
+		{Name: "author", FieldType: "relation", RelationType: RelBelongsTo},
+		{Name: "reviewer", FieldType: "relation", RelationType: RelBelongsTo, RelationFKName: "checked_by"},
+		{Name: "tags", FieldType: "relation", RelationType: RelManyToMany},
+	}
+	entry := map[string]any{
+		"title": "t", "author": "a", "author_id": "a", "reviewer": "r", "checked_by": "r", "tags": []any{},
+	}
+	for _, tc := range []struct {
+		name   string
+		hidden HiddenFields
+		served []string
+	}{
+		{"the field name", HiddenFields{"author": {}}, []string{"title", "reviewer", "checked_by", "tags"}},
+		{"the default column", HiddenFields{"author_id": {}}, []string{"title", "reviewer", "checked_by", "tags"}},
+		{"the field whose column is named", HiddenFields{"reviewer": {}}, []string{"title", "author", "author_id", "tags"}},
+		{"the named column", HiddenFields{"checked_by": {}}, []string{"title", "author", "author_id", "tags"}},
+		{"a many_to_many field", HiddenFields{"tags": {}}, []string{"title", "author", "author_id", "reviewer", "checked_by"}},
+		{"nothing", nil, []string{"title", "author", "author_id", "reviewer", "checked_by", "tags"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resolved := tc.hidden.WithRelations(fields)
+			got := resolved.Apply(entry)
+			served := make([]string, 0, len(got))
+			for k := range got {
+				served = append(served, k)
+			}
+			assert.ElementsMatch(t, tc.served, served)
+			for k := range entry {
+				_, kept := got[k]
+				assert.Equal(t, !kept, resolved.Names(k), "Apply and Names disagree on %s", k)
+			}
+		})
+	}
+	before := HiddenFields{"author": {}}
+	before.WithRelations(fields)
+	assert.Equal(t, HiddenFields{"author": {}}, before, "the set it was called on changed")
+}

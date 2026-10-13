@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -303,7 +304,32 @@ func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema 
 
 // fieldMask is maskFor without the response.
 func (h *ContentHandler) fieldMask(r *http.Request, schema string) (func(map[string]any) map[string]any, error) {
-	return core.ContentFieldMask(r.Context(), h.checker(), requestClaims(r), schema)
+	hidden, err := h.hiddenFields(r, schema)
+	if err != nil {
+		return nil, err
+	}
+	return hidden.Apply, nil
+}
+
+// hiddenFields resolves the fields of schema the caller may not read, with
+// each relation's column and populated record hidden together through the
+// schema's own definition. A schema the source does not know keeps the names
+// the rule gave, since no read of it can succeed. A source that cannot answer
+// fails the read, because guessing which column a relation uses could serve
+// the one the rule meant to hide.
+func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.HiddenFields, error) {
+	hidden, err := core.ContentHiddenFields(r.Context(), h.checker(), requestClaims(r), schema)
+	if err != nil || len(hidden) == 0 || h.schemas == nil {
+		return hidden, err
+	}
+	sc, err := h.schemas.GetByName(r.Context(), schema)
+	switch {
+	case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
+		return hidden, nil
+	case err != nil:
+		return nil, fmt.Errorf("field mask %s: %w", schema, err)
+	}
+	return hidden.WithRelations(sc.Fields), nil
 }
 
 // populate resolves ?populate= and ?depth= on items, putting every relation

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -81,7 +82,9 @@ type HiddenFields map[string]struct{}
 // Names reports whether key names a hidden field: the field itself, or the
 // column a relation field is stored and filtered in, which carries an _id
 // suffix. A filter or a sort on a hidden field answers which entries hold a
-// guessed value, so it reads the field as surely as serving it would.
+// guessed value, so it reads the field as surely as serving it would. A
+// column whose name the relation's definition overrides is named once the set
+// has been through WithRelations.
 func (h HiddenFields) Names(key string) bool {
 	if len(h) == 0 {
 		return false
@@ -96,16 +99,45 @@ func (h HiddenFields) Names(key string) bool {
 	return false
 }
 
-// Apply returns data without the hidden fields. It copies an entry it
-// changes and never edits the map it is given.
+// Apply returns data without the hidden fields. It drops exactly the keys
+// Names reports, so a response never carries a field that a filter on it is
+// refused for. It copies an entry it changes and never edits the map it is
+// given.
 func (h HiddenFields) Apply(data map[string]any) map[string]any {
 	if len(h) == 0 || len(data) == 0 {
 		return data
 	}
 	out := make(map[string]any, len(data))
 	for k, v := range data {
-		if _, off := h[k]; !off {
+		if !h.Names(k) {
 			out[k] = v
+		}
+	}
+	return out
+}
+
+// WithRelations returns the set with both forms of each belongs_to relation
+// in fields hidden together. Such a relation reaches a reader as the column
+// it is stored in, and as the related record under the field name when it is
+// populated. A rule may name either form, and a set that hides one while
+// serving the other serves the relation. Reading the schema's own fields
+// finds a column whose name the definition overrides as well. The set it is
+// called on is not changed.
+func (h HiddenFields) WithRelations(fields []SchemaField) HiddenFields {
+	if len(h) == 0 {
+		return h
+	}
+	out := maps.Clone(h)
+	for _, f := range fields {
+		if f.FieldType != "relation" || (f.RelationType != RelBelongsTo && f.RelationType != "") {
+			continue
+		}
+		col := FKColumn(f.Name, f.RelationFKName)
+		_, byName := h[f.Name]
+		_, byColumn := h[col]
+		if byName || byColumn {
+			out[f.Name] = struct{}{}
+			out[col] = struct{}{}
 		}
 	}
 	return out
@@ -114,7 +146,9 @@ func (h HiddenFields) Apply(data map[string]any) map[string]any {
 // ContentHiddenFields resolves the fields of schema the caller may not read.
 // A checker that does not implement FieldMasker hides nothing, since a mask
 // only ever comes from a rule. Resolve it once per request, because each
-// resolution asks the rule store once per role.
+// resolution asks the rule store once per role. A transport that holds the
+// schema's definition passes the set through WithRelations, so a relation's
+// column and its populated record are hidden together.
 func ContentHiddenFields(ctx context.Context, checker PermissionChecker, claims *AuthClaims, schema string) (HiddenFields, error) {
 	masker, ok := checker.(FieldMasker)
 	if !ok {
