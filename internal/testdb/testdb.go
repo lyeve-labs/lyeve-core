@@ -293,10 +293,22 @@ func ensureMySQL(t *testing.T) {
 			// the joins would fail in the harness with "illegal mix of
 			// collations". That would be coverage lost to the harness rather
 			// than a product fault.
+			//
+			// Every test creates a database and runs every migration in it,
+			// and InnoDB writes each DDL statement to disk before it returns,
+			// so the suite waited on fsync rather than on MySQL. The data
+			// directory lives in memory and the server skips the flushes and
+			// the binary log. A test database is thrown away when its test
+			// ends, so nothing that durability protects is lost.
 			testcontainers.WithCmd(
 				"--character-set-server=utf8mb4",
 				"--collation-server=utf8mb4_unicode_ci",
+				"--innodb-flush-log-at-trx-commit=0",
+				"--innodb-doublewrite=OFF",
+				"--sync-binlog=0",
+				"--skip-log-bin",
 			),
+			testcontainers.WithTmpfs(map[string]string{"/var/lib/mysql": "rw"}),
 			testcontainers.WithWaitStrategy(
 				wait.ForLog("port: 3306  MySQL Community Server").
 					WithStartupTimeout(90*time.Second),
