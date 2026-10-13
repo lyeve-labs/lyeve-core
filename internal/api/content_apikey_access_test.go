@@ -99,6 +99,10 @@ func keyRouter(fx schemaContentFixture, keys map[string]*core.AuthClaims) http.H
 	r.Get("/api/v1/content/{schema}/{id}/revisions", fx.content.ListRevisions)
 	r.Get("/api/v1/content/{schema}/{id}/relations/{field}", fx.content.ListRelations)
 	r.Put("/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore", fx.content.RestoreRevision)
+	writer := requireRole("editor", "admin", "super_admin")
+	r.With(writer).Post("/api/v1/content/{schema}", fx.content.Create)
+	r.With(writer).Put("/api/v1/content/{schema}/{id}", fx.content.Update)
+	r.With(writer).Put("/api/v1/content/{schema}/{id}/publish", fx.content.Publish)
 	return r
 }
 
@@ -419,6 +423,107 @@ func TestContentHandler_APIKey_RelationsAndRestore(t *testing.T) {
 			data := dataOf(t, rr)
 			assert.Equal(t, "a", data["title"], "the restore did not answer with the restored entry")
 			assert.NotContains(t, data, "internal", "the restore served a masked field")
+		})
+	})
+}
+
+// A fresh install has written no access rule. A key's scopes narrow what its
+// roles may do and never grant on their own, so a content:read key with no
+// role reads nothing. A key whose role a rule opens reads what the rule
+// allows and no more: the published entries, and no write.
+//
+// Scopes cannot be the grant because a tenant admin may mint a key with no
+// role and any scope. A scope that granted reads would hand that admin every
+// schema the rules refuse the admin role, and every field they mask from it,
+// through a key the creation guard never saw a role on.
+func TestContentHandler_APIKey_RolelessKeyOnAFreshInstall(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"drafts"}, func(t *testing.T, fx schemaContentFixture) {
+		publishedID := createdID(t, fx.create(t, "drafts", map[string]any{"title": "Live"}))
+		draftID := createdID(t, fx.create(t, "drafts", map[string]any{"title": "Hidden"}))
+		unpublish := httptest.NewRequest(http.MethodPut, "/api/v1/content/drafts/"+draftID+"/unpublish", nil)
+		unpublish = chiCtx(unpublish.WithContext(fx.ctx), map[string]string{"schema": "drafts", "id": draftID})
+		rr := httptest.NewRecorder()
+		fx.content.Unpublish(rr, unpublish)
+		require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+
+		keys := map[string]*core.AuthClaims{
+			"roleless":       {Scopes: []string{"content:read"}},
+			"roleless-every": {Scopes: []string{"*:*"}},
+			"site-reader":    {Roles: []string{"site-reader"}, Scopes: []string{"content:read"}},
+		}
+		reads := []string{"/api/v1/content/drafts", "/api/v1/content/drafts/" + publishedID}
+
+		// The kernel's own checker and a rule engine holding no rows are the
+		// two shapes a fresh install takes, and they answer alike.
+		fresh := map[string]core.PermissionCheckerProvider{
+			"no rule engine":           nil,
+			"a rule store with no row": fakeProvider{ruleChecker{}},
+		}
+		for name, perms := range fresh {
+			t.Run(name+" refuses every key a read", func(t *testing.T) {
+				fx.content.perms = perms
+				r := keyRouter(fx, keys)
+				for key := range keys {
+					for _, path := range reads {
+						rr := call(t, r, http.MethodGet, key, path, nil)
+						require.Equal(t, http.StatusForbidden, rr.Code, "%s %s: %s", key, path, rr.Body.String())
+						assert.Contains(t, rr.Body.String(), "permission denied", "%s %s", key, path)
+					}
+				}
+			})
+		}
+
+		t.Run("a rule for the key's role opens the published entries", func(t *testing.T) {
+			fx.content.perms = fakeProvider{ruleChecker{reads: map[string][]string{"site-reader": {"drafts"}}}}
+			r := keyRouter(fx, keys)
+
+			rr := call(t, r, http.MethodGet, "site-reader", "/api/v1/content/drafts", nil)
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+			var entries []map[string]any
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &entries))
+			require.Len(t, entries, 1, "a list serves published entries only: %s", rr.Body.String())
+			assert.Equal(t, publishedID, entries[0]["id"])
+
+			for _, key := range []string{"roleless", "roleless-every"} {
+				rr := call(t, r, http.MethodGet, key, "/api/v1/content/drafts", nil)
+				require.Equal(t, http.StatusForbidden, rr.Code, "%s: %s", key, rr.Body.String())
+				assert.Contains(t, rr.Body.String(), "permission denied", key)
+			}
+		})
+
+		t.Run("no key writes", func(t *testing.T) {
+			fx.content.perms = fakeProvider{ruleChecker{
+				reads:   map[string][]string{"site-reader": {"drafts"}},
+				updates: map[string][]string{"site-reader": {"drafts"}},
+			}}
+			r := keyRouter(fx, keys)
+			refusals := map[string]string{
+				"roleless":       "insufficient scope",
+				"site-reader":    "insufficient scope",
+				"roleless-every": "insufficient permissions",
+			}
+			for key, msg := range refusals {
+				for _, w := range []struct{ method, path, body string }{
+					{http.MethodPost, "/api/v1/content/drafts", `{"data": {"title": "From a key"}}`},
+					{http.MethodPut, "/api/v1/content/drafts/" + publishedID, `{"data": {"title": "Changed"}}`},
+					{http.MethodPut, "/api/v1/content/drafts/" + draftID + "/publish", ""},
+				} {
+					rr := call(t, r, w.method, key, w.path, strings.NewReader(w.body))
+					require.Equal(t, http.StatusForbidden, rr.Code, "%s %s %s: %s", key, w.method, w.path, rr.Body.String())
+					assert.Contains(t, rr.Body.String(), msg, "%s %s %s", key, w.method, w.path)
+				}
+			}
+
+			// Nothing reached the table: one entry is still published under
+			// its first title and the other is still a draft.
+			fx.content.perms = nil
+			for id, want := range map[string]string{publishedID: "published", draftID: "draft"} {
+				rr := fx.get(t, "drafts", id)
+				require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+				data := dataOf(t, rr)
+				assert.Equal(t, want, data["_status"], id)
+			}
+			assert.Equal(t, "Live", dataOf(t, fx.get(t, "drafts", publishedID))["title"])
 		})
 	})
 }
