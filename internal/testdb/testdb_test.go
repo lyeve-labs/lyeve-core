@@ -235,3 +235,32 @@ func TestMSSQLContainer_SpinUp(t *testing.T) {
 
 	t.Log("MSSQL (Azure SQL Edge): spin up, migrations, CRUD (INSERT/SELECT/UPDATE/DELETE)")
 }
+
+// A helper asked for a dialect the run does not cover skips its test before
+// the server starts, whether or not the caller asked ShouldTest first. A run
+// limited to one dialect then starts no other dialect's server.
+func TestHelpers_SkipADialectTheRunDoesNotCover(t *testing.T) {
+	cases := []struct {
+		run, asked string
+		open       func(*testing.T)
+	}{
+		{"postgres", "mysql", func(t *testing.T) { testdb.MySQL(t) }},
+		{"postgres", "mssql", func(t *testing.T) { testdb.MSSQL(t) }},
+		{"mysql", "postgres", func(t *testing.T) { testdb.Postgres(t) }},
+	}
+	for _, c := range cases {
+		t.Run(c.asked+"_in_a_"+c.run+"_run", func(t *testing.T) {
+			t.Setenv("CI_DIALECT", c.run)
+			opened := false
+			if !t.Run("open", func(t *testing.T) {
+				c.open(t)
+				opened = true
+			}) {
+				t.Fatalf("asking for %s failed the test instead of skipping it", c.asked)
+			}
+			if opened {
+				t.Fatalf("a run limited to %s opened a %s database", c.run, c.asked)
+			}
+		})
+	}
+}

@@ -4,6 +4,11 @@
 // is started once via sync.Once. Each test gets its own database for
 // isolation. Postgres uses TEMPLATE for instant DB creation, while MySQL and
 // MSSQL create and migrate each one, a few ahead of the tests that take them.
+//
+// A helper skips its test when CI_DIALECT names another dialect, before any
+// container starts or any database is prepared. A run limited to one dialect
+// then starts that dialect's server alone, whether or not the caller asked
+// ShouldTest first.
 package testdb
 
 import (
@@ -33,6 +38,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // migrationsRoot returns the absolute path to the module's migrations
@@ -58,11 +64,7 @@ func containerImage(adapter, defaultImage string) string {
 // given adapter. In CI, CI_DIALECT gates each matrix job to a single dialect.
 // Locally (CI_DIALECT unset), all dialects are enabled.
 func ShouldTest(adapter string) bool {
-	dialect := os.Getenv("CI_DIALECT")
-	if dialect == "" {
-		return true
-	}
-	return dialect == adapter
+	return testdialect.Enabled(adapter)
 }
 
 // Shared container management
@@ -110,6 +112,7 @@ var pgShared struct {
 
 func ensurePostgres(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "postgres")
 	pgShared.once.Do(func() {
 		ctx := context.Background()
 		pgShared.ctr, pgShared.err = postgres.Run(ctx,
@@ -281,6 +284,7 @@ var mysqlShared struct {
 
 func ensureMySQL(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "mysql")
 	mysqlShared.once.Do(func() {
 		ctx := context.Background()
 		mysqlShared.ctr, mysqlShared.err = mysql.Run(ctx,
@@ -461,6 +465,7 @@ var mssqlShared struct {
 
 func ensureMSSQL(t *testing.T) {
 	t.Helper()
+	testdialect.Require(t, "mssql")
 	mssqlShared.once.Do(func() {
 		ctx := context.Background()
 		mssqlShared.ctr, mssqlShared.err = tcmssql.Run(ctx,
