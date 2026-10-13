@@ -62,6 +62,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Six guard refusals now answer with the JSON error shape and content type every other refusal uses. Their body was JSON labeled as plain text, so a client that trusted the label could not read it. Status and message are unchanged.
 - The API description names the format each route answers in, including the content change stream, which serves Server-Sent Events and was described as newline-delimited JSON. It also names the role or token each admin route requires and the schema import's request body.
 - Through the plugin releases this engine pins: GraphQL lists work on SQL Server, GraphQL and gRPC writes can set a `belongs_to` relation, and a GraphQL record has one form on every database. Live log streams stay open past the server's write timeout. The Elasticsearch search provider indexes and searches. A GitHub sign-in provider made from its template signs people in. Scheduled audit retention applies its policies. Tenant backup import and validate accept dumps up to their own limits, and export, import and restore name their operation so its progress can be followed.
+- The table helpers in `plugintest` (`AssertTablesExist`, `AssertMigrationTable` and `DBFixture.TableExists`) count a table only in the test's own database. On MySQL `information_schema` lists every database on the server, so a table another test created used to count.
 
 ## [0.54.1] - 2026-10-11
 

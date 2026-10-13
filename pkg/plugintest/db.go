@@ -81,14 +81,12 @@ func (f *DBFixture) AssertTableNotExists(ctx context.Context, table string) {
 	}
 }
 
-// TableExists reports whether table exists via information_schema.
+// TableExists reports whether table exists in the test's database, read
+// from information_schema, which every dialect has.
 func (f *DBFixture) TableExists(ctx context.Context, table string) bool {
 	f.t.Helper()
 	var count int
-	// Use information_schema which is portable across PG/MySQL/MSSQL.
-	row, err := f.host.Querier(ctx).QueryRow(ctx,
-		`SELECT COUNT(*) FROM information_schema.tables WHERE table_name = $1`,
-		table)
+	row, err := f.host.Querier(ctx).QueryRow(ctx, tableCountQuery(f.host.Dialect()), table)
 	if err != nil {
 		f.t.Fatalf("TableExists(%s): %v", table, err)
 	}
@@ -144,4 +142,17 @@ func buildInsert(row map[string]any) (columns string, args []any, placeholders s
 		i++
 	}
 	return
+}
+
+// tableCountQuery counts a table by name in the test's own database. On MySQL
+// information_schema lists every database on the server, and the shared test
+// server holds one database per running test and a few prepared ahead, so a
+// table another test created would count. Postgres and SQL Server already
+// answer for the connected database only.
+func tableCountQuery(dialect string) string {
+	q := `SELECT COUNT(*) FROM information_schema.tables WHERE table_name = $1`
+	if dialect == "mysql" {
+		q += ` AND table_schema = DATABASE()`
+	}
+	return q
 }
