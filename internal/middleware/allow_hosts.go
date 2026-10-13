@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 )
 
 // AllowedHosts returns middleware that validates the Host header against a
@@ -48,7 +50,7 @@ func AllowedHosts(allowed []string) func(http.Handler) http.Handler {
 				"method", r.Method,
 				"path", r.URL.Path,
 			)
-			http.Error(w, `{"error":"misdirected request"}`, http.StatusMisdirectedRequest)
+			httpx.ErrorReq(w, r, http.StatusMisdirectedRequest, "misdirected request")
 		})
 	}
 }
