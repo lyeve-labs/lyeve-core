@@ -210,12 +210,16 @@ func (h *ScopedHost) MigrationDB() *sql.DB {
 
 // Schema returns the schema engine. Reads pass through. Mutating ops
 // (Apply, Delete, ApplyPending) return ErrCapDenied without CapSchema.
+//
+// With CapSchema it is the host's engine itself, nil while no plugin has
+// registered one, which every caller tests for. Without it the plugin always
+// gets the refusing engine, which answers ErrNoSchemaEngine to a read while
+// there is none.
 func (h *ScopedHost) Schema() SchemaEngine {
-	inner := h.inner.Schema()
 	if !h.has(CapSchema) {
-		return &scopedSchemaEngine{inner: inner}
+		return &scopedSchemaEngine{host: h.inner}
 	}
-	return inner
+	return h.inner.Schema()
 }
 
 // UpsertContent forwards content writes to the inner host. Implements
@@ -971,9 +975,22 @@ func (r readOnlyQuerier) Begin(ctx context.Context) (Tx, error) {
 // scopedSchemaEngine
 // Allows reads (List, Get, PreviewDDL, ValidateContent) but denies
 // mutating ops (Apply, Delete, ApplyPending) with ErrCapDenied.
+//
+// A read asks the host for its engine each time rather than holding the one
+// there was when Schema was called. The engine belongs to another plugin,
+// which can register after this plugin starts and stop before it does, and a
+// plugin may keep this value from Start. With no engine registered a read
+// answers ErrNoSchemaEngine, as SchemaSource does.
 
 type scopedSchemaEngine struct {
-	inner SchemaEngine
+	host Host
+}
+
+func (s *scopedSchemaEngine) engine() (SchemaEngine, error) {
+	if e := s.host.Schema(); e != nil {
+		return e, nil
+	}
+	return nil, ErrNoSchemaEngine
 }
 
 func (s *scopedSchemaEngine) Apply(ctx context.Context, name string, definition json.RawMessage) error {
@@ -989,19 +1006,35 @@ func (s *scopedSchemaEngine) ApplyPending(ctx context.Context) (int, error) {
 }
 
 func (s *scopedSchemaEngine) List(ctx context.Context) ([]json.RawMessage, error) {
-	return s.inner.List(ctx)
+	e, err := s.engine()
+	if err != nil {
+		return nil, err
+	}
+	return e.List(ctx)
 }
 
 func (s *scopedSchemaEngine) Get(ctx context.Context, name string) (json.RawMessage, error) {
-	return s.inner.Get(ctx, name)
+	e, err := s.engine()
+	if err != nil {
+		return nil, err
+	}
+	return e.Get(ctx, name)
 }
 
 func (s *scopedSchemaEngine) PreviewDDL(ctx context.Context, name string, definition json.RawMessage) ([]DDLStatement, error) {
-	return s.inner.PreviewDDL(ctx, name, definition)
+	e, err := s.engine()
+	if err != nil {
+		return nil, err
+	}
+	return e.PreviewDDL(ctx, name, definition)
 }
 
 func (s *scopedSchemaEngine) ValidateContent(ctx context.Context, schemaName string, data map[string]any) ([]SchemaValidationError, error) {
-	return s.inner.ValidateContent(ctx, schemaName, data)
+	e, err := s.engine()
+	if err != nil {
+		return nil, err
+	}
+	return e.ValidateContent(ctx, schemaName, data)
 }
 
 // Denied stubs
