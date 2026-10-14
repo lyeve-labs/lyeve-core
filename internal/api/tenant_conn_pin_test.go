@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,7 +40,7 @@ type pinRig struct {
 	secret string
 }
 
-func newPinRig(t *testing.T, pool db.DB) *pinRig {
+func newPinRig(t *testing.T, pool db.DB, opts ...RouterOption) *pinRig {
 	t.Helper()
 	cfg := testConfig()
 	cfg.DatabaseDriver = pool.Engine()
@@ -63,14 +65,14 @@ func newPinRig(t *testing.T, pool db.DB) *pinRig {
 		w.WriteHeader(http.StatusOK)
 	})
 	reg := hooks.NewRegistry()
-	router, err := NewAPIRouter(pool, cfg, reg, WithLifetime(testLifetime(t)),
+	router, err := NewAPIRouter(pool, cfg, reg, append([]RouterOption{WithLifetime(testLifetime(t)),
 		WithPluginRoutes([]plugin.PluginRoutes{{
 			Name: "pin-probe",
 			Routes: []plugin.RouteDecl{
 				{Method: http.MethodGet, Pattern: "/api/v1/pin-probe/stream", Group: plugin.GroupAuth, Handler: stream},
 				{Method: http.MethodGet, Pattern: "/api/v1/pin-probe/read", Group: plugin.GroupAuth, Handler: read},
 			},
-		}}))
+		}})}, opts...)...)
 	require.NoError(t, err)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
@@ -81,8 +83,14 @@ func newPinRig(t *testing.T, pool db.DB) *pinRig {
 // token for them.
 func (p *pinRig) session(t *testing.T, tenant string) (uuid.UUID, string) {
 	t.Helper()
+	return p.sessionAs(t, tenant, "super_admin")
+}
+
+// sessionAs is session for a user holding role.
+func (p *pinRig) sessionAs(t *testing.T, tenant, role string) (uuid.UUID, string) {
+	t.Helper()
 	ctx := context.Background()
-	u, err := p.users.Create(ctx, uuid.NewString()+"@pin.test", "!hash!", []string{"super_admin"}, tenant)
+	u, err := p.users.Create(ctx, uuid.NewString()+"@pin.test", "!hash!", []string{role}, tenant)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.users.Delete(ctx, u.ID) })
 	tok, err := auth.Sign(p.secret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion)
@@ -136,7 +144,7 @@ func (p *pinRig) open(t *testing.T, path, tok string) <-chan string {
 func (p *pinRig) requirePoolFree(t *testing.T, what string) {
 	t.Helper()
 	assert.Eventually(t, func() bool { return p.pool.Stats().InUse == 0 }, 3*time.Second, 20*time.Millisecond,
-		"%s hold %d of %d pool connections", what, p.pool.Stats().InUse, pinPoolSize)
+		"%s: %d of %d pool connections still in use", what, p.pool.Stats().InUse, pinPoolSize)
 }
 
 // requireOtherTenantServed reads once with tok, a session in a tenant with no
@@ -264,5 +272,98 @@ func TestContentStream_HoldsNoPoolConnectionBetweenChanges(t *testing.T) {
 		require.NoError(t, bumpWithin(rig, firstUser))
 		change(tenants[0], "after the sign-out")
 		assert.Equal(t, "event: error", next(0), "a stream whose session was revoked")
+	})
+}
+
+// ruleTableChecker answers from rules kept in sys_permissions in the test's
+// own database, read on the caller's context for every question, as the rule
+// plugin does on a cache miss. pinned counts the questions asked on a context
+// that carried the request's tenant connection.
+type ruleTableChecker struct {
+	pool   db.DB
+	pinned atomic.Int64
+}
+
+func (c *ruleTableChecker) PermissionChecker() core.PermissionChecker { return c }
+
+func (c *ruleTableChecker) Allowed(ctx context.Context, roles []string, resource, action string) (bool, error) {
+	if db.LazyTenantConnFromCtx(ctx) != nil {
+		c.pinned.Add(1)
+	}
+	for _, role := range roles {
+		rows, err := c.pool.Query(ctx, `SELECT actions FROM sys_permissions WHERE role = $1 AND schema_name = $2 AND tenant_id IN ($3, '')`,
+			role, resource, core.TenantIDFromCtx(ctx))
+		if err != nil {
+			return false, err
+		}
+		var granted []string
+		for rows.Next() {
+			var actions string
+			if err := rows.Scan(&actions); err != nil {
+				_ = rows.Close()
+				return false, err
+			}
+			granted = append(granted, strings.Split(actions, ",")...)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return false, err
+		}
+		if err := rows.Close(); err != nil {
+			return false, err
+		}
+		if slices.Contains(granted, action) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// An editor reads a content type through a rule, not a super admin's pass.
+// The stream asks the rule again before each change, on a connection it
+// borrows for the read, so it holds none between changes. Withdrawing the
+// rule while the stream is open ends it at the next change.
+func TestContentStream_EndsWhenItsReadRuleIsWithdrawn(t *testing.T) {
+	pinDialects(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `CREATE TABLE sys_permissions (role VARCHAR(100) NOT NULL, schema_name VARCHAR(255) NOT NULL, actions VARCHAR(255) NOT NULL, tenant_id VARCHAR(64) NOT NULL)`)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO sys_permissions (role, schema_name, actions, tenant_id) VALUES ($1, $2, $3, $4)`, "editor", "notes", "read", "")
+		require.NoError(t, err)
+
+		rules := &ruleTableChecker{pool: pool}
+		rig := newPinRig(t, pool, WithPermissionChecker(rules))
+		_, tok := rig.sessionAs(t, "pin_a", "editor")
+		stream := rig.open(t, "/api/v1/content/notes/stream", tok)
+		change := func(title string) {
+			require.NoError(t, rig.hooks.Run(core.WithTenantID(ctx, "pin_a"), hooks.Event{Type: hooks.AfterUpdate, Schema: "notes",
+				Data: map[string]any{"title": title, core.ContentStatusKey: core.ContentStatusPublished}}))
+		}
+		next := func() string {
+			for {
+				select {
+				case line, ok := <-stream:
+					require.True(t, ok, "the stream ended without saying why")
+					if !strings.HasPrefix(line, ":") {
+						return line
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatal("the stream sent nothing for the change")
+				}
+			}
+		}
+
+		change("while the rule stands")
+		assert.Contains(t, next(), "while the rule stands")
+		rig.requirePoolFree(t, "a change stream between changes")
+
+		withdraw, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		_, err = pool.Exec(withdraw, `DELETE FROM sys_permissions WHERE role = $1 AND schema_name = $2`, "editor", "notes")
+		require.NoError(t, err)
+		change("after the rule was withdrawn")
+		assert.Equal(t, "event: error", next())
+		assert.Equal(t, `data: {"error":"permission denied"}`, next())
+		assert.Zero(t, rules.pinned.Load(), "the stream asked the rule on the request's tenant connection")
 	})
 }
