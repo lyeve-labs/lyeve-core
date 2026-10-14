@@ -33,9 +33,11 @@ type ContentLocalizer interface {
 // ContentLocalizerRegistrar is implemented by the engine host. The plugin
 // that owns translations calls it when it starts and again with nil when
 // it stops, so the registration follows the license and the plugin's
-// lifecycle, not the process.
+// lifecycle, not the process. Through ScopedHost a registration needs
+// CapContentLocalizer, and only the plugin that registered the localizer may
+// replace or clear it. A refusal comes back as the error.
 type ContentLocalizerRegistrar interface {
-	RegisterContentLocalizer(l ContentLocalizer)
+	RegisterContentLocalizer(l ContentLocalizer) error
 }
 
 // ContentLocalizerProvider is implemented by the engine host and forwarded

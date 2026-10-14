@@ -117,6 +117,12 @@ type engineHost struct {
 	// Start and remove in Stop. The zero value is an empty registry.
 	configSections core.ConfigSectionRegistry
 
+	// roleHolders records which plugin holds each host role, so a scoped
+	// host refuses a plugin that would replace or clear another plugin's
+	// permission checker, schema engine or any other role. The zero value
+	// records no holder.
+	roleHolders core.HostRoleRegistry
+
 	// Wired by RegisterContentEntryWriter (the registering plugin's
 	// activation, cleared in its Stop). Nil-safe: ContentEntryWriter()
 	// returns nil when no plugin has registered one, and an import then
@@ -211,6 +217,12 @@ var (
 	_ core.ConfigSectionRegistrar           = (*engineHost)(nil)
 	_ core.ContentEntryWriterProvider       = (*engineHost)(nil)
 	_ core.ContentEntryWriterRegistrar      = (*engineHost)(nil)
+	_ core.RecordRevisionStoreProvider      = (*engineHost)(nil)
+	_ core.RecordRevisionStoreRegistrar     = (*engineHost)(nil)
+	_ core.SchemaEngineRegistrar            = (*engineHost)(nil)
+	_ core.StorageProvider                  = (*engineHost)(nil)
+	_ core.StorageSetter                    = (*engineHost)(nil)
+	_ core.HostRoleOwnerRegistrar           = (*engineHost)(nil)
 	_ core.MetricsGathererProvider          = (*engineHost)(nil)
 	_ core.MetricsGathererRegistrar         = (*engineHost)(nil)
 	_ core.GoroutineTunablesProvider        = (*engineHost)(nil)

@@ -43,11 +43,15 @@ var _ ContentLocalizer = (*fakeLocalizer)(nil)
 // host does once the owning plugin has registered one.
 type localizerHost struct {
 	*stubHost
+	HostRoleRegistry
 	localizer ContentLocalizer
 }
 
-func (h *localizerHost) RegisterContentLocalizer(l ContentLocalizer) { h.localizer = l }
-func (h *localizerHost) ContentLocalizer() ContentLocalizer          { return h.localizer }
+func (h *localizerHost) RegisterContentLocalizer(l ContentLocalizer) error {
+	h.localizer = l
+	return nil
+}
+func (h *localizerHost) ContentLocalizer() ContentLocalizer { return h.localizer }
 
 // The owning plugin registers through its scoped host and a transport
 // plugin reads the same localizer through its own. The arguments and the

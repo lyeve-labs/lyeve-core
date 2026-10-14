@@ -79,8 +79,12 @@ type SchemaSource interface {
 // This is the seam that makes the schema engine suppliable. Any package that
 // can import this one can implement SchemaEngine and register it, so an
 // install is not tied to one implementation.
+//
+// Through ScopedHost a registration needs CapSchema, and only the plugin that
+// registered the engine may replace or clear it. A refusal comes back as the
+// error, which the plugin's Start should return or log.
 type SchemaEngineRegistrar interface {
-	RegisterSchemaEngine(e SchemaEngine)
+	RegisterSchemaEngine(e SchemaEngine) error
 }
 
 // ErrNoSchemaEngine is what every schema read answers when no schema engine is

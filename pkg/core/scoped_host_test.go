@@ -665,13 +665,20 @@ func (s *stubSchemaEngine) List(ctx context.Context) ([]json.RawMessage, error) 
 // deterministic values.
 type providerHost struct {
 	stubHost
+	HostRoleRegistry
 	storageSet         bool
 	userProvisionerSet bool
 }
 
-func (p *providerHost) Storage() Storage                     { return &stubStorage{} }
-func (p *providerHost) SetStorage(s Storage)                 { p.storageSet = true }
-func (p *providerHost) SetUserProvisioner(s UserProvisioner) { p.userProvisionerSet = true }
+func (p *providerHost) Storage() Storage { return &stubStorage{} }
+func (p *providerHost) SetStorage(s Storage) error {
+	p.storageSet = true
+	return nil
+}
+func (p *providerHost) SetUserProvisioner(s UserProvisioner) error {
+	p.userProvisionerSet = true
+	return nil
+}
 
 func (p *providerHost) SignSessionToken(ctx context.Context, userID uuid.UUID, email string, roles []string) (string, error) {
 	return "mock-token", nil
@@ -684,8 +691,8 @@ func (p *providerHost) StorageConnected() any             { return &struct{}{} }
 func (p *providerHost) AdminQuerier(ctx context.Context) Querier {
 	return &stubQuerier{}
 }
-func (p *providerHost) EmailSender() EmailSender          { return &stubEmailSender{} }
-func (p *providerHost) RegisterEmailSender(s EmailSender) {}
+func (p *providerHost) EmailSender() EmailSender                { return &stubEmailSender{} }
+func (p *providerHost) RegisterEmailSender(s EmailSender) error { return nil }
 func (p *providerHost) RevokeAllRefreshTokens(ctx context.Context, userID string) error {
 	return nil
 }

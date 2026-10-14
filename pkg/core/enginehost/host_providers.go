@@ -31,11 +31,24 @@ func (h *engineHost) Storage() core.Storage { return h.storage }
 
 // SetStorage implements StorageSetter. Called by plugins that provide
 // alternative storage backends (e.g., S3) to replace the default Local driver.
-func (h *engineHost) SetStorage(s core.Storage) { h.storage = s }
+func (h *engineHost) SetStorage(s core.Storage) error {
+	h.storage = s
+	return nil
+}
 
 // RegisterEmailSender implements EmailSenderRegistrar. Called by the plugin
 // that supplies a mailer, from its Start, for transactional email.
-func (h *engineHost) RegisterEmailSender(s core.EmailSender) { h.emailSender = s }
+func (h *engineHost) RegisterEmailSender(s core.EmailSender) error {
+	h.emailSender = s
+	return nil
+}
+
+// RegisterOwnedRole implements core.HostRoleOwnerRegistrar. A scoped host
+// calls it under the plugin's name with the role's own registrar as set, so
+// one plugin cannot replace or clear a role another plugin holds.
+func (h *engineHost) RegisterOwnedRole(owner string, role core.HostRole, clear bool, set func() error) error {
+	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
+}
 
 // WithFlowRegistry wires the registry of flow node and trigger types the
 // activator builds from started plugins. Called once at boot, after the
@@ -70,8 +83,9 @@ func (h *engineHost) EmailSender() core.EmailSender { return h.emailSender }
 // RegisterFlowDefinitionValidator implements FlowDefinitionValidatorRegistrar.
 // Called by the plugin that runs flows, in Start with its validator and in
 // Stop with nil.
-func (h *engineHost) RegisterFlowDefinitionValidator(v core.FlowDefinitionValidator) {
+func (h *engineHost) RegisterFlowDefinitionValidator(v core.FlowDefinitionValidator) error {
 	h.flowValidator = v
+	return nil
 }
 
 // FlowDefinitionValidator implements FlowDefinitionValidatorProvider. Returns
@@ -83,8 +97,9 @@ func (h *engineHost) FlowDefinitionValidator() core.FlowDefinitionValidator {
 // RegisterFlowInvoker implements FlowInvokerRegistrar. Called by the plugin
 // that runs flows, with its invoker when it activates and with nil when it
 // deactivates.
-func (h *engineHost) RegisterFlowInvoker(inv core.FlowInvoker) {
+func (h *engineHost) RegisterFlowInvoker(inv core.FlowInvoker) error {
 	h.flowInvoker = inv
+	return nil
 }
 
 // FlowInvoker implements FlowInvokerProvider. Returns the registered invoker,
@@ -119,8 +134,9 @@ func (h *engineHost) APIRoutes() core.APIRoutes {
 // RegisterPermissionChecker implements PermissionCheckerRegistrar. Called by
 // the plugin that owns the rules, with its checker in Start and with nil in
 // Stop, so authorization follows that plugin's lifecycle.
-func (h *engineHost) RegisterPermissionChecker(c core.PermissionChecker) {
+func (h *engineHost) RegisterPermissionChecker(c core.PermissionChecker) error {
 	h.permissionChecker = c
+	return nil
 }
 
 // PermissionChecker implements PermissionCheckerProvider. Never nil: with no
@@ -137,8 +153,9 @@ func (h *engineHost) PermissionChecker() core.PermissionChecker {
 // RegisterContentLocalizer implements ContentLocalizerRegistrar. Called by
 // the plugin that owns translations, in Start with its localizer and in Stop
 // with nil.
-func (h *engineHost) RegisterContentLocalizer(l core.ContentLocalizer) {
+func (h *engineHost) RegisterContentLocalizer(l core.ContentLocalizer) error {
 	h.contentLocalizer = l
+	return nil
 }
 
 // ContentLocalizer implements ContentLocalizerProvider. Returns the
@@ -170,8 +187,9 @@ func (h *engineHost) ConfigSections() []core.ConfigSection {
 // RegisterContentEntryWriter implements ContentEntryWriterRegistrar. Called
 // by the plugin that owns the editorial store, with its writer when it
 // activates and with nil in Stop.
-func (h *engineHost) RegisterContentEntryWriter(w core.ContentEntryWriter) {
+func (h *engineHost) RegisterContentEntryWriter(w core.ContentEntryWriter) error {
 	h.contentEntryWriter = w
+	return nil
 }
 
 // ContentEntryWriter implements ContentEntryWriterProvider. Returns the
@@ -236,8 +254,9 @@ func (h *engineHost) WithContentStore(store *db.ContentStore) {
 // owns schema definitions calls it in Start with its engine and in Stop with
 // nil. This module builds no schema engine, so the registered one is the only
 // one the install has.
-func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) {
+func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) error {
 	h.suppliedSchema = e
+	return nil
 }
 
 // Schema implements core.Host.Schema. It is whatever a plugin registered, and
@@ -388,8 +407,9 @@ func (h *engineHost) sessionFactsFor(ctx context.Context, userID uuid.UUID) (ses
 // RegisterRecordRevisionStore implements RecordRevisionStoreRegistrar.
 // Called by the plugin that keeps revision snapshots in Start with its store
 // and in Stop with nil.
-func (h *engineHost) RegisterRecordRevisionStore(s core.RecordRevisionStore) {
+func (h *engineHost) RegisterRecordRevisionStore(s core.RecordRevisionStore) error {
 	h.recordRevisionStore = s
+	return nil
 }
 
 // RecordRevisionStore implements RecordRevisionStoreProvider. Returns the

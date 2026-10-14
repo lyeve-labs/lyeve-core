@@ -178,8 +178,11 @@ type FlowDefinitionValidator interface {
 
 // FlowDefinitionValidatorRegistrar is implemented by the engine host. The
 // plugin that runs flows calls it in Start, and again in Stop with nil.
+// Through ScopedHost a registration needs CapFlowRegistry, and only the
+// plugin that registered the validator may replace or clear it. A refusal
+// comes back as the error.
 type FlowDefinitionValidatorRegistrar interface {
-	RegisterFlowDefinitionValidator(v FlowDefinitionValidator)
+	RegisterFlowDefinitionValidator(v FlowDefinitionValidator) error
 }
 
 // FlowDefinitionValidatorProvider is implemented by the engine host. Nil
@@ -269,8 +272,11 @@ type FlowInvokeResult struct {
 // FlowInvokerRegistrar is implemented by the engine host. The plugin that
 // runs flows calls it when it activates and again with nil when it
 // deactivates, so the registration follows the license, not the process.
+// Through ScopedHost a registration needs CapFlowRegistry, and only the
+// plugin that registered the invoker may replace or clear it. A refusal
+// comes back as the error.
 type FlowInvokerRegistrar interface {
-	RegisterFlowInvoker(inv FlowInvoker)
+	RegisterFlowInvoker(inv FlowInvoker) error
 }
 
 // FlowInvokerProvider is implemented by the engine host. Nil means no
