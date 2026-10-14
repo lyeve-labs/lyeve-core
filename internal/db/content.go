@@ -788,9 +788,9 @@ func (w *actionWalker) delete(schemaName string, id uuid.UUID) (int64, error) {
 					}
 				}
 			case domain.RelManyToMany:
-				pivot := f.RelationThrough
-				if pivot == "" {
-					pivot = domain.PivotTableName(sc.Name, f.RelationTo)
+				pivot, err := w.store.pivotTable(w.ctx, sc.Name, f)
+				if err != nil {
+					return 0, fmt.Errorf("delete %s: %w", schemaName, err)
 				}
 				pivot = w.store.qualify(pivot)
 				for _, side := range []string{sc.Name, f.RelationTo} {
