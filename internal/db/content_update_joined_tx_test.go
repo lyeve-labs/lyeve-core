@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/cache"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
@@ -107,5 +108,58 @@ func TestContentStore_UpdateHandsADeadlockToTheTransactionOwner_AllDialects(t *t
 			require.NoError(t, row.Scan(&title))
 			assert.Equal(t, "other", title, "no write of the caller may land outside its transaction")
 		}
+	})
+}
+
+// A reader that misses the cache while a caller's transaction holds an update
+// reads the row as committed, the old one, and caches it. The store drops the
+// cached row when the caller's transaction commits rather than when its own
+// statement completes, so the next read sees the update. A read inside the
+// transaction goes to the database, so the caller sees its own write and the
+// cache never holds a row that has not committed.
+func TestContentStore_UpdateInACallersTransactionDropsTheCacheAfterCommit_AllDialects(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		schemas := newTestRegistry(t, pool)
+		require.NoError(t, schemas.Upsert(ctx, &domain.Schema{
+			Name:          "cache_join",
+			WithCreatedAt: true,
+			WithUpdatedAt: true,
+			Fields:        []domain.SchemaField{{Name: "title", FieldType: "text"}},
+		}))
+		store := db.NewContentStoreWithCache(pool, schemas.Source(),
+			cache.NewMemory[string, *domain.Content](100, 0), cache.NewMemory[string, []*domain.Content](100, 0))
+		row, err := store.Insert(ctx, "cache_join", map[string]any{"title": "before"})
+		require.NoError(t, err)
+
+		read := make(chan error, 1)
+		err = db.SerializeWrite(ctx, pool, "test.cache_join", func(ctx context.Context) error {
+			if _, err := store.Update(ctx, "cache_join", row.ID, map[string]any{"title": "after"}, time.Time{}); err != nil {
+				return err
+			}
+			go func() {
+				_, err := store.GetByID(context.Background(), "cache_join", row.ID)
+				read <- err
+			}()
+			// SQL Server's locking read waits for the commit, so the wait
+			// is bounded and the commit goes ahead.
+			select {
+			case err := <-read:
+				read <- err
+			case <-time.After(500 * time.Millisecond):
+			}
+			inside, err := store.GetByID(ctx, "cache_join", row.ID)
+			if err != nil {
+				return err
+			}
+			assert.Equal(t, "after", inside.Data["title"], "the caller must read its own write")
+			return nil
+		})
+		require.NoError(t, err)
+		require.NoError(t, <-read)
+
+		got, err := store.GetByID(ctx, "cache_join", row.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "after", got.Data["title"], "a read after the commit must not be served the row cached before it")
 	})
 }

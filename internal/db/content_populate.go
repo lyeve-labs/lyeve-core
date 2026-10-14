@@ -250,7 +250,7 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 	// Check item cache first.
 	tenantID := tenant.ID(ctx)
 	for _, id := range ids {
-		if s.itemCache != nil {
+		if s.itemCache != nil && writeTx(ctx) == nil {
 			key := cacheItemKey(tenantID, schemaName, id)
 			if cached, ok := s.itemCache.Get(ctx, key); ok {
 				result[id] = cloneContent(cached)
@@ -308,7 +308,7 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 				return nil, scanErr
 			}
 			result[c.ID] = c
-			if s.itemCache != nil {
+			if s.itemCache != nil && writeTx(ctx) == nil {
 				_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, c.ID), cloneContent(c), 0) // err suppressed: cache is best-effort
 			}
 		}

@@ -143,7 +143,14 @@ func (s *ContentStore) OnInvalidate(fn func(ctx context.Context, schemaName stri
 }
 
 // invalidateSchema flushes all item and list caches for a schema on any write.
+// A write that joined a caller's transaction flushes once that transaction
+// commits: until then a reader still gets the old row from the database, and
+// a flush before the commit would let it cache that row past it.
 func (s *ContentStore) invalidateSchema(ctx context.Context, schemaName string, id uuid.UUID) {
+	afterCommit(ctx, func(ctx context.Context) { s.flushSchema(ctx, schemaName, id) })
+}
+
+func (s *ContentStore) flushSchema(ctx context.Context, schemaName string, id uuid.UUID) {
 	if s.onInvalidate != nil && (s.itemCache != nil || s.listCache != nil) {
 		s.onInvalidate(ctx, schemaName)
 	}
@@ -336,7 +343,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 
 	// Cache read
 	tenantID := tenant.ID(ctx)
-	if s.listCache != nil {
+	if s.listCache != nil && writeTx(ctx) == nil {
 		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
 		if cached, ok := s.listCache.Get(ctx, key); ok {
 			s.ListCacheHits.Add(1)
@@ -428,7 +435,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 	}
 	// Cache write: skip for oversized limits (abusive or direct-caller paths).
 	// The handler clamps to ≤200. This guard covers unclamped callers.
-	if s.listCache != nil && limit <= 200 {
+	if s.listCache != nil && limit <= 200 && writeTx(ctx) == nil {
 		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
 		// The cache keeps its own copy so that what it holds stays as the
 		// database returned it, whatever the caller does to the page it got.
@@ -462,9 +469,10 @@ func (s *ContentStore) GetByID(ctx context.Context, schemaName string, id uuid.U
 }
 
 func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uuid.UUID) (*domain.Content, error) {
-	// Cache read
+	// A read inside a caller's transaction can see writes that have not
+	// committed, so it neither reads the cache nor fills it.
 	tenantID := tenant.ID(ctx)
-	if s.itemCache != nil {
+	if s.itemCache != nil && writeTx(ctx) == nil {
 		key := cacheItemKey(tenantID, schemaName, id)
 		if cached, ok := s.itemCache.Get(ctx, key); ok {
 			return cloneContent(cached), nil
@@ -494,7 +502,7 @@ func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uu
 		return nil, err
 	}
 	// Cache write
-	if s.itemCache != nil {
+	if s.itemCache != nil && writeTx(ctx) == nil {
 		_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, id), cloneContent(c), 0) // err suppressed: cache is best-effort
 	}
 	return c, nil
