@@ -214,8 +214,10 @@ func TestTenancyConn_MSSQL_InvalidSlug_HTTP500(t *testing.T) {
 	}
 
 	pool := testdb.MSSQL(t)
-	tenancy := db.NewMSSQLDatabaseTenancy(func(ctx context.Context) string {
-		return mw.TenantIDFromContext(ctx)
+	tenancy := db.NewMSSQLDatabaseTenancy(func(context.Context) string {
+		// TenantHeader refuses a token naming this slug, so the
+		// strategy is handed it directly to prove Apply refuses it too.
+		return "MSSQL_BAD"
 	}, "master")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +232,7 @@ func TestTenancyConn_MSSQL_InvalidSlug_HTTP500(t *testing.T) {
 	m := mw.TenantHeader(true)(mw.TenancyConn(pool, tenancy)(handler))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	claims := &auth.Claims{TenantID: "MSSQL_BAD", Roles: []string{"admin"}}
+	claims := &auth.Claims{TenantID: "acme", Roles: []string{"admin"}}
 	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, claims))
 	w := httptest.NewRecorder()
 	m.ServeHTTP(w, req)

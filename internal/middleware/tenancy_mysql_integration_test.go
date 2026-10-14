@@ -210,8 +210,10 @@ func TestTenancyConn_MySQL_InvalidSlug_HTTP500(t *testing.T) {
 	}
 
 	pool := testdb.MySQL(t)
-	tenancy := db.NewMySQLDatabaseTenancy(func(ctx context.Context) string {
-		return mw.TenantIDFromContext(ctx)
+	tenancy := db.NewMySQLDatabaseTenancy(func(context.Context) string {
+		// TenantHeader refuses a token naming this slug, so the
+		// strategy is handed it directly to prove Apply refuses it too.
+		return "BAD_SLUG"
 	}, "lyeve_test")
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +228,7 @@ func TestTenancyConn_MySQL_InvalidSlug_HTTP500(t *testing.T) {
 	m := mw.TenantHeader(true)(mw.TenancyConn(pool, tenancy)(handler))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	claims := &auth.Claims{TenantID: "BAD_SLUG", Roles: []string{"admin"}}
+	claims := &auth.Claims{TenantID: "acme", Roles: []string{"admin"}}
 	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, claims))
 	w := httptest.NewRecorder()
 	m.ServeHTTP(w, req)

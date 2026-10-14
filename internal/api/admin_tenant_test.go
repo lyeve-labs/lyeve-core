@@ -170,9 +170,9 @@ func TestAdminRouter_TenantHeaderConfigControlled(t *testing.T) {
 			claims: &auth.Claims{
 				UserID:   "admin-1",
 				Roles:    []string{"admin"},
-				TenantID: "tenant-gamma",
+				TenantID: "tenant_gamma",
 			},
-			wantTenantID: "tenant-gamma",
+			wantTenantID: "tenant_gamma",
 		},
 		{
 			name:        "multi_tenant_disabled_still_extracts_jwt_tenant",
@@ -180,9 +180,9 @@ func TestAdminRouter_TenantHeaderConfigControlled(t *testing.T) {
 			claims: &auth.Claims{
 				UserID:   "admin-1",
 				Roles:    []string{"admin"},
-				TenantID: "tenant-gamma",
+				TenantID: "tenant_gamma",
 			},
-			wantTenantID: "tenant-gamma",
+			wantTenantID: "tenant_gamma",
 		},
 	}
 

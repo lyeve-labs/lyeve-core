@@ -90,11 +90,11 @@ func TestTenantHeader_AJwtTenantIsNotOverriddenByAnApiKey(t *testing.T) {
 	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = mw.TenantIDFromCtx(r) })
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{UserID: "u1", TenantID: "from-jwt"})
+	ctx := context.WithValue(req.Context(), auth.ClaimsKey, &auth.Claims{UserID: "u1", TenantID: "from_jwt"})
 	ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{TenantID: "from-key"})
 	req = req.WithContext(ctx)
 
 	mw.TenantHeader(true)(next).ServeHTTP(httptest.NewRecorder(), req)
 
-	assert.Equal(t, "from-jwt", seen)
+	assert.Equal(t, "from_jwt", seen)
 }

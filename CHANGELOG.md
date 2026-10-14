@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the multitenant plugin release this engine pins: a tenant clone creates its target the way tenant create does, so it can no longer take a slug whose deleted tenant left rows behind.
 - Through the multitenant plugin release this engine pins: a row a backup import cannot restore is reported as "the row could not be restored". The database's own text, which names its tables, keys and values, goes to the log instead of the answer.
 - Through the schema plugin release this engine pins: a tenant that defines a content type another tenant also defines can no longer store a field in a column the other definition uses for something else, such as a plain field on the other tenant's relation key, through which writes skipped the relation check. A field can no longer be stored in a column the engine keeps for itself, such as `tenant_id`.
+- On an install with several tenants, a session token that names its tenant in a spelling the engine never issues, such as one with a capital letter or a hyphen, is refused with `401` before any handler runs, whatever tenant header a super admin sends. A request that read the database was already refused when its connection was scoped to that tenant, and a stream that read nothing was not. A single-tenant install is unchanged.
 
 ### Added
 
