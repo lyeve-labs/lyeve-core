@@ -446,9 +446,11 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 // caller as a 503 on a request that never made it to the row. The read did not
 // happen, so running it again is not a duplicate. Postgres and MySQL read from
 // a snapshot and rarely take this path, but the retry costs them nothing.
+// Inside a caller's transaction the deadlock goes to the caller instead, as
+// retryOwnTx says.
 func (s *ContentStore) GetByID(ctx context.Context, schemaName string, id uuid.UUID) (*domain.Content, error) {
 	var out *domain.Content
-	err := sqlx.RetryOnTxConflict(ctx, "content get", func() error {
+	err := retryOwnTx(ctx, "content get", func() error {
 		var gerr error
 		out, gerr = s.getByIDOnce(ctx, schemaName, id)
 		return gerr
@@ -524,10 +526,11 @@ func softDeleteWhere(sc *domain.Schema) string {
 // A deadlock victim is retried. SQL Server picks one of two contending writers
 // and rolls its statement back whole with error 1205, and MySQL and Postgres do
 // the same under their own codes. Without a retry that concurrency loss would
-// reach the caller as a 503 on a write that never happened.
+// reach the caller as a 503 on a write that never happened. Inside a caller's
+// transaction the deadlock goes to the caller instead, as retryOwnTx says.
 func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	var out *domain.Content
-	err := sqlx.RetryOnTxConflict(ctx, "content update", func() error {
+	err := retryOwnTx(ctx, "content update", func() error {
 		var uerr error
 		out, uerr = s.updateOnce(ctx, schemaName, id, data, expectedUpdatedAt)
 		return uerr
@@ -536,6 +539,20 @@ func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UU
 		return nil, err
 	}
 	return out, nil
+}
+
+// retryOwnTx runs fn under sqlx.RetryOnTxConflict, unless ctx carries a
+// transaction a caller opened, which fn joins. A deadlock ends that
+// transaction: MySQL and SQL Server roll it back whole, so a statement run
+// again would commit on its own outside it, and PostgreSQL refuses every
+// statement after it. Only the caller can start its transaction over, so fn
+// runs once and the deadlock reaches the caller as it is, which
+// sqlx.IsRetryableTxError still recognizes.
+func retryOwnTx(ctx context.Context, label string, fn func() error) error {
+	if writeTx(ctx) != nil {
+		return fn()
+	}
+	return sqlx.RetryOnTxConflict(ctx, label, fn)
 }
 
 // updateOnce runs one attempt of Update. Safe to repeat: a rolled-back
