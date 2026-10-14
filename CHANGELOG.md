@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin route can declare the media types it answers in, such as a stream, CSV or a file, through `MediaTypes` on its `core.RouteDecl`, and the API description shows them. A route that declares nothing is described as before.
 - A plugin route can declare the response headers a page on another origin may read and the request headers it accepts, through `ExposeHeaders` and `AllowHeaders` on its `core.RouteDecl`. The engine adds them to the CORS lists every router sends, and the origin check is unchanged.
 - The `contentrules` package gives a plugin that writes content the field defaults and validation rules the Content API applies: `PrepareCreate` for a new entry and `ValidatePatch` for a partial update.
+- A tenant purge handler can learn whether the tenant delete it ran in committed or rolled back, through `core.OnTenantPurgeOutcome` on the context the delete hands it. Work a handler does outside the database can then wait for the commit. Handlers that do not ask behave as before.
 
 ### Changed
 
@@ -75,6 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A content update that runs inside a transaction a plugin holds, as the content plugin's save does, no longer retries a deadlock it lost. On MySQL the deadlock had already rolled the transaction back, so the retried update committed on its own while the rest of the save was lost, and the save was answered as saved. On PostgreSQL and SQL Server the retry failed with an error that did not read as a deadlock. The update now returns the deadlock to the plugin, which can start its transaction over. An update outside such a transaction is retried as before.
 - A content write that runs inside a transaction a plugin holds drops the cached reads of its content type when that transaction commits, rather than when its own statement completes. A read in between used to cache the row as it was before the write, and serve it after the commit until the cache expired. A read inside the transaction now goes to the database, so it sees the write and never caches a row that has not committed.
 - A many_to_many between two content types whose pivot table name would pass 63 characters keeps its pairs in a table named by `core.BoundedPivotTableName`: the name's first 54 characters, an underscore and 8 characters of its SHA-256. MySQL refused the full name, and PostgreSQL cut it to 63 bytes, so two such relations could share one table. The content store resolves the pivot through `core.ResolvePivotTable`, the same rule the schema engine creates it by, and a pivot an earlier install created under its full name keeps that name.
+- Through the plugin releases this engine pins: a tenant delete that rolls back after the search purge ran no longer leaves the tenant without its Elasticsearch or Meilisearch index on every replica, with its writes refused for ten minutes. The index is dropped, and the other replicas told, only once the delete has committed.
 
 ## [0.54.1] - 2026-10-11
 
