@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ type pinRig struct {
 	srv    *httptest.Server
 	pool   db.DB
 	users  *db.UserStore
+	hooks  *hooks.Registry
 	secret string
 }
 
@@ -60,7 +62,8 @@ func newPinRig(t *testing.T, pool db.DB) *pinRig {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	router, err := NewAPIRouter(pool, cfg, hooks.NewRegistry(), WithLifetime(testLifetime(t)),
+	reg := hooks.NewRegistry()
+	router, err := NewAPIRouter(pool, cfg, reg, WithLifetime(testLifetime(t)),
 		WithPluginRoutes([]plugin.PluginRoutes{{
 			Name: "pin-probe",
 			Routes: []plugin.RouteDecl{
@@ -71,7 +74,7 @@ func newPinRig(t *testing.T, pool db.DB) *pinRig {
 	require.NoError(t, err)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	return &pinRig{srv: srv, pool: pool, users: db.NewUserStore(pool), secret: cfg.JWTSecret}
+	return &pinRig{srv: srv, pool: pool, users: db.NewUserStore(pool), hooks: reg, secret: cfg.JWTSecret}
 }
 
 // session creates a super admin in tenant and returns the user and a session
@@ -208,5 +211,58 @@ func TestAPIRouter_SessionStreamHoldsNoPoolConnection(t *testing.T) {
 		res := rig.get(context.Background(), t, "/api/v1/pin-probe/stream", firstToken)
 		defer res.Body.Close()
 		assert.Equal(t, http.StatusUnauthorized, res.StatusCode, "a stream opened with a revoked session")
+	})
+}
+
+// The content change stream asks again before each change whether the
+// caller's credential and grants still admit it. Those reads ran on the
+// connection the request was scoped to, so a stream that had delivered one
+// change kept that connection until its client went away. A stream holds no
+// connection between changes, and a session revoked while it is open still
+// ends it at the next change.
+func TestContentStream_HoldsNoPoolConnectionBetweenChanges(t *testing.T) {
+	pinDialects(t, func(t *testing.T, pool db.DB) {
+		rig := newPinRig(t, pool)
+		_, other := rig.session(t, "pin_e")
+		tenants := []string{"pin_a", "pin_b", "pin_c", "pin_d"}
+		streams := make([]<-chan string, len(tenants))
+		var firstUser uuid.UUID
+		for i, tenant := range tenants {
+			id, tok := rig.session(t, tenant)
+			if i == 0 {
+				firstUser = id
+			}
+			streams[i] = rig.open(t, "/api/v1/content/notes/stream", tok)
+		}
+		rig.requirePoolFree(t, "four change streams before any change")
+		change := func(tenant, title string) {
+			require.NoError(t, rig.hooks.Run(core.WithTenantID(context.Background(), tenant),
+				hooks.Event{Type: hooks.AfterUpdate, Schema: "notes", Data: map[string]any{"title": title}}))
+		}
+		next := func(i int) string {
+			for {
+				select {
+				case line, ok := <-streams[i]:
+					if !ok {
+						t.Fatalf("stream %d ended", i)
+					}
+					if !strings.HasPrefix(line, ":") {
+						return line
+					}
+				case <-time.After(10 * time.Second):
+					t.Fatalf("stream %d sent nothing for the change", i)
+				}
+			}
+		}
+		for i, tenant := range tenants {
+			change(tenant, "first")
+			assert.Contains(t, next(i), "first")
+		}
+		rig.requirePoolFree(t, "four change streams between changes")
+		rig.requireOtherTenantServed(t, other)
+
+		require.NoError(t, bumpWithin(rig, firstUser))
+		change(tenants[0], "after the sign-out")
+		assert.Equal(t, "event: error", next(0), "a stream whose session was revoked")
 	})
 }

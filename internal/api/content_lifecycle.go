@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -277,7 +278,13 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // first write after it fails and ends the stream. So every write moves the
 // deadline two heartbeats ahead first, and a comment line every heartbeat
 // keeps an idle stream inside it.
+//
+// None of those checks reads on the request's tenant connection. Each reads
+// the engine's own tables, which resolve the same on any connection, and the
+// first read on the request's connection would take it for as long as the
+// stream stays open. So an idle stream holds no connection between changes.
 func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(db.WithoutTakingTenantConn(r.Context()))
 	schemaName := chi.URLParam(r, "schema")
 	if !h.runBeforeRequest(w, r, schemaName, "list") {
 		return
