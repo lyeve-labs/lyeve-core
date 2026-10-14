@@ -148,12 +148,12 @@ func TestTenantHeader_ClaimTenantIsHonoredAndHeaderCannotMoveIt(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
-	claims := &auth.Claims{TenantID: "claimed-tenant", Roles: []string{"editor"}}
+	claims := &auth.Claims{TenantID: "claimed_tenant", Roles: []string{"editor"}}
 	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, claims))
 
 	m(next).ServeHTTP(httptest.NewRecorder(), req)
 
-	if resolved != "claimed-tenant" {
+	if resolved != "claimed_tenant" {
 		t.Fatalf("tenant = %q; want the claim to be honored", resolved)
 	}
 
@@ -165,10 +165,10 @@ func TestTenantHeader_ClaimTenantIsHonoredAndHeaderCannotMoveIt(t *testing.T) {
 
 	m(next).ServeHTTP(httptest.NewRecorder(), req)
 
-	if resolved != "claimed-tenant" {
+	if resolved != "claimed_tenant" {
 		t.Fatalf("tenant = %q; a header must not override the claim", resolved)
 	}
-	if got := req.Header.Get("X-Tenant-ID"); got != "claimed-tenant" {
+	if got := req.Header.Get("X-Tenant-ID"); got != "claimed_tenant" {
 		t.Errorf("raw header = %q; the middleware must normalize it to the resolved tenant", got)
 	}
 }
@@ -216,14 +216,14 @@ func TestTenantHeader_NonSuperAdminHeaderIsIgnored(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
 	req.Header.Set("X-Tenant-ID", "stolen_tenant")
 	claims := &auth.Claims{
-		TenantID: "legit-tenant",
+		TenantID: "legit_tenant",
 		Roles:    []string{"admin"}, // NOT super_admin
 	}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
 	req = req.WithContext(ctx)
 	m(next).ServeHTTP(httptest.NewRecorder(), req)
 
-	if resolvedTenant != "legit-tenant" {
+	if resolvedTenant != "legit_tenant" {
 		t.Errorf("non-super_admin override: got %q, want 'legit-tenant'", resolvedTenant)
 	}
 }
@@ -264,7 +264,7 @@ func TestTenancyConn_NoResetWithoutAConnection(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil).WithContext(ctx)
 	req = req.WithContext(context.WithValue(req.Context(),
-		auth.ClaimsKey, &auth.Claims{TenantID: "tenant-a"}))
+		auth.ClaimsKey, &auth.Claims{TenantID: "tenant_a"}))
 
 	mw.TenantHeader(true)(mw.TenancyConn(nil, tenancy)(next)).ServeHTTP(httptest.NewRecorder(), req)
 
@@ -310,7 +310,7 @@ func TestTenancyConn_TenantComesOnlyFromAClaim(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
 	req = req.WithContext(context.WithValue(req.Context(),
-		auth.ClaimsKey, &auth.Claims{TenantID: "tenant-a"}))
+		auth.ClaimsKey, &auth.Claims{TenantID: "tenant_a"}))
 	m.ServeHTTP(httptest.NewRecorder(), req)
 
 	m.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/api/v1/content", nil))
@@ -410,13 +410,13 @@ func TestTenantHeader_SingleTenantUsesTheJWTTenantClaim(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	claims := &auth.Claims{TenantID: "from-the-claim", Roles: []string{"super_admin"}}
+	claims := &auth.Claims{TenantID: "from_the_claim", Roles: []string{"super_admin"}}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
 	req = req.WithContext(ctx)
 
 	m(next).ServeHTTP(httptest.NewRecorder(), req)
 
-	if resolvedTenant != "from-the-claim" {
+	if resolvedTenant != "from_the_claim" {
 		t.Errorf("multiTenant=false: expected tenant from JWT claims, got %q", resolvedTenant)
 	}
 }

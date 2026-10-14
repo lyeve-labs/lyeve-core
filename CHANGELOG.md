@@ -29,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the multitenant plugin release this engine pins: a tenant clone creates its target the way tenant create does, so it can no longer take a slug whose deleted tenant left rows behind.
 - Through the multitenant plugin release this engine pins: a row a backup import cannot restore is reported as "the row could not be restored". The database's own text, which names its tables, keys and values, goes to the log instead of the answer.
 - Through the schema plugin release this engine pins: a tenant that defines a content type another tenant also defines can no longer store a field in a column the other definition uses for something else, such as a plain field on the other tenant's relation key, through which writes skipped the relation check. A field can no longer be stored in a column the engine keeps for itself, such as `tenant_id`.
+- On an install with several tenants, a session token that names its tenant in a spelling the engine never issues, such as one with a capital letter or a hyphen, is refused with `401` before any handler runs, whatever tenant header a super admin sends. A request that read the database was already refused when its connection was scoped to that tenant, and a stream that read nothing was not. A single-tenant install is unchanged.
 
 ### Added
 
@@ -66,6 +67,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: GraphQL lists work on SQL Server, GraphQL and gRPC writes can set a `belongs_to` relation, and a GraphQL record has one form on every database. Live log streams stay open past the server's write timeout. The Elasticsearch search provider indexes and searches. A GitHub sign-in provider made from its template signs people in. Scheduled audit retention applies its policies. Tenant backup import and validate accept dumps up to their own limits, and export, import and restore name their operation so its progress can be followed.
 - The table helpers in `plugintest` (`AssertTablesExist`, `AssertMigrationTable` and `DBFixture.TableExists`) count a table only in the test's own database. On MySQL `information_schema` lists every database on the server, so a table another test created used to count.
 - A plugin that reads content type definitions while no schema engine is registered gets an error instead of a panic. Its reads also go to the engine registered at the time of the read, not the one there was when the plugin started.
+- On an install with several tenants, the session check on authenticated API routes no longer takes the request's tenant database connection. It took that connection before any handler ran, and the handler kept it until it returned, so every stream opened with a session token held one connection for as long as it stayed open, whether or not it read anything, and 25 idle streams in any tenants held the whole default pool. The check now reads on a connection it gives back at once, so a stream whose handler reads nothing holds none, and a revoked session is refused as before.
 
 ## [0.54.1] - 2026-10-11
 

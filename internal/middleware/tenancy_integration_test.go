@@ -228,8 +228,10 @@ func TestTenancyConn_InvalidSlug_HTTP500(t *testing.T) {
 	}
 
 	pool := testdb.Postgres(t)
-	tenancy := db.NewPostgresSchemaTenancy(func(ctx context.Context) string {
-		return mw.TenantIDFromContext(ctx)
+	tenancy := db.NewPostgresSchemaTenancy(func(context.Context) string {
+		// TenantHeader refuses a token naming this slug, so the
+		// strategy is handed it directly to prove Apply refuses it too.
+		return "EVIL_UPPERCASE"
 	})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +247,7 @@ func TestTenancyConn_InvalidSlug_HTTP500(t *testing.T) {
 
 	// Slug with uppercase: violates safeSlugRe ^[a-z][a-z0-9_]{0,62}$
 	req := httptest.NewRequest(http.MethodGet, "/api/items", nil)
-	claims := &auth.Claims{TenantID: "EVIL_UPPERCASE", Roles: []string{"admin"}}
+	claims := &auth.Claims{TenantID: "acme", Roles: []string{"admin"}}
 	req = req.WithContext(context.WithValue(req.Context(), auth.ClaimsKey, claims))
 	w := httptest.NewRecorder()
 	m.ServeHTTP(w, req)

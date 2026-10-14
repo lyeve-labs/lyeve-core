@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -539,7 +540,12 @@ func tokenVersionCheck(getTokenVersion func(ctx context.Context, userID string) 
 				next.ServeHTTP(w, r)
 				return
 			}
-			currentVersion, err := getTokenVersion(r.Context(), claims.UserID)
+			// Never the read that takes the request's tenant connection.
+			// Taken here, before any handler runs, it would stay with a
+			// handler that streams until its client leaves, and a few idle
+			// streams would hold the whole pool. sys_users is the engine's
+			// own table, so the row is the same on any connection.
+			currentVersion, err := getTokenVersion(db.WithoutTakingTenantConn(r.Context()), claims.UserID)
 			if err != nil {
 				slog.WarnContext(r.Context(), "token version check failed, rejecting",
 					"err", err, "user_id", claims.UserID)

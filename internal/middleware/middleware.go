@@ -308,6 +308,20 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			tenantID := ""
 
 			if claims, ok := r.Context().Value(auth.ClaimsKey).(*auth.Claims); ok && claims != nil {
+				// On a multi-tenant install a token naming its tenant in a
+				// spelling the engine never issues is refused here. Scoping a
+				// tenant connection to it would fail too, but a request that
+				// never reads, such as a stream, never scopes one and would
+				// run under that name. A single-tenant install scopes no
+				// connection, so its accounts keep whatever name they carry.
+				if multiTenant && claims.TenantID != "" && !core.IsValidTenantSlug(claims.TenantID) {
+					slog.WarnContext(r.Context(), "refusing token whose tenant is not a canonical slug",
+						"user_id", claims.UserID, "path", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					fmt.Fprintf(w, `{"error":"invalid token tenant"}`)
+					return
+				}
 				// JWT tenant claims: always honored. In single-tenant mode,
 				// still extracted so RequireTenantID has a tenant context.
 				if multiTenant || claims.TenantID != "" {
