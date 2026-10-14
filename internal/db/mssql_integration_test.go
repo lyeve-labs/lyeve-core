@@ -8,6 +8,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	tcmssql "github.com/testcontainers/testcontainers-go/modules/mssql"
+
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // TestMSSQL_ConnectAndMigrate verifies the full MSSQL lifecycle:
@@ -23,6 +25,7 @@ func TestMSSQL_ConnectAndMigrate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MSSQL integration test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx := context.Background()
 
@@ -84,6 +87,7 @@ func TestMSSQL_DialectRewrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MSSQL integration test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx := context.Background()
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugintest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -32,6 +33,7 @@ import (
 
 func pgForScopedHost(t *testing.T) *sql.DB {
 	t.Helper()
+	plugintest.SkipDialect(t, "postgres")
 	ctx := context.Background()
 	ctr, err := postgres.Run(ctx,
 		"postgres:16-alpine",

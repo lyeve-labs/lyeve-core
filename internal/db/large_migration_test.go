@@ -36,6 +36,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // largeDatasetRows returns the target row count from LARGE_DATASET_ROWS env var
@@ -149,6 +151,7 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "postgres")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -262,6 +265,7 @@ func TestLargeMigration_ConcurrentAccess_Postgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "postgres")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -422,6 +426,7 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -526,6 +531,7 @@ func TestLargeMigration_ConcurrentAccess_MySQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -674,6 +680,7 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -783,6 +790,7 @@ func TestLargeMigration_ConcurrentAccess_MSSQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -932,6 +940,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// PostgreSQL
 	t.Run("postgres", func(t *testing.T) {
+		testdialect.Require(t, "postgres")
 		ctx := context.Background()
 		ctr, err := postgres.RunContainer(ctx,
 			testcontainers.WithImage("postgres:16-alpine"),
@@ -978,6 +987,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// MySQL
 	t.Run("mysql", func(t *testing.T) {
+		testdialect.Require(t, "mysql")
 		ctx := context.Background()
 		ctr, err := mysql.Run(ctx, "mysql:8",
 			mysql.WithDatabase("lyeve_test"),
@@ -1032,6 +1042,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// MSSQL
 	t.Run("mssql", func(t *testing.T) {
+		testdialect.Require(t, "mssql")
 		ctx := context.Background()
 		ctr, err := tcmssql.Run(ctx,
 			"mcr.microsoft.com/azure-sql-edge:latest",

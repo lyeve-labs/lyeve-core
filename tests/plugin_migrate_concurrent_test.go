@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/stretchr/testify/assert"
 	"github.com/testcontainers/testcontainers-go"
@@ -26,6 +27,7 @@ import (
 // processes booting at once must both succeed and record the version once: a
 // plain INSERT of the version row would fail with error 23505 for the second.
 func TestPluginMigrate_ConcurrentBoot(t *testing.T) {
+	testdialect.Require(t, "postgres")
 	ctx := context.Background()
 
 	// Start PostgreSQL container
@@ -104,6 +106,7 @@ func TestPluginMigrate_ConcurrentBoot(t *testing.T) {
 // the same migration SQL more than once. A migration that inserts a row as a
 // side-effect must produce exactly one row: not one per goroutine.
 func TestPluginMigrate_LockPreventsDoubleApply(t *testing.T) {
+	testdialect.Require(t, "postgres")
 	ctx := context.Background()
 
 	ctr, err := postgres.RunContainer(ctx,

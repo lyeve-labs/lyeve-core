@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	_ "github.com/microsoft/go-mssqldb"
 
@@ -97,6 +98,7 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = '_idx_test_items_status')
 
 func migrateTestPostgres(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "postgres")
 	ctx := context.Background()
 	ctr, err := postgres.Run(ctx,
 		"postgres:16-alpine",
@@ -131,6 +133,7 @@ func migrateTestPostgres(t *testing.T) *sql.DB {
 
 func migrateTestMySQL(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "mysql")
 	ctx := context.Background()
 	ctr, err := mysql.Run(ctx,
 		"mysql:8",
@@ -162,6 +165,7 @@ func migrateTestMySQL(t *testing.T) *sql.DB {
 
 func migrateTestMSSQL(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "mssql")
 	ctx := context.Background()
 	ctr, err := tcmssql.Run(ctx,
 		"mcr.microsoft.com/azure-sql-edge:latest",
