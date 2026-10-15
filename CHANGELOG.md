@@ -97,6 +97,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the flow plugin release this engine pins: a flow reads a relation whose pivot table has a bounded name instead of failing with `invalid pivot table name`.
 - Through the schema plugin release this engine pins: renaming a content type moves its pivot tables, their key columns, indexes and keys with it, so its relations and existing pairs work under the new name. A rename is refused with 409 when another tenant's definition relates to the type or defines the new name.
 - Through the schema plugin release this engine pins: a content type rename that stops partway on MySQL holds both names until it finishes, so another tenant can no longer take over the moved table, and the plugin's start finishes a pending rename. Renaming a type also renames the indexes and keys of its own table.
+- An engine pointed at a MySQL database created the way the documentation describes starts and completes setup. It turns on the driver's time parsing even when the URL leaves it out or turns it off, gives a database it has not yet installed into the collation its tables need, and takes its migration lock on MySQL 9, which has no MD5 function. A database that already holds the engine's tables under another collation is left as it is, with a warning.
 
 ## [0.54.1] - 2026-10-11
 
