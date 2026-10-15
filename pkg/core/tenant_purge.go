@@ -9,7 +9,10 @@ import (
 // TenantPurgeHandler is invoked during tenant deletion for GDPR-compliant
 // per-tenant data removal. The handler receives a transaction-bound Querier
 // (so all purges participate in the delete transaction) and the tenant slug.
-// Return an error to abort the deletion and roll back the transaction.
+// Return an error to abort the deletion and roll back the transaction. A
+// handler that changes state outside the database registers a
+// TenantPurgeOutcome through OnTenantPurgeOutcome to learn whether the delete
+// committed.
 type TenantPurgeHandler func(ctx context.Context, q Querier, slug string) error
 
 var (
@@ -40,6 +43,65 @@ func TenantPurgeHandlers() []TenantPurgeHandler {
 	out := make([]TenantPurgeHandler, len(purgeHandlers))
 	copy(out, purgeHandlers)
 	return out
+}
+
+// TenantPurgeOutcome runs once the tenant delete it was registered on ends.
+// committed is false when the delete rolled back and the tenant still exists.
+// It cannot fail the delete, which has already ended, so it handles its own
+// errors.
+type TenantPurgeOutcome func(ctx context.Context, committed bool)
+
+type tenantPurgeOutcomesKey struct{}
+
+type tenantPurgeOutcomes struct {
+	mu   sync.Mutex
+	fns  []TenantPurgeOutcome
+	done bool
+}
+
+// WithTenantPurgeOutcomes prepares ctx for running the purge handlers of one
+// tenant delete. The caller runs every handler with the returned context and
+// calls end once the delete's transaction commits or rolls back, which runs
+// each TenantPurgeOutcome the handlers registered, in registration order.
+// end runs them only on its first call.
+//
+// A purge handler runs inside the delete's transaction, so whatever it does
+// outside the database, such as dropping an external index, stays done when
+// the delete rolls back. This is how such a handler learns the outcome.
+func WithTenantPurgeOutcomes(ctx context.Context) (context.Context, func(ctx context.Context, committed bool)) {
+	o := &tenantPurgeOutcomes{}
+	end := func(ctx context.Context, committed bool) {
+		o.mu.Lock()
+		if o.done {
+			o.mu.Unlock()
+			return
+		}
+		o.done = true
+		fns := o.fns
+		o.mu.Unlock()
+		for _, fn := range fns {
+			fn(ctx, committed)
+		}
+	}
+	return context.WithValue(ctx, tenantPurgeOutcomesKey{}, o), end
+}
+
+// OnTenantPurgeOutcome registers fn on the tenant delete whose purge ctx
+// belongs to. It reports false, and registers nothing, when ctx belongs to no
+// delete prepared by WithTenantPurgeOutcomes or to one that already ended. A
+// handler then cannot learn the outcome and does its work in the purge.
+func OnTenantPurgeOutcome(ctx context.Context, fn TenantPurgeOutcome) bool {
+	o, ok := ctx.Value(tenantPurgeOutcomesKey{}).(*tenantPurgeOutcomes)
+	if !ok {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.done {
+		return false
+	}
+	o.fns = append(o.fns, fn)
+	return true
 }
 
 // TenantPurgeHandlerCount returns the number of registered purge handlers.

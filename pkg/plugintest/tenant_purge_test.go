@@ -53,3 +53,37 @@ func TestRunTenantPurges_ClearsTheTenantsRows(t *testing.T) {
 	require.NoError(t, row.Scan(&n))
 	assert.Equal(t, 1, n)
 }
+
+type outcomePlugin struct {
+	table     string
+	committed *[]bool
+}
+
+func (p outcomePlugin) Name() string                           { return "outcome" }
+func (p outcomePlugin) Start(context.Context, core.Host) error { return nil }
+func (p outcomePlugin) Stop(context.Context) error             { return nil }
+
+func (p outcomePlugin) TenantPurges() []core.TenantPurge {
+	return []core.TenantPurge{{
+		Tables: []string{p.table},
+		Handler: func(ctx context.Context, _ core.Querier, _ string) error {
+			core.OnTenantPurgeOutcome(ctx, func(_ context.Context, committed bool) {
+				*p.committed = append(*p.committed, committed)
+			})
+			return nil
+		},
+	}}
+}
+
+func TestRunTenantPurges_EndsThePurgeWithACommit(t *testing.T) {
+	host := plugintest.Postgres(t)
+	ctx := context.Background()
+	table := "outcome_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:10]
+	_, err := host.Querier(ctx).Exec(ctx, `CREATE TABLE `+table+` (id VARCHAR(36) PRIMARY KEY, tenant_id VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err)
+	var committed []bool
+
+	plugintest.RunTenantPurges(t, host, outcomePlugin{table: table, committed: &committed}, "acme")
+
+	assert.Equal(t, []bool{true}, committed)
+}
