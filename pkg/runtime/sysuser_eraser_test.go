@@ -61,8 +61,10 @@ func TestSysUserEraser_ExecCalled(t *testing.T) {
 	     token_version = token_version + 1,
 	     updated_at = %s,
 	     sessions_revoked_at = %s,
-	     anonymized = %s
-	 WHERE (email = $1 OR %s = $2) AND password_hash != ''`,
+	     anonymized = %s,
+	     provider_email = NULL,
+	     provider_seen_at = NULL
+	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND password_hash != ''`,
 		"LOWER(CONCAT('erased-', id::text, '@localhost'))", "'{}'", "NOW()", "NOW()", "true", "id::text")
 
 	// Set up the expectation: return 1 row affected.
@@ -216,7 +218,7 @@ func TestSysUserEraser_RevokesRefreshTokens(t *testing.T) {
 
 	// The eraser resolves the id through the postgres text cast before the
 	// UPDATE, then revokes that id.
-	resolveSQL := `SELECT id::text FROM sys_users WHERE (email = $1 OR id::text = $2) AND password_hash != ''`
+	resolveSQL := `SELECT id::text FROM sys_users WHERE (email = $1 OR provider_email = $3 OR id::text = $2) AND password_hash != ''`
 	mock.Spy().OnQuery(resolveSQL).ReturnRows(mockhost.Rows("id").Add(subjectID.String()))
 
 	updateSQL := fmt.Sprintf(`UPDATE sys_users
@@ -226,8 +228,10 @@ func TestSysUserEraser_RevokesRefreshTokens(t *testing.T) {
 	     token_version = token_version + 1,
 	     updated_at = %s,
 	     sessions_revoked_at = %s,
-	     anonymized = %s
-	 WHERE (email = $1 OR %s = $2) AND password_hash != ''`,
+	     anonymized = %s,
+	     provider_email = NULL,
+	     provider_seen_at = NULL
+	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND password_hash != ''`,
 		"LOWER(CONCAT('erased-', id::text, '@localhost'))", "'{}'", "NOW()", "NOW()", "true", "id::text")
 	mock.Spy().OnExec(updateSQL).ReturnTag(core.CommandTag{RowsAffected: 1})
 
