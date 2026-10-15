@@ -74,7 +74,8 @@ func logSubjectEraserRoster(ctx context.Context, logger *slog.Logger) {
 // email or id column, then revokes the subject's active sessions. Replaces
 // email with a per-row sentinel, clears password_hash, empties roles, and
 // bumps token_version so every previously issued JWT is rejected immediately.
-// Skips rows with empty password_hash (idempotency guard). Rows affected:
+// Skips rows already marked anonymized, so a second erasure is a no-op.
+// Rows affected:
 // 1 for a match, 0 for no match.
 func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
 	if strings.TrimSpace(identifier) == "" {
@@ -109,9 +110,9 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	}
 
 	// anonymized is BOOLEAN on Postgres and TINYINT/BIT on MySQL/MSSQL.
-	boolTrue := "1"
+	boolTrue, boolFalse := "1", "0"
 	if dialect == "postgres" {
-		boolTrue = "true"
+		boolTrue, boolFalse = "true", "false"
 	}
 
 	// A constant sentinel collides on uq_sys_users_email the second time a
@@ -132,7 +133,7 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	var ids []uuid.UUID
 	if canRevoke {
 		var err error
-		ids, err = e.resolveSubjectIDs(ctx, q, idCast, identifier)
+		ids, err = e.resolveSubjectIDs(ctx, q, idCast, boolFalse, identifier)
 		if err != nil {
 			slog.WarnContext(ctx, "sys_users erasure: resolve subject ids", "err", err)
 		}
@@ -154,6 +155,10 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	// An address also matches provider_email, where a tenant-local account
 	// keeps the address its provider asserted, and both provider columns are
 	// cleared with the rest of the row.
+	//
+	// A row already erased is skipped by its anonymized flag. An empty
+	// password_hash does not mean erased: an account a SAML provider created
+	// has no password, and the account still holds the person's address.
 	qtext := fmt.Sprintf(`UPDATE sys_users
 	 SET email = %s,
 	     password_hash = '',
@@ -164,7 +169,7 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	     anonymized = %s,
 	     provider_email = NULL,
 	     provider_seen_at = NULL
-	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND password_hash != ''`, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, idCast)
+	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, idCast, boolFalse)
 
 	address := core.NormalizeEmail(identifier)
 	tag, err := q.Exec(ctx, qtext, address, identifier, address)
@@ -194,10 +199,10 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 // before the row is anonymized. It reads the id through the same text cast the
 // UPDATE matches on, then parses it back to a canonical uuid so refresh-token
 // revocation keys by the exact string the refresh store recorded at issue time.
-func (e *sysUserEraser) resolveSubjectIDs(ctx context.Context, q core.Querier, idCast, identifier string) ([]uuid.UUID, error) {
+func (e *sysUserEraser) resolveSubjectIDs(ctx context.Context, q core.Querier, idCast, boolFalse, identifier string) ([]uuid.UUID, error) {
 	address := core.NormalizeEmail(identifier)
 	rows, err := q.Query(ctx, fmt.Sprintf(
-		`SELECT %s FROM sys_users WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND password_hash != ''`, idCast, idCast),
+		`SELECT %s FROM sys_users WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
 		address, identifier, address)
 	if err != nil {
 		return nil, fmt.Errorf("sys_users erasure: resolve: %w", err)
