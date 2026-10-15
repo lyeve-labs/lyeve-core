@@ -120,7 +120,10 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 			roles = []string{}
 		}
 		row := map[string]any{
-			"id":         id,
+			// SQL Server renders a UNIQUEIDENTIFIER cast to text in upper
+			// case. Every other answer names an account by the lower case
+			// form, so a consumer matching ids as strings finds this one.
+			"id":         strings.ToLower(id),
 			"email":      email,
 			"roles":      roles,
 			"tenant_id":  tenantID,

@@ -235,3 +235,18 @@ func TestSysUserExporter_AllTenantExportMatchesEachHolderOnce(t *testing.T) {
 		}
 	})
 }
+
+// The export names an account by the id every other answer uses, the lower
+// case form. SQL Server renders a UNIQUEIDENTIFIER cast to text in upper case.
+func TestSysUserExporter_ExportsTheLowerCaseID(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		address := "case-" + uuid.NewString()[:8] + "@agency.example"
+		id := seedTenantLocal(t, host, "acme", address)
+
+		for _, identifier := range []string{address, id.String()} {
+			rows := exportedRows(t, host, "acme", identifier)
+			require.Len(t, rows, 1, "identifier %s", identifier)
+			assert.Equal(t, strings.ToLower(id.String()), rows[0]["id"])
+		}
+	})
+}
