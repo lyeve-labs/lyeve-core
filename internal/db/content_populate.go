@@ -405,9 +405,9 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 		return map[uuid.UUID][]*domain.Content{}, nil
 	}
 
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return nil, fmt.Errorf("list related batch: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return nil, fmt.Errorf("list related batch: ensure pivot tenant column: %w", err)
@@ -877,9 +877,9 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 // unpublished one only when drafts is true. The total counts what the same
 // filter would serve, so a page count never reveals a hidden row.
 func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int, drafts bool) ([]*domain.Content, int, error) {
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list related: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return nil, 0, fmt.Errorf("list related: ensure pivot tenant column: %w", err)
@@ -951,9 +951,9 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 // does not hold refuses the whole set as a validation error naming the field.
 // Another tenant's row is refused exactly as a row nobody holds.
 func (s *ContentStore) SetRelations(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, targetIDs []uuid.UUID) error {
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return fmt.Errorf("set relations: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return fmt.Errorf("set relations: ensure pivot tenant column: %w", err)
