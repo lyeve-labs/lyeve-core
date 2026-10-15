@@ -39,6 +39,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the synthetic monitoring plugin release this engine pins: a probe update that moves the target to another host needs each stored secret sent again, and a run drops its secrets on a redirect to another origin.
 - Through the schema plugin release this engine pins: adding a relation to a content type that several tenants define clears dangling references only in the saving tenant's rows, and a definition that would store a field differently from another tenant's definition of the same table is refused.
 - Through the plugin releases this engine pins: a bulk import through the content plugin refuses a relation into another tenant's entry or a missing one, as its dry run does. A draft the content status backfill lost to a deadlock on MySQL is projected again instead of staying readable on the public content routes. The ceiling of 50 enabled PII masking rules per tenant holds under concurrent writes.
+- On an install with several tenants, an account that a tenant's identity provider, its directory or a self sign-up creates belongs to that tenant alone. It is found by the tenant and its address, so the same address can name a different account in each tenant, and a sign-up, a password reset or a magic link in one tenant no longer reveals whether another tenant holds the address. The sign-in plugins take part through the releases this engine pins.
+- A sign-in refused because the account has no password, or signs in only through its identity provider, takes as long as a sign-in for an address nobody holds.
+- The tenant a request resolves from its hostname decides which tenant's account a password sign-in or a token request reaches. A tenant named in the request body no longer overrides it.
 
 ### Added
 
@@ -49,6 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The `contentrules` package gives a plugin that writes content the field defaults and validation rules the Content API applies: `PrepareCreate` for a new entry and `ValidatePatch` for a partial update.
 - A tenant purge handler can learn whether the tenant delete it ran in committed or rolled back, through `core.OnTenantPurgeOutcome` on the context the delete hands it. Work a handler does outside the database can then wait for the commit. Handlers that do not ask behave as before.
 - A free install refused another admin seat gets a link to where that ceiling is lifted, in the refusal body and its upgrade header, when the build's licensing names one. A link that is neither https nor a console path is dropped, and a build whose licensing names none refuses as before.
+- Each tenant sets how many days an account its identity provider created may still sign in with a password, a reset or a magic link after its last sign-in through that provider, from 0 to 365 with 30 as the default, through `GET` and `PUT /api/admin/auth/provider-window`. 0 allows sign-in through the provider only. Only a signed-in session can read or change it, a tenant admin changes only their own tenant, and each change is audited with the old and new values.
 
 ### Changed
 
@@ -65,6 +69,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the flow plugin release this engine pins: a datasource update keeps the secret parts it leaves out, `"secret": {}` keeps every part and `"secret": null` clears them. A flow's upsert with an id its tenant does not hold fails the node instead of creating a record.
 - Through the usage and webhook plugin releases this engine pins: the quota, quota request, incoming webhook and dead letter lists say whether their paid capability is licensed.
 - Through the plugin releases this engine pins: a closed region cannot be the default, and a SCIM connection's deprovision action is `disable` or `delete`.
+- A session's email claim is no longer unique on an install with several tenants. An account a tenant's identity provider created carries its address there, and the same address can sign in to another tenant's account, so identify an account by its id. Migration 011 adds the account's provider address and its last provider sign-in, and runs at the next start.
 
 ### Fixed
 
@@ -99,6 +104,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the schema plugin release this engine pins: renaming a content type moves its pivot tables, their key columns, indexes and keys with it, so its relations and existing pairs work under the new name. A rename is refused with 409 when another tenant's definition relates to the type or defines the new name.
 - Through the schema plugin release this engine pins: a content type rename that stops partway on MySQL holds both names until it finishes, so another tenant can no longer take over the moved table, and the plugin's start finishes a pending rename. Renaming a type also renames the indexes and keys of its own table.
 - An engine pointed at a MySQL database created the way the documentation describes starts and completes setup. It turns on the driver's time parsing even when the URL leaves it out or turns it off, gives a database it has not yet installed into the collation its tables need, and takes its migration lock on MySQL 9, which has no MD5 function. A database that already holds the engine's tables under another collation is left as it is, with a warning.
+- An erasure reaches accounts that have no password, such as those a SAML sign-up creates. They used to be skipped and kept their address.
+- The token endpoint refuses a disabled or expired account, as the password sign-in does.
 
 ## [0.54.1] - 2026-10-11
 
