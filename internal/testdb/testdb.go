@@ -451,6 +451,40 @@ func prepareMySQL() readyDB {
 	return readyDB{name: dbName, migrations: n, ddl: ddl}
 }
 
+// MySQLStockDatabase creates an empty database on the shared MySQL server and
+// returns its URL the way an operator writes one: the mysql:// scheme and no
+// driver parameters. Nothing is migrated.
+//
+// The database takes utf8mb4_0900_ai_ci, the default a stock MySQL 8 server
+// and its official image give a CREATE DATABASE that names no collation. The
+// harness server runs utf8mb4_unicode_ci so that every other test can migrate,
+// which also hides the database an operator actually starts from.
+func MySQLStockDatabase(t *testing.T) string {
+	t.Helper()
+	ensureMySQL(t)
+	ctx := context.Background()
+	dbName := nextDBName("mysqlstock")
+
+	adminDB, err := sql.Open("mysql", mysqlRootDSN(""))
+	if err != nil {
+		t.Fatalf("mysql admin open: %v", err)
+	}
+	defer adminDB.Close()
+	if _, err := adminDB.ExecContext(ctx,
+		"CREATE DATABASE "+dbName+" CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci"); err != nil {
+		t.Fatalf("mysql CREATE DATABASE %s: %v", dbName, err)
+	}
+	t.Cleanup(func() {
+		d, err2 := sql.Open("mysql", mysqlRootDSN(""))
+		if err2 != nil {
+			return
+		}
+		defer d.Close()
+		_, _ = d.ExecContext(context.Background(), "DROP DATABASE IF EXISTS "+dbName) // err suppressed: best-effort test cleanup
+	})
+	return fmt.Sprintf("mysql://root:secret@tcp(%s:%s)/%s", mysqlShared.host, mysqlShared.port, dbName)
+}
+
 // MSSQL
 
 var mssqlShared struct {
