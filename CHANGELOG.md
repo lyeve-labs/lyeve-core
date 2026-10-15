@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin route can declare the response headers a page on another origin may read and the request headers it accepts, through `ExposeHeaders` and `AllowHeaders` on its `core.RouteDecl`. The engine adds them to the CORS lists every router sends, and the origin check is unchanged.
 - The `contentrules` package gives a plugin that writes content the field defaults and validation rules the Content API applies: `PrepareCreate` for a new entry and `ValidatePatch` for a partial update.
 - A tenant purge handler can learn whether the tenant delete it ran in committed or rolled back, through `core.OnTenantPurgeOutcome` on the context the delete hands it. Work a handler does outside the database can then wait for the commit. Handlers that do not ask behave as before.
+- A free install refused another admin seat gets a link to where that ceiling is lifted, in the refusal body and its upgrade header, when the build's licensing names one. A link that is neither https nor a console path is dropped, and a build whose licensing names none refuses as before.
 
 ### Changed
 

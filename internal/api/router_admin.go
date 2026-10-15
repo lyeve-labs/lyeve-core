@@ -215,6 +215,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	usersHandler := NewUsersHandler(userStore, cfg.PasswordHashAlgo)
 	usersHandler.seats = o.adminSeats(userStore)
+	usersHandler.ceilingURL = o.ceilingURL
 	if o.refreshTokenStore != nil {
 		usersHandler.revokeRefresh = o.refreshTokenStore.RevokeAllForUser
 	}

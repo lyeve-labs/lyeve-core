@@ -32,6 +32,9 @@ type UsersHandler struct {
 	// ceiling a licensing implementation may state. The routers always set
 	// it. Nil checks nothing.
 	seats core.AdminSeatGuard
+	// ceilingURL is where the licensing implementation sends an operator to
+	// lift a ceiling, put in the seat refusal. Nil offers no link.
+	ceilingURL func(cap string) string
 }
 
 // NewUsersHandler constructs a UsersHandler. passwordHashAlgo defaults to
@@ -127,7 +130,7 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		user, err = h.users.Create(ctx, body.Email, hash, body.Roles, tenantID)
 		return err
 	})
-	if !admitAdminSeat(w, r, seatErr) {
+	if !admitAdminSeat(w, r, seatErr, h.ceilingURL) {
 		return
 	}
 	if err != nil {
@@ -183,7 +186,7 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 		user, err = h.users.UpdateRoles(ctx, id, body.Roles)
 		return err
 	})
-	if !admitAdminSeat(w, r, seatErr) {
+	if !admitAdminSeat(w, r, seatErr, h.ceilingURL) {
 		return
 	}
 	if err != nil {
@@ -198,15 +201,20 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 // admitAdminSeat answers the guard's verdict: true to proceed, otherwise the
-// response is written. A refusal is the cap_exceeded body, and a count that
+// response is written. A refusal is the cap_exceeded body, with the link
+// upgrade names for the seat ceiling when upgrade is set, and a count that
 // could not be read is the database outage it is.
-func admitAdminSeat(w http.ResponseWriter, r *http.Request, err error) bool {
+func admitAdminSeat(w http.ResponseWriter, r *http.Request, err error, upgrade func(cap string) string) bool {
 	if err == nil {
 		return true
 	}
 	var capErr *core.AdminSeatCapError
 	if errors.As(err, &capErr) {
-		httpx.CapExceeded(w, core.CapAdminSeats, capErr.Limit, capErr.Current, "")
+		link := ""
+		if upgrade != nil {
+			link = upgrade(core.CapAdminSeats)
+		}
+		httpx.CapExceeded(w, core.CapAdminSeats, capErr.Limit, capErr.Current, link)
 		return false
 	}
 	respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)

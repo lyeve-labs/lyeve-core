@@ -632,7 +632,9 @@ func trustedIssuerAuth(policies []auth.IssuerPolicy, users externalUsers, seats 
 				}
 				local, unavailable, seatErr := admitExternal(r.Context(), p, token, ext, users, seats)
 				if seatErr != nil {
-					admitAdminSeat(w, r, seatErr)
+					// The caller is an issuer's user, not an operator of this
+					// install, so the refusal carries no link to buy one.
+					admitAdminSeat(w, r, seatErr, nil)
 					return
 				}
 				if unavailable {
