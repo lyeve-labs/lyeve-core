@@ -256,3 +256,35 @@ func TestStampProviderSeen_MySQLRoundTripsUnderAnyLocation(t *testing.T) {
 		})
 	}
 }
+
+// The store keeps the caller's intent for roles: no list at all takes the
+// default a provider sign-up has always had, and an empty list grants nothing,
+// which is what a magic-link sign-up with no configured roles asks for.
+func TestCreateTenantAccount_RolesKeepTheCallersIntent(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		store := db.NewTenantAccountStore(pool)
+		users := db.NewUserStore(pool)
+
+		for _, c := range []struct {
+			name  string
+			roles []string
+			want  []string
+		}{
+			{"nil", nil, []string{"editor"}},
+			{"empty", []string{}, nil},
+			{"given", []string{"viewer"}, []string{"viewer"}},
+		} {
+			acct, created, err := store.CreateTenantAccount(ctx, core.NewTenantAccount{
+				TenantID: "acme", Address: "roles-" + uuid.NewString()[:8] + "@agency.example", Roles: c.roles,
+			})
+			require.NoError(t, err, c.name)
+			require.True(t, created, c.name)
+			assert.ElementsMatch(t, c.want, acct.Roles, "%s: the account returned", c.name)
+
+			stored, err := users.GetByID(ctx, acct.ID)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, c.want, stored.Roles, "%s: the row as stored", c.name)
+		}
+	})
+}

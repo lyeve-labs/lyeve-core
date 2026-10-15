@@ -114,7 +114,10 @@ type NewTenantAccount struct {
 	// PasswordHash is stored as given: a door's own no-password marker, or
 	// the empty string.
 	PasswordHash string
-	// Roles defaults to editor when empty.
+	// Roles are the account's roles. A nil Roles takes editor, the default
+	// a SAML, SCIM or OAuth sign-up has always been given. A non-nil empty
+	// Roles is stored as no roles, which is what a door that grants nothing
+	// by default (magic link) passes.
 	Roles []string
 	// ProviderSeen stamps provider_seen_at with the creation time. A door
 	// whose provider vouches for the person (SAML, OAuth) sets it. Magic

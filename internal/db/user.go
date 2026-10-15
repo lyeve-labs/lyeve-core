@@ -224,7 +224,9 @@ func (s *UserStore) GetByTenantAddress(ctx context.Context, tenantID, address st
 
 // CreateTenantLocal inserts an account that belongs to tenantID alone: its
 // email is core.TenantLocalEmail of its id and provider_email holds address.
-// seen stamps provider_seen_at with the creation time.
+// seen stamps provider_seen_at with the creation time. A nil roles takes
+// editor, the role a provider sign-up has always been given. An empty
+// non-nil roles is stored as no roles.
 //
 // Two first sign-ins at the same moment both insert. The unique index on
 // (tenant_id, provider_email) fails the second, which then reads the winner
@@ -235,7 +237,7 @@ func (s *UserStore) CreateTenantLocal(ctx context.Context, tenantID, address, pa
 	if address == "" {
 		return nil, false, fmt.Errorf("create tenant-local user: no address: %w", domain.ErrValidation)
 	}
-	if len(roles) == 0 {
+	if roles == nil {
 		roles = []string{"editor"}
 	}
 	rolesArg, err := encodeStringArray(s.pool.Engine(), roles)
