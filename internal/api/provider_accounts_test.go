@@ -419,6 +419,59 @@ func TestPasswordLogin_AddressHeldInAnotherTenantAnswersAsAFreeOne(t *testing.T)
 	})
 }
 
+// An account with no password in the tenant the request names answers a
+// password attempt as a free address does, in status, body and timing. SAML
+// and SCIM store an empty hash, OAuth and the trusted issuer a marker.
+func TestPasswordLogin_PasswordlessAccountAnswersAsAFreeOne(t *testing.T) {
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		users := db.NewUserStore(pool)
+		h := NewAuthHandler(users, nil, pool, "test-secret-at-least-32-bytes-long!!", 3600, false)
+		h.WithRiskBasedMFADisabled(true)
+
+		free := "free-" + uuid.NewString()[:8] + "@agency.example"
+
+		doors := map[string]func(http.ResponseWriter, *http.Request){"login": h.Login, "token": h.Token}
+		for doorName, door := range doors {
+			// Fresh accounts per door, and fewer attempts than lock one: a
+			// locked account pays the dummy compare and would hide the gap.
+			held := map[string]string{}
+			for name, hash := range map[string]string{"empty": "", "oauth": auth.OAuthOnlyMarker, "issuer": auth.ExternalIssuerMarker} {
+				address := "nopw-" + name + "-" + uuid.NewString()[:8] + "@agency.example"
+				_, _, err := users.CreateTenantLocal(ctx, "acme", address, hash, nil, true)
+				require.NoError(t, err)
+				held[name] = address
+			}
+			send := func(email string) (int, string, time.Duration) {
+				body := fmt.Sprintf(`{"email":%q,"password":%q,"tenant":"acme"}`, email, providerTestPassword)
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				start := time.Now()
+				door(rec, req)
+				return rec.Code, rec.Body.String(), time.Since(start)
+			}
+			times := map[string][]time.Duration{}
+			for i := 0; i < h.MaxFailedAttempts-1; i++ {
+				freeCode, freeBody, freeTook := send(free)
+				require.Equal(t, http.StatusUnauthorized, freeCode, doorName)
+				times["free"] = append(times["free"], freeTook)
+				for name, email := range held {
+					code, body, took := send(email)
+					assert.Equal(t, freeCode, code, "%s, %s hash", doorName, name)
+					assert.Equal(t, freeBody, body, "%s, %s hash", doorName, name)
+					times[name] = append(times[name], took)
+				}
+			}
+			freeMedian := median(times["free"])
+			for name := range held {
+				ratio := float64(median(times[name])) / float64(freeMedian)
+				assert.True(t, ratio >= 0.5 && ratio <= 2.0, "%s, %s hash: timing ratio %.2f, free %v", doorName, name, ratio, freeMedian)
+			}
+		}
+	})
+}
+
 func median(d []time.Duration) time.Duration {
 	s := append([]time.Duration(nil), d...)
 	sort.Slice(s, func(i, j int) bool { return s[i] < s[j] })
