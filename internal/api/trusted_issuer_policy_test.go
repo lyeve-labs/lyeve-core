@@ -41,7 +41,7 @@ func (f *fakeExternalUsers) SessionsRevokedAt(_ context.Context, id uuid.UUID) (
 	return nil, nil
 }
 
-func (f *fakeExternalUsers) EnsureExternalUser(_ context.Context, id uuid.UUID, email, hash string, roles []string, tenant string) (*domain.User, error) {
+func (f *fakeExternalUsers) EnsureExternalUser(_ context.Context, id uuid.UUID, providerEmail, hash string, roles []string, tenant string) (*domain.User, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.users == nil {
@@ -49,7 +49,7 @@ func (f *fakeExternalUsers) EnsureExternalUser(_ context.Context, id uuid.UUID, 
 	}
 	u, ok := f.users[id]
 	if !ok {
-		u = &domain.User{ID: id, Email: email, PasswordHash: hash, TenantID: tenant, TokenVersion: 1}
+		u = &domain.User{ID: id, Email: core.TenantLocalEmail(id), ProviderEmail: providerEmail, PasswordHash: hash, TenantID: tenant, TokenVersion: 1}
 		f.users[id] = u
 	}
 	if u.TenantID != tenant {

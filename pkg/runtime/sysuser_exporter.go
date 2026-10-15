@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -71,12 +72,15 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 	// The email and id halves take separate parameters for the reason the
 	// eraser gives: stored addresses are lower case, so a subject request
 	// naming Foo@x.com has to be folded before it can match, while the cast id
-	// is compared as supplied.
+	// is compared as supplied. An address also matches provider_email, where a
+	// tenant-local account keeps the address its provider asserted, so a
+	// person's accounts in every tenant come back.
+	address := core.NormalizeEmail(identifier)
 	rows, err := e.host.Querier(ctx).Query(ctx, fmt.Sprintf(`
-		SELECT %s, email, roles, tenant_id, disabled, expires_at, created_at, updated_at
+		SELECT %s, email, roles, tenant_id, disabled, expires_at, created_at, updated_at, provider_email, provider_seen_at
 		FROM sys_users
-		WHERE (email = $1 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
-		core.NormalizeEmail(identifier), identifier)
+		WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
+		address, identifier, address)
 	if err != nil {
 		return nil, fmt.Errorf("sys_users export: %w", err)
 	}
@@ -90,9 +94,11 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 			disabled             bool
 			expiresAt            *time.Time
 			createdAt, updatedAt time.Time
+			providerEmail        sql.NullString
+			providerSeenAt       *time.Time
 		)
 		if err := rows.Scan(&id, &email, db.NewRolesScanner(&roles), &tenantID,
-			&disabled, &expiresAt, &createdAt, &updatedAt); err != nil {
+			&disabled, &expiresAt, &createdAt, &updatedAt, &providerEmail, &providerSeenAt); err != nil {
 			return nil, fmt.Errorf("sys_users export scan: %w", err)
 		}
 		if roles == nil {
@@ -109,6 +115,12 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 		}
 		if expiresAt != nil {
 			row["expires_at"] = *expiresAt
+		}
+		if providerEmail.Valid {
+			row["provider_email"] = providerEmail.String
+		}
+		if providerSeenAt != nil {
+			row["provider_seen_at"] = *providerSeenAt
 		}
 		out = append(out, row)
 	}

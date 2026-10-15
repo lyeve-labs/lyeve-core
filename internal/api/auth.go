@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
+	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -24,6 +25,7 @@ const csrfCookieName = "__Host-csrf"
 // Satisfied by *db.UserStore (production) and test fakes.
 type userStore interface {
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
+	GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	Count(ctx context.Context) (int64, error)
 	Create(ctx context.Context, email, passwordHash string, roles []string, tenantID string) (*domain.User, error)
@@ -49,6 +51,10 @@ type AuthHandler struct {
 	passwordPolicy     auth.PasswordPolicy  // password complexity rules
 	refreshTokenTTL    time.Duration        // TTL for refresh tokens (default 7 days)
 	keyStore           *encryption.KeyStore // optional: per-tenant DEK encryption
+
+	// providerWindows answers whether a provider account is inside its
+	// tenant's window. Nil applies the default window.
+	providerWindows core.ProviderWindowProvider
 
 	// lockoutShared is set when both lockouts live in a backend every replica
 	// shares, which changes what a lockout log line can promise an operator.
@@ -89,8 +95,13 @@ func NewAuthHandler(users userStore, mfaStore security.MFAStore, pool db.DB, jwt
 		algo = passwordHashAlgo[0]
 	}
 	maxFailedAttempts, lockoutWindow := lockoutPolicy()
+	var windows core.ProviderWindowProvider
+	if pool != nil {
+		windows = config.NewProviderWindows(pool)
+	}
 	return &AuthHandler{
-		users: users, mfaStore: mfaStore, pool: pool,
+		providerWindows: windows,
+		users:           users, mfaStore: mfaStore, pool: pool,
 		jwtSecret: jwtSecret, expirySecs: expirySecs,
 		secureCook: secureCook, passwordHashAlgo: algo,
 		passwordPolicy:    auth.DefaultPasswordPolicy(),

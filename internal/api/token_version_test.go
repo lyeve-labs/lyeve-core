@@ -475,6 +475,17 @@ func (s *versionAwareUserStore) GetByEmail(ctx context.Context, email string) (*
 	return u, nil
 }
 
+func (s *versionAwareUserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.byEmail {
+		if u.TenantID == tenantID && u.ProviderEmail != "" && u.ProviderEmail == address {
+			return u, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (s *versionAwareUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

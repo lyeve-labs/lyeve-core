@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -937,4 +938,41 @@ func (h *testHost) AdminSeatGuard() core.AdminSeatGuard {
 	}
 	return db.NewAdminSeatGuard(db.NewUserStore(pool),
 		func() int { return h.Capabilities().Limit(core.CapAdminSeats) }, nil)
+}
+
+var (
+	_ core.TenantAccountProvider  = (*testHost)(nil)
+	_ core.ProviderWindowProvider = (*testHost)(nil)
+)
+
+// TenantAccounts implements core.TenantAccountProvider with the store the
+// engine host serves, over the test database, so a plugin suite finds, creates
+// and stamps accounts with the statements production runs. A host with no
+// database answers nil.
+func (h *testHost) TenantAccounts() core.TenantAccountStore {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return nil
+	}
+	return db.NewTenantAccountStore(pool)
+}
+
+// ProviderWindowDays implements core.ProviderWindowProvider with the engine's
+// reader over the test database. A host with no database reports the default.
+func (h *testHost) ProviderWindowDays(ctx context.Context, tenantID string) (int, error) {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return core.ProviderWindowDefaultDays, nil
+	}
+	return config.NewProviderWindows(pool).ProviderWindowDays(ctx, tenantID)
+}
+
+// ProviderWindowAdmitsAccount implements core.ProviderWindowProvider with the
+// engine's reader over the test database.
+func (h *testHost) ProviderWindowAdmitsAccount(ctx context.Context, tenantID string, seenAt *time.Time) (bool, error) {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return core.ProviderWindowAdmits(seenAt, core.ProviderWindowDefaultDays, time.Now()), nil
+	}
+	return config.NewProviderWindows(pool).ProviderWindowAdmitsAccount(ctx, tenantID, seenAt)
 }

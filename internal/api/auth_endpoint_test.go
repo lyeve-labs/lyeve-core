@@ -603,6 +603,17 @@ func (s *fakeUserStore) GetByEmail(ctx context.Context, email string) (*domain.U
 	return u, nil
 }
 
+func (s *fakeUserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.byEmail {
+		if u.TenantID == tenantID && u.ProviderEmail != "" && u.ProviderEmail == address {
+			return u, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (s *fakeUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -681,6 +692,9 @@ func (s *failingMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUI
 type dbErrorUserStore struct{}
 
 func (s *dbErrorUserStore) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return nil, errors.New("db unavailable")
+}
+func (s *dbErrorUserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
 	return nil, errors.New("db unavailable")
 }
 func (s *dbErrorUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {

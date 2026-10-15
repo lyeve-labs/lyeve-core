@@ -89,6 +89,7 @@ var SessionOnlyAdminPatterns = []string{
 	"/api/admin/roles/*",
 	"/api/admin/admin-tokens/*",
 	"/api/admin/auth/device/*",
+	"/api/admin/auth/provider-window",
 	// What the install is.
 	"/api/admin/config/*",
 	"/api/admin/plugins/{name}/config/*",

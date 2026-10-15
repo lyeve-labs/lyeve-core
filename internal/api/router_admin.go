@@ -362,6 +362,14 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			r.With(requireRole("super_admin")).Put("/users/{id}/password", usersHandler.SetPassword)
 			r.With(requireRole("super_admin")).Delete("/users/{id}", usersHandler.Delete)
 
+			// The provider window of the request's tenant. An admin sets their
+			// own tenant's, a super admin any tenant's through X-Tenant-ID.
+			if pluginConfigStore != nil {
+				windows := &providerWindowHandler{store: pluginConfigStore, windows: config.NewProviderWindows(pool), host: o.scalingHost}
+				r.With(requireRole("admin", "super_admin")).Get("/auth/provider-window", windows.get)
+				r.With(requireRole("admin", "super_admin")).Put("/auth/provider-window", windows.put)
+			}
+
 			// Auto-mounted via RoutesPlugin.
 
 			// Auto-mounted via RoutesPlugin with GroupAdmin.

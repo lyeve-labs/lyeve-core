@@ -594,7 +594,7 @@ func tokenVersionGetter(s tokenVersionStore) func(ctx context.Context, userID st
 
 // externalUsers is the store trustedIssuerAuth keeps issuers' users in.
 type externalUsers interface {
-	EnsureExternalUser(ctx context.Context, id uuid.UUID, email, passwordHash string, roles []string, tenantID string) (*domain.User, error)
+	EnsureExternalUser(ctx context.Context, id uuid.UUID, providerEmail, passwordHash string, roles []string, tenantID string) (*domain.User, error)
 	SessionsRevokedAt(ctx context.Context, id uuid.UUID) (*time.Time, error)
 }
 
@@ -668,18 +668,19 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 		return nil, false, nil
 	}
 	id := auth.ExternalUserID(p.Issuer, ext.UserID)
-	// The token's email labels the account and is unique across the install,
-	// so an unverified one could squat an address a person will need. Without
-	// a verified email, and for a machine token with none, a reserved domain
-	// gives a unique address that can never collide with a person's.
-	email := id.String() + "@external.invalid"
+	// The account belongs to the policy's tenant alone and stores the
+	// tenant-local key as its email, so the address cannot collide with
+	// another tenant's account. Only a verified address is kept as the one the
+	// issuer asserted: an unverified one could claim a person's address in
+	// this tenant. A machine token with none signs in under the key.
+	providerEmail := ""
 	if ext.Email != "" && auth.EmailVerified(token) {
-		email = ext.Email
+		providerEmail = ext.Email
 	}
 	var u *domain.User
 	seatErr, err = core.WriteWithAdminSeat(ctx, seats, id, roles, func(ctx context.Context) error {
 		var err error
-		u, err = users.EnsureExternalUser(ctx, id, email, auth.ExternalIssuerMarker, roles, tenant)
+		u, err = users.EnsureExternalUser(ctx, id, providerEmail, auth.ExternalIssuerMarker, roles, tenant)
 		return err
 	})
 	if seatErr != nil {
@@ -688,7 +689,7 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			// The driver's text names the email. The reason is enough here.
-			slog.WarnContext(ctx, "trusted issuer account refused: the email or tenant belongs to another account", "issuer", p.Issuer)
+			slog.WarnContext(ctx, "trusted issuer account refused: the address or tenant belongs to another account", "issuer", p.Issuer)
 			return nil, false, nil
 		}
 		slog.ErrorContext(ctx, "trusted issuer account unavailable", "issuer", p.Issuer)
@@ -709,7 +710,7 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 	}
 	return &auth.Claims{
 		UserID:           u.ID.String(),
-		Email:            u.Email,
+		Email:            u.SignInEmail(),
 		Roles:            u.Roles,
 		TenantID:         u.TenantID,
 		TokenType:        "session",
