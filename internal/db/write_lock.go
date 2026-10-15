@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -42,6 +43,30 @@ type writeTxKey struct{}
 func writeTx(ctx context.Context) *sql.Tx {
 	tx, _ := ctx.Value(writeTxKey{}).(*sql.Tx)
 	return tx
+}
+
+type afterCommitKey struct{}
+
+// afterCommitHooks holds what runs once a serialized write's transaction has
+// committed.
+type afterCommitHooks struct {
+	mu  sync.Mutex
+	fns []func(context.Context)
+}
+
+// afterCommit runs fn once the transaction a serialized write holds on ctx
+// commits, and not at all when it rolls back. Outside one it runs fn now.
+// fn gets the context the write was started with, which carries no
+// transaction, so it may query the pool.
+func afterCommit(ctx context.Context, fn func(context.Context)) {
+	hooks, _ := ctx.Value(afterCommitKey{}).(*afterCommitHooks)
+	if hooks == nil || writeTx(ctx) == nil {
+		fn(ctx)
+		return
+	}
+	hooks.mu.Lock()
+	hooks.fns = append(hooks.fns, fn)
+	hooks.mu.Unlock()
 }
 
 // SerializeWrite runs fn inside a transaction that holds an exclusive lock
@@ -148,13 +173,20 @@ func runWriteTx(ctx context.Context, pool DB, key string, fn func(context.Contex
 		}
 	}
 
-	if err := fn(context.WithValue(ctx, writeTxKey{}, tx)); err != nil {
+	hooks := &afterCommitHooks{}
+	if err := fn(context.WithValue(context.WithValue(ctx, writeTxKey{}, tx), afterCommitKey{}, hooks)); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("%s: commit: %w", label, err)
 	}
 	committed = true
+	hooks.mu.Lock()
+	fns := hooks.fns
+	hooks.mu.Unlock()
+	for _, after := range fns {
+		after(ctx)
+	}
 	return nil
 }
 
