@@ -95,6 +95,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: a content save the content table refuses answers 409 or 422 instead of saving an entry no read serves. gRPC writes and bulk imports take a relation under its declared name. A webhook retry the receiver accepted is sent once. On SQL Server, concurrent API key counts and quota writes no longer deadlock and drop the count.
 - Through the plugin releases this engine pins: a password reset longer than 72 bytes is refused before it spends the link, a first passkey registers on an account with no authenticator, a PII rule keeps priority 0, a region can be created closed and its coordinates cleared, a rate limit rule for every tenant can be saved, a media upload into a folder with dot segments works, and a storage provider whose keys will not decrypt is marked as such.
 - Through the flow plugin release this engine pins: a flow reads a relation whose pivot table has a bounded name instead of failing with `invalid pivot table name`.
+- Through the schema plugin release this engine pins: renaming a content type moves its pivot tables, their key columns, indexes and keys with it, so its relations and existing pairs work under the new name. A rename is refused with 409 when another tenant's definition relates to the type or defines the new name.
 
 ## [0.54.1] - 2026-10-11
 
