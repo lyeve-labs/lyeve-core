@@ -12,9 +12,11 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/plugintest"
 )
 
-// A subject request by address reaches the accounts a provider created in
-// every tenant, which keep the address in provider_email, as well as the
-// account that holds it as its email. Erasure clears both provider columns.
+// A subject request by address reaches the account a provider created in
+// each tenant, which keeps the address in provider_email, as well as the
+// account that holds it as its email. Export keeps to the tenant it runs
+// for. Erasure is by address across the install and clears both provider
+// columns.
 func TestSysUserSubject_ProviderEmailIsExportedAndErased(t *testing.T) {
 	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
 		ctx := context.Background()
@@ -35,19 +37,16 @@ func TestSysUserSubject_ProviderEmailIsExportedAndErased(t *testing.T) {
 			`INSERT INTO sys_users (email, password_hash, tenant_id) VALUES ($1, $2, $3)`, address, "hashed", "third")
 		require.NoError(t, err)
 
-		got, err := newSysUserExporter(host).ExportSubject(ctx, address)
-		require.NoError(t, err)
-		rows, ok := got["sys_users"].([]map[string]any)
-		require.True(t, ok, "%#v", got)
-		require.Len(t, rows, 3, "every tenant's account for the address")
-		local := 0
-		for _, row := range rows {
-			if row["provider_email"] == address {
-				local++
-				assert.Contains(t, row, "provider_seen_at")
+		for _, tenant := range []string{"acme", "brand", "third"} {
+			rows := exportedRows(t, host, tenant, address)
+			require.Len(t, rows, 1, "the account in %s", tenant)
+			if tenant == "third" {
+				assert.NotContains(t, rows[0], "provider_email")
+				continue
 			}
+			assert.Equal(t, address, rows[0]["provider_email"])
+			assert.Contains(t, rows[0], "provider_seen_at")
 		}
-		assert.Equal(t, 2, local)
 
 		n, err := newSysUserEraser(host).EraseSubject(ctx, address)
 		require.NoError(t, err)
@@ -66,8 +65,8 @@ func TestSysUserSubject_ProviderEmailIsExportedAndErased(t *testing.T) {
 			assert.Equal(t, 1, cleared, "both provider columns are cleared")
 		}
 
-		after, err := newSysUserExporter(host).ExportSubject(ctx, address)
-		require.NoError(t, err)
-		assert.Nil(t, after, "nothing is held for the address after erasure")
+		for _, tenant := range []string{"acme", "brand", "third"} {
+			assert.Nil(t, exportedRows(t, host, tenant, address), "nothing is held for the address in %s after erasure", tenant)
+		}
 	})
 }

@@ -37,15 +37,31 @@ func registerSysUserExporter(host core.Host) {
 	compliance.RegisterSubjectExporter(newSysUserExporter(host))
 }
 
-// ExportSubject returns the account record whose email or id matches
-// identifier, under the "sys_users" section. Returns (nil, nil) when nothing
-// matches.
+// ExportSubject returns the accounts of the tenant ctx names whose email, id
+// or provider address matches identifier, under the "sys_users" section.
+// Returns (nil, nil) when nothing matches.
+//
+// One address can hold an account in several tenants, and the DSAR
+// orchestrator runs every exporter once per tenant it covers. Each run
+// therefore keeps to its own tenant, or a tenant's export would carry another
+// tenant's accounts and a sweep would count each account once per tenant. An
+// account stored with no tenant acts in the default tenant, so the default
+// tenant's run exports it. A context naming no tenant is refused, because
+// the only answer it could give is every tenant's accounts.
 //
 // password_hash and token_version are withheld: a credential digest is not
 // portable subject data and handing it out weakens the account it protects.
 func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) (map[string]any, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return nil, nil
+	}
+	tenant, err := core.RequireTenantID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sys_users export: %w", err)
+	}
+	tenantCond := "tenant_id = $4"
+	if tenant == core.DefaultTenantSlug {
+		tenantCond = "tenant_id IN ($4, '')"
 	}
 
 	// The id column is UUID on Postgres and a fixed-width string elsewhere, so
@@ -73,14 +89,13 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 	// eraser gives: stored addresses are lower case, so a subject request
 	// naming Foo@x.com has to be folded before it can match, while the cast id
 	// is compared as supplied. An address also matches provider_email, where a
-	// tenant-local account keeps the address its provider asserted, so a
-	// person's accounts in every tenant come back.
+	// tenant-local account keeps the address its provider asserted.
 	address := core.NormalizeEmail(identifier)
 	rows, err := e.host.Querier(ctx).Query(ctx, fmt.Sprintf(`
 		SELECT %s, email, roles, tenant_id, disabled, expires_at, created_at, updated_at, provider_email, provider_seen_at
 		FROM sys_users
-		WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
-		address, identifier, address)
+		WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s AND %s`, idCast, idCast, boolFalse, tenantCond),
+		address, identifier, address, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("sys_users export: %w", err)
 	}

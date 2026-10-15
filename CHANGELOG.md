@@ -109,6 +109,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - An erasure reaches accounts that have no password, such as those a SAML sign-up creates. They used to be skipped and kept their address.
 - The token endpoint refuses a disabled or expired account, as the password sign-in does.
 - Through the plugin releases this engine pins: when a field turns rich text, the values stored before, in entries and in translations, are sanitized in the background, including a change made while a plugin was stopped. Rows a tenant migration import or a backup restore writes appear in the console, and after a restore that cleared tables the console drops entries whose rows are gone. An erasure by address reaches what the sign-in plugins keep about accounts a tenant's identity provider created, however the request capitalizes the address, clears the directory's stored copy of the person, and no longer fails on the second person erased from one directory.
+- A data subject export by address returns only the accounts of the tenants it covers. One address can hold an account in each of several tenants, and an export for one tenant also listed the other tenants' accounts, while an export of every tenant reported each tenant as matched and counted each account once per tenant. An account that names no tenant is exported with the default tenant.
 
 ## [0.54.1] - 2026-10-11
 
