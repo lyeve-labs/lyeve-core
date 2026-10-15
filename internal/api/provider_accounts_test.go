@@ -23,6 +23,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/tenant"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // eachProviderDialect runs fn against every dialect the run covers.
@@ -468,6 +469,44 @@ func TestPasswordLogin_PasswordlessAccountAnswersAsAFreeOne(t *testing.T) {
 				ratio := float64(median(times[name])) / float64(freeMedian)
 				assert.True(t, ratio >= 0.5 && ratio <= 2.0, "%s, %s hash: timing ratio %.2f, free %v", doorName, name, ratio, freeMedian)
 			}
+		}
+	})
+}
+
+// The tenant a request resolved by itself (a mapped hostname, the sole tenant,
+// a single-tenant install) decides which tenant-local account a password
+// sign-in reaches. The body's tenant field applies only where the request
+// resolved none, so a sign-in on one tenant's hostname never reaches another
+// tenant's account by naming it.
+func TestPasswordLogin_ResolvedTenantWinsOverTheBodyTenant(t *testing.T) {
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		users := db.NewUserStore(pool)
+		hash, err := auth.HashPassword("bcrypt", providerTestPassword)
+		require.NoError(t, err)
+		h := NewAuthHandler(users, nil, pool, "test-secret-at-least-32-bytes-long!!", 3600, false)
+		h.WithRiskBasedMFADisabled(true)
+
+		address := "resolved-" + uuid.NewString()[:8] + "@agency.example"
+		_, _, err = users.CreateTenantLocal(ctx, "brand", address, hash, nil, true)
+		require.NoError(t, err)
+
+		doors := map[string]func(http.ResponseWriter, *http.Request){"login": h.Login, "token": h.Token}
+		for doorName, door := range doors {
+			send := func(resolved, bodyTenant string) int {
+				body := fmt.Sprintf(`{"email":%q,"password":%q,"tenant":%q}`, address, providerTestPassword, bodyTenant)
+				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				if resolved != "" {
+					req = req.WithContext(core.WithTenantID(req.Context(), resolved))
+				}
+				rec := httptest.NewRecorder()
+				door(rec, req)
+				return rec.Code
+			}
+			assert.Equal(t, http.StatusUnauthorized, send("acme", "brand"), "%s: another tenant named in the body on acme's hostname", doorName)
+			assert.Equal(t, http.StatusOK, send("brand", ""), "%s: the account's own resolved tenant", doorName)
+			assert.Equal(t, http.StatusOK, send("", "brand"), "%s: the body names the tenant when none resolved", doorName)
 		}
 	})
 }

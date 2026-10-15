@@ -16,20 +16,21 @@ import (
 //
 // An account a tenant's provider created belongs to that tenant alone and
 // keeps the address in provider_email, so it is reachable only from a request
-// that names its tenant: the body's tenant field, or the tenant the request
-// resolved from its hostname, the sole tenant or a single-tenant install.
+// that names its tenant. The tenant the request resolved by itself (a mapped
+// hostname, the sole tenant, a single-tenant install) wins. The body's tenant
+// field names it only where the request resolved none, so a sign-in on one
+// tenant's hostname never reaches another tenant's account by naming it.
 // When a tenant is known that read runs first, whatever it finds, and the
 // install-wide email is the fallback. So an address another tenant's provider
 // account holds is answered as a free one: neither read can reach that row.
 //
-// A body tenant the engine never issues names no tenant. resolveActingTenant
-// refuses it later as it refuses any tenant the account is not in.
+// A body tenant the engine never issues names no tenant. The field still
+// chooses which of an account's own memberships the session acts in, which
+// resolveActingTenant decides and limits to those memberships.
 func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant string) (*domain.User, error) {
-	tenant := bodyTenant
-	if tenant == "" {
-		tenant = core.TenantIDFromCtx(ctx)
-	} else if !core.IsValidTenantSlug(tenant) {
-		tenant = ""
+	tenant := core.TenantIDFromCtx(ctx)
+	if tenant == "" && core.IsValidTenantSlug(bodyTenant) {
+		tenant = bodyTenant
 	}
 	if tenant != "" {
 		u, err := h.users.GetByTenantProviderEmail(ctx, tenant, email)
