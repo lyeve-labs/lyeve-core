@@ -255,7 +255,7 @@ func (a *adminTokenAuth) admit(r *http.Request, tok *core.AdminToken, ip string)
 	}
 	return &core.AuthClaims{
 		UserID:       owner.ID.String(),
-		Email:        owner.Email,
+		Email:        owner.SignInEmail(),
 		Roles:        tokenRoles(roles),
 		TenantID:     tok.TenantID,
 		TokenType:    "admin_token",

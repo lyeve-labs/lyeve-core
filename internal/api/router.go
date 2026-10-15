@@ -1224,6 +1224,8 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"PUT /api/admin/users/{id}/state",
 			"PUT /api/admin/users/{id}/password",
 			"DELETE /api/admin/users/{id}",
+			"GET /api/admin/auth/provider-window",
+			"PUT /api/admin/auth/provider-window",
 			"GET /api/admin/openapi.json",
 			"GET /api/admin/openapi/public.json",
 			"GET /api/admin/openapi/admin.json",

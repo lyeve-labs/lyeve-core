@@ -1254,3 +1254,30 @@ func (h *ScopedHost) Capabilities() CapabilitySet {
 func (h *ScopedHost) HasFeature(ctx context.Context, feature string) bool {
 	return h.inner.HasFeature(ctx, feature)
 }
+
+// ProviderWindowDays forwards to inner if it implements
+// ProviderWindowProvider. A host without one reports the default window.
+func (h *ScopedHost) ProviderWindowDays(ctx context.Context, tenantID string) (int, error) {
+	if p, ok := h.inner.(ProviderWindowProvider); ok {
+		return p.ProviderWindowDays(ctx, tenantID)
+	}
+	return ProviderWindowDefaultDays, nil
+}
+
+// ProviderWindowAdmitsAccount forwards to inner if it implements
+// ProviderWindowProvider. A host without one applies the default window.
+func (h *ScopedHost) ProviderWindowAdmitsAccount(ctx context.Context, tenantID string, seenAt *time.Time) (bool, error) {
+	if p, ok := h.inner.(ProviderWindowProvider); ok {
+		return p.ProviderWindowAdmitsAccount(ctx, tenantID, seenAt)
+	}
+	return ProviderWindowAdmits(seenAt, ProviderWindowDefaultDays, time.Now()), nil
+}
+
+// TenantAccounts forwards to inner if it implements TenantAccountProvider.
+// Nil when the host keeps no accounts.
+func (h *ScopedHost) TenantAccounts() TenantAccountStore {
+	if p, ok := h.inner.(TenantAccountProvider); ok {
+		return p.TenantAccounts()
+	}
+	return nil
+}

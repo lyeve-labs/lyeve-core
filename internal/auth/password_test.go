@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"sort"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,5 +37,33 @@ func TestDummyBcryptHash_CostMatchesTheCostRealHashesUse(t *testing.T) {
 	}
 	if realCost != cost {
 		t.Errorf("real hash cost = %d, dummy = %d", realCost, cost)
+	}
+}
+
+// An account with no password stores an empty hash or a marker, and a sign-in
+// attempt against it is refused. The refusal costs the bcrypt compare an
+// unknown address gets, or a fast answer tells the caller the account exists.
+func TestVerifyPassword_RefusedHashesCostOneBcrypt(t *testing.T) {
+	medianOf := func(hash string) time.Duration {
+		var took []time.Duration
+		for i := 0; i < 7; i++ {
+			start := time.Now()
+			_ = VerifyPassword("bcrypt", hash, "not-the-password")
+			took = append(took, time.Since(start))
+		}
+		sort.Slice(took, func(i, j int) bool { return took[i] < took[j] })
+		return took[len(took)/2]
+	}
+	unknown := medianOf(DummyBcryptHash)
+	for _, hash := range []string{"", OAuthOnlyMarker, ExternalIssuerMarker} {
+		if err := VerifyPassword("bcrypt", hash, "not-the-password"); err == nil {
+			t.Errorf("hash %q verified a password", hash)
+		}
+		if err := VerifyPassword("bcrypt", hash, ""); err == nil {
+			t.Errorf("hash %q verified an empty password", hash)
+		}
+		if got := medianOf(hash); float64(got) < 0.5*float64(unknown) {
+			t.Errorf("hash %q is refused in %v, an unknown address costs %v", hash, got, unknown)
+		}
 	}
 }

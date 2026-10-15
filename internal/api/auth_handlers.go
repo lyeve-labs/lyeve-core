@@ -249,7 +249,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.GetByEmail(r.Context(), body.Email)
+	user, err := h.passwordAccount(r.Context(), body.Email, body.Tenant)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			// Enumeration prevention: unknown email -> dummy bcrypt compare.
@@ -342,12 +342,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// expired is not enough on its own: a caller holding the correct password
 	// still learns the account exists and is locked if the code differs from
 	// the credentials-failure path.
-	if user.Disabled {
-		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-		return
-	}
-	if user.ExpiresAt != nil && time.Now().After(*user.ExpiresAt) {
-		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+	if !h.respondIfPasswordSignInRefused(w, r, user) {
 		return
 	}
 
@@ -426,7 +421,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Enforce MFA when risk assessment demands it OR user has MFA enabled
 	if enforceMFA || mfaEnabled {
 		// Issue challenge token: even if the user didn't opt into MFA, risk escalation forces it.
-		challengeToken, err := auth.SignChallenge(h.jwtSecret, user.ID, user.Email, actingRoles, actingTenant)
+		challengeToken, err := auth.SignChallenge(h.jwtSecret, user.ID, user.SignInEmail(), actingRoles, actingTenant)
 		if err != nil {
 			respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeChallengeFailed, nil)
 			return
@@ -456,7 +451,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.warnIfTenantMissing(r.Context(), actingTenant, user.Email)
 
 	// Login: no MFA required, issue full session token
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, actingRoles, actingTenant, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -658,7 +653,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	if h.users != nil {
 		if u, err := h.users.GetByID(r.Context(), userID); err == nil {
 			liveUser = u
-			liveEmail = u.Email
+			liveEmail = u.SignInEmail()
 			liveRoles = u.Roles
 			liveTenantID = u.TenantID
 

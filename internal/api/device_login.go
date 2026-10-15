@@ -567,13 +567,13 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 		return
 	}
 
-	token, err := auth.Sign(h.auth.jwtSecret, h.auth.expirySecs, user.ID, user.Email, roles, tenant, user.TokenVersion)
+	token, err := auth.Sign(h.auth.jwtSecret, h.auth.expirySecs, user.ID, user.SignInEmail(), roles, tenant, user.TokenVersion)
 	if err != nil {
 		httpx.ErrorReq(w, r, http.StatusInternalServerError, "Could not complete the sign-in.")
 		return
 	}
 	actor := context.WithValue(core.WithTenantID(ctx, tenant), core.ClaimsKey,
-		&core.AuthClaims{UserID: user.ID.String(), Email: user.Email, Roles: roles, TenantID: tenant})
+		&core.AuthClaims{UserID: user.ID.String(), Email: user.SignInEmail(), Roles: roles, TenantID: tenant})
 	h.audit(actor, "auth.device_login.exchange", d, clientIP(r), r.UserAgent())
 	// The session starts on a device and an address the account may never
 	// have used, so the device risk history hears of it as it hears of a

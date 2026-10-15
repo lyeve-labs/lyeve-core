@@ -54,14 +54,23 @@ const DummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL1
 //   - "$argon2id$..." -> argon2id
 //   - "$2a$..." / "$2b$..." -> bcrypt
 //
-// The special sentinel OAuthOnlyMarker is rejected immediately: these accounts
-// are OAuth-only and password authentication is disabled.
+// An account with no password is always refused: an empty hash (SAML and
+// SCIM accounts), OAuthOnlyMarker and ExternalIssuerMarker. The refusal still
+// runs one bcrypt compare against DummyBcryptHash, so it costs what an unknown
+// address costs and its timing does not reveal that the account exists.
 func VerifyPassword(_, hash, password string) error {
-	if hash == OAuthOnlyMarker {
-		return errors.New("account is oauth-only: no password authentication")
+	var refused error
+	switch hash {
+	case "":
+		refused = errors.New("account has no password: no password authentication")
+	case OAuthOnlyMarker:
+		refused = errors.New("account is oauth-only: no password authentication")
+	case ExternalIssuerMarker:
+		refused = errors.New("account belongs to a trusted issuer: no password authentication")
 	}
-	if hash == ExternalIssuerMarker {
-		return errors.New("account belongs to a trusted issuer: no password authentication")
+	if refused != nil {
+		_ = bcrypt.CompareHashAndPassword([]byte(DummyBcryptHash), []byte(password)) // timing only, the result is discarded
+		return refused
 	}
 	if strings.HasPrefix(hash, "$argon2id$") {
 		return verifyArgon2id(hash, password)

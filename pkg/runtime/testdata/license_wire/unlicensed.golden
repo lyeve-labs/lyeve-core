@@ -710,6 +710,82 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/auth/provider-window": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Days an account created by the tenant's identity provider may still sign in by password, reset or magic link after the provider last signed it in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "days": 30
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Days outside 0 to 365, or not a whole number"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Set the provider window, a whole number of days from 0 to 365. 0 means only through the identity provider",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
     "/api/admin/auth/refresh": {
       "post": {
         "description": "Rotates the refresh token and issues a new access token. Rate limited.",

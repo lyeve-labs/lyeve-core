@@ -290,6 +290,19 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		}, super...),
 	}
 
+	// Admin API: the provider window of the request's tenant
+	paths["/api/admin/auth/provider-window"] = openAPIPath{
+		"get": requiringRoles(&openAPIOperation{
+			Tags: []string{"Admin / Auth"}, Summary: "Days an account created by the tenant's identity provider may still sign in by password, reset or magic link after the provider last signed it in", Security: bothAuth,
+			Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
+		}, admins...),
+		"put": requiringRoles(&openAPIOperation{
+			Tags: []string{"Admin / Auth"}, Summary: "Set the provider window, a whole number of days from 0 to 365. 0 means only through the identity provider", Security: bothAuth,
+			RequestBody: jsonBody(map[string]any{"days": 30}),
+			Responses:   map[string]any{"200": ok200, "401": err401, "403": err403, "422": map[string]any{"description": "Days outside 0 to 365, or not a whole number"}},
+		}, admins...),
+	}
+
 	// Admin API: configuration
 	paths["/api/admin/config"] = openAPIPath{
 		"get": requiringRoles(&openAPIOperation{

@@ -14,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
@@ -116,7 +117,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.GetByEmail(r.Context(), body.Email)
+	user, err := h.passwordAccount(r.Context(), body.Email, body.Tenant)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			// Enumeration prevention: unknown email -> dummy bcrypt compare.
@@ -180,13 +181,17 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.respondIfPasswordSignInRefused(w, r, user) {
+		return
+	}
+
 	actingTenant, actingRoles, err := h.resolveActingTenant(r.Context(), user, body.Tenant)
 	if err != nil {
 		respondTenantResolution(w, r, err)
 		return
 	}
 
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, actingRoles, actingTenant, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -341,7 +346,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, actingRoles, actingTenant, user.TokenVersion)
+	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -364,14 +369,20 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeUser strips password_hash from the response.
+//
+// A tenant-local account answers with the address its provider asserted as
+// its email, so a console keeps one shape for every account, and tenant_local
+// marks it: the account belongs to its tenant alone and its stored email is a
+// key.
 func safeUser(u *domain.User) map[string]any {
 	out := map[string]any{
-		"id":         u.ID.String(),
-		"email":      u.Email,
-		"roles":      u.Roles,
-		"tenant_id":  u.TenantID,
-		"disabled":   u.Disabled,
-		"created_at": u.CreatedAt,
+		"id":           u.ID.String(),
+		"email":        u.SignInEmail(),
+		"tenant_local": core.IsTenantLocalEmail(u.ID, u.Email),
+		"roles":        u.Roles,
+		"tenant_id":    u.TenantID,
+		"disabled":     u.Disabled,
+		"created_at":   u.CreatedAt,
 	}
 	if u.ExpiresAt != nil {
 		out["expires_at"] = u.ExpiresAt

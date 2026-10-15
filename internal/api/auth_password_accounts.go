@@ -1,0 +1,82 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
+)
+
+// passwordAccount finds the account a password login names by address.
+//
+// An account a tenant's provider created belongs to that tenant alone and
+// keeps the address in provider_email, so it is reachable only from a request
+// that names its tenant. The tenant the request resolved by itself (a mapped
+// hostname, the sole tenant, a single-tenant install) wins. The body's tenant
+// field names it only where the request resolved none, so a sign-in on one
+// tenant's hostname never reaches another tenant's account by naming it.
+// When a tenant is known that read runs first, whatever it finds, and the
+// install-wide email is the fallback. So an address another tenant's provider
+// account holds is answered as a free one: neither read can reach that row.
+//
+// A body tenant the engine never issues names no tenant. The field still
+// chooses which of an account's own memberships the session acts in, which
+// resolveActingTenant decides and limits to those memberships.
+func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant string) (*domain.User, error) {
+	tenant := core.TenantIDFromCtx(ctx)
+	if tenant == "" && core.IsValidTenantSlug(bodyTenant) {
+		tenant = bodyTenant
+	}
+	if tenant != "" {
+		u, err := h.users.GetByTenantProviderEmail(ctx, tenant, email)
+		if err == nil {
+			return u, nil
+		}
+		if !errors.Is(err, domain.ErrNotFound) {
+			return nil, err
+		}
+	}
+	return h.users.GetByEmail(ctx, email)
+}
+
+// respondIfPasswordSignInRefused answers a password sign-in for an account
+// that may not sign in by password, and reports whether the sign-in may go
+// on. A disabled or expired account, and a provider account outside its
+// tenant's window, are each answered exactly as a wrong password is. The
+// caller has already run the password compare, so the timing matches too.
+func (h *AuthHandler) respondIfPasswordSignInRefused(w http.ResponseWriter, r *http.Request, user *domain.User) bool {
+	if user.Disabled || (user.ExpiresAt != nil && time.Now().After(*user.ExpiresAt)) {
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return false
+	}
+	admitted, err := h.providerWindowAdmits(r.Context(), user)
+	if err != nil {
+		slog.WarnContext(r.Context(), "provider window read failed", "err", err, "user_id", user.ID)
+		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		return false
+	}
+	if !admitted {
+		slog.InfoContext(r.Context(), "password sign-in refused: the provider has not signed the account in within its tenant's window",
+			"user_id", user.ID, "tenant", user.TenantID)
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return false
+	}
+	return true
+}
+
+// providerWindowAdmits reports whether user is inside its tenant's provider
+// window. An account no provider vouches for always is.
+func (h *AuthHandler) providerWindowAdmits(ctx context.Context, user *domain.User) (bool, error) {
+	if user.ProviderSeenAt == nil {
+		return true, nil
+	}
+	if h.providerWindows == nil {
+		return core.ProviderWindowAdmits(user.ProviderSeenAt, core.ProviderWindowDefaultDays, time.Now()), nil
+	}
+	return h.providerWindows.ProviderWindowAdmitsAccount(ctx, user.TenantID, user.ProviderSeenAt)
+}
