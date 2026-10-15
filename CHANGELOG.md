@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - On an install with several tenants, an account that a tenant's identity provider, its directory or a self sign-up creates belongs to that tenant alone. It is found by the tenant and its address, so the same address can name a different account in each tenant, and a sign-up, a password reset or a magic link in one tenant no longer reveals whether another tenant holds the address. The sign-in plugins take part through the releases this engine pins.
 - A sign-in refused because the account has no password, or signs in only through its identity provider, takes as long as a sign-in for an address nobody holds.
 - The tenant a request resolves from its hostname decides which tenant's account a password sign-in or a token request reaches. A tenant named in the request body no longer overrides it.
+- Through the plugin releases this engine pins: a SAML sign-in never signs in an account that holds the super admin role, whichever way the account was found, and a user the directory deactivated is refused at SSO sign-in however the directory capitalized the address. A magic link requested with a tenant named in the request body never creates an account, and password reset and magic link requests answer in one timing class whether or not the tenant holds the address.
 
 ### Added
 
@@ -53,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A tenant purge handler can learn whether the tenant delete it ran in committed or rolled back, through `core.OnTenantPurgeOutcome` on the context the delete hands it. Work a handler does outside the database can then wait for the commit. Handlers that do not ask behave as before.
 - A free install refused another admin seat gets a link to where that ceiling is lifted, in the refusal body and its upgrade header, when the build's licensing names one. A link that is neither https nor a console path is dropped, and a build whose licensing names none refuses as before.
 - Each tenant sets how many days an account its identity provider created may still sign in with a password, a reset or a magic link after its last sign-in through that provider, from 0 to 365 with 30 as the default, through `GET` and `PUT /api/admin/auth/provider-window`. 0 allows sign-in through the provider only. Only a signed-in session can read or change it, a tenant admin changes only their own tenant, and each change is audited with the old and new values.
+- Through the plugin releases this engine pins: a tenant's admin can abandon a content type rename that stopped partway and cannot finish, which puts every part it moved back under the old name and frees both names. A refusal at a free ceiling on tenants, a tenant's admin seats, OAuth providers, review workflows or locales carries a link to the pricing page opened on the add-on that lifts it. The content and localization plugins list a tenant's pending rich text repairs.
 
 ### Changed
 
@@ -106,6 +108,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - An engine pointed at a MySQL database created the way the documentation describes starts and completes setup. It turns on the driver's time parsing even when the URL leaves it out or turns it off, gives a database it has not yet installed into the collation its tables need, and takes its migration lock on MySQL 9, which has no MD5 function. A database that already holds the engine's tables under another collation is left as it is, with a warning.
 - An erasure reaches accounts that have no password, such as those a SAML sign-up creates. They used to be skipped and kept their address.
 - The token endpoint refuses a disabled or expired account, as the password sign-in does.
+- Through the plugin releases this engine pins: when a field turns rich text, the values stored before, in entries and in translations, are sanitized in the background, including a change made while a plugin was stopped. Rows a tenant migration import or a backup restore writes appear in the console, and after a restore that cleared tables the console drops entries whose rows are gone. An erasure by address reaches what the sign-in plugins keep about accounts a tenant's identity provider created, however the request capitalizes the address, clears the directory's stored copy of the person, and no longer fails on the second person erased from one directory.
 
 ## [0.54.1] - 2026-10-11
 
