@@ -213,3 +213,46 @@ func providerColumns(t *testing.T, pool db.DB) int {
 	require.NoError(t, pool.SQLDB().QueryRowContext(context.Background(), q).Scan(&n))
 	return n
 }
+
+// A DATETIME keeps no offset, so a provider stamp written under one MySQL
+// location and read under another could come back hours off, which the
+// day-sized window would hide. Under every location a DATABASE_URL may name,
+// and a session time zone off UTC, a stamp written through one connection
+// reads back through another within a second of when it was written.
+func TestStampProviderSeen_MySQLRoundTripsUnderAnyLocation(t *testing.T) {
+	if testing.Short() || !testdb.ShouldTest("mysql") {
+		t.Skip("CI_DIALECT != mysql")
+	}
+	base, dsn := testdb.MySQLWithDSN(t)
+	saved := time.Local
+	time.Local = time.FixedZone("UTC+9", 9*3600)
+	t.Cleanup(func() { time.Local = saved })
+
+	for _, extra := range []string{"", "&loc=Local", "&loc=Asia%2FTokyo", "&loc=Local&time_zone=%27%2B09%3A00%27"} {
+		t.Run(extra, func(t *testing.T) {
+			ctx := context.Background()
+			pool, err := db.Connect(ctx, dsn+extra, 2)
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = pool.Close() })
+			other, plain := db.NewUserStore(pool), db.NewUserStore(base)
+
+			for _, c := range []struct {
+				name        string
+				write, read *db.UserStore
+			}{
+				{"written here, read plain", other, plain},
+				{"written plain, read here", plain, other},
+			} {
+				u, _, err := c.write.CreateTenantLocal(ctx, "acme", "loc-"+uuid.NewString()[:8]+"@agency.example", "", nil, false)
+				require.NoError(t, err)
+				require.NoError(t, c.write.StampProviderSeen(ctx, "acme", u.ID))
+				stamped := time.Now()
+
+				got, err := c.read.GetByID(ctx, u.ID)
+				require.NoError(t, err)
+				require.NotNil(t, got.ProviderSeenAt, c.name)
+				assert.WithinDuration(t, stamped, *got.ProviderSeenAt, time.Second, c.name)
+			}
+		})
+	}
+}
