@@ -156,7 +156,7 @@ func configSaveHandler(store *db.PluginConfigStore, reloader PluginConfigReloade
 		// Merged onto what is already stored rather than replacing it: a save
 		// carries the fields one screen edited, and a concurrent save of other
 		// keys must survive it.
-		if err := store.Merge(r.Context(), config.CoreSettingsOwner, accepted, actorID(r)); err != nil {
+		if _, err := store.Merge(r.Context(), config.CoreSettingsOwner, accepted, actorID(r)); err != nil {
 			if errors.Is(err, db.ErrNoSealer) {
 				httpx.ErrorReq(w, r, http.StatusPreconditionFailed,
 					"cannot store a credential without an encryption key: set ENCRYPTION_KEY")

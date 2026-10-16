@@ -142,8 +142,15 @@ func (s *PluginConfigStore) Set(ctx context.Context, pluginName string, cfg map[
 // merges of different keys at the same time both land: without it, each would
 // write back the row it read and the later one would drop the earlier one's
 // key.
-func (s *PluginConfigStore) Merge(ctx context.Context, pluginName string, values map[string]any, updatedBy *uuid.UUID) error {
-	return WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {
+//
+// It returns the configuration as it stood before the merge, read under the
+// lock and with every top-level credential replaced by SecretMask, as Get does,
+// and an empty map when there was no row. A caller that records what it
+// changed reads the old value here: read before the lock, it can be a value a
+// concurrent merge has already replaced.
+func (s *PluginConfigStore) Merge(ctx context.Context, pluginName string, values map[string]any, updatedBy *uuid.UUID) (map[string]any, error) {
+	var prior map[string]any
+	err := WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {
 		// Created first because a row lock needs a row: two writers that both
 		// found none would each write a row of their own keys alone.
 		if _, err := s.pool.Exec(ctx, PluginConfigCreateSQL(s.pool.Engine()), tenant.ID(ctx), pluginName); err != nil {
@@ -154,12 +161,17 @@ func (s *PluginConfigStore) Merge(ctx context.Context, pluginName string, values
 			return err
 		}
 		// Credentials go in masked, and Set keeps the stored value for a mask.
+		prior = maskValues(stored)
 		merged := maskValues(stored)
 		for key, value := range values {
 			merged[key] = value
 		}
 		return s.Set(ctx, pluginName, merged, updatedBy)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return prior, nil
 }
 
 // Delete removes a plugin's stored configuration, returning it to schema
