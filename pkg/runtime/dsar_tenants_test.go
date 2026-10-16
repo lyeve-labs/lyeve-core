@@ -58,3 +58,14 @@ func TestDSARTenantLister_SweepReachesTheDefaultTenantOffTheRoster(t *testing.T)
 		})
 	}
 }
+
+// A roster that already lists the default tenant comes back unchanged. A
+// second entry would run every exporter twice under one tenant.
+func TestDSARTenantLister_RosterHoldingTheDefaultTenantListsItOnce(t *testing.T) {
+	roster := func(context.Context) ([]string, error) {
+		return []string{"acme", core.DefaultTenantSlug, "brand"}, nil
+	}
+	tenants, err := dsarTenantLister(roster)(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"acme", core.DefaultTenantSlug, "brand"}, tenants)
+}
