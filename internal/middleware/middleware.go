@@ -308,8 +308,13 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			tenantID := ""
 			// Domain routing ran above and left the host's tenant on the core
 			// key, which the credential's tenant replaces below. A sign-in
-			// handler still needs the host's answer, so it is kept apart.
+			// handler still needs the host's answer, so it is kept apart. A
+			// tenant the resolver picked without the host naming it, such as
+			// the only tenant an install has, is not the host's.
 			hostTenant := core.TenantIDFromCtx(r.Context())
+			if core.IsFallbackTenant(r.Context()) {
+				hostTenant = ""
+			}
 
 			if claims, ok := r.Context().Value(auth.ClaimsKey).(*auth.Claims); ok && claims != nil {
 				// On a multi-tenant install a token naming its tenant in a
