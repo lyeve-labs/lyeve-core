@@ -76,6 +76,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- A handler can read which tenant the request's host belongs to even when the request carries another tenant's session. The session's tenant still decides where the request acts, so a sign-in completed on one tenant's domain could not tell that it was running for another tenant.
 - The content change stream stays open past the server's write timeout. It ended after 15 seconds, so a change made after that point was lost. The stream now moves its deadline forward before every write and sends a heartbeat comment every 10 seconds, which also keeps proxies from closing a quiet stream.
 - Through the multitenant plugin release this engine pins: a backup restore test no longer deletes the tenant's data. It restored the newest backup over the tenant itself, so every change since that backup was lost. It now checks the backup without writing anything. Scheduled backups and restore tests also run on their schedules, which nothing did before.
 - Through the multitenant plugin release this engine pins: a backup import accepts a dump of up to 500 MiB and a backup validate one of up to 50 MiB, the limits those routes document, and a larger body answers `413` in JSON. A clone whose client disconnects partway removes its target tenant, and the JSON Lines and portable dump exports have ten minutes to finish instead of stopping at the admin listener's 30-second write deadline.
