@@ -1145,18 +1145,13 @@ func normalizeContentTime(v any) any {
 }
 
 // dataColumnExpr returns the SQL expression that extracts user-defined columns
-// as a JSON value, aliased as "data". PostgreSQL uses to_jsonb, and MySQL/MSSQL
-// uses JSON_OBJECT built from the schema field list.
+// as a JSON value, aliased as "data". Every dialect builds it from the schema
+// field list, never from the row: a removed field keeps its column until the
+// drop is applied, and the definition is what a reader is served.
 // Column-name references are dialect-quoted (backticks/brackets/double-quotes)
 // via QuoteIdentifier so reserved-word field names (order, group, key, etc.)
 // do not cause syntax errors.
 func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
-	if engine == "postgres" {
-		// tenant_id is an isolation marker, never user data: exclude it from
-		// the returned JSON object.
-		return fmt.Sprintf("(to_jsonb(%s) - 'id' - 'created_at' - 'updated_at' - '%s') AS data", alias, TenantColumnName)
-	}
-	// MySQL / MSSQL: build a JSON object from known schema columns.
 	d := dialect.Must(engine)
 	qi := d.QuoteIdentifier
 	cols := make([]string, 0, len(sc.Fields)+3)
@@ -1165,8 +1160,7 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 			continue
 		}
 		// Virtual relations (has_one, has_many, many_to_many) hold no column
-		// on this table. PostgreSQL's to_jsonb never emits them, and the
-		// physical column does not exist to reference here.
+		// on this table to reference.
 		if f.FieldType == "relation" &&
 			(f.RelationType == domain.RelHasOne || f.RelationType == domain.RelHasMany || f.RelationType == domain.RelManyToMany) {
 			continue
@@ -1182,6 +1176,21 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 	}
 	if sc.WithLocalization {
 		cols = append(cols, "_locale")
+	}
+
+	if engine == "postgres" {
+		// jsonb_build_object takes at most 50 pairs, so the row is projected
+		// through a subquery whose column names become the keys. A bare d
+		// would resolve to a column named d, a field or a foreign key, before
+		// the subquery's row, so the row is written d.*.
+		if len(cols) == 0 {
+			return "'{}'::jsonb AS data"
+		}
+		sel := make([]string, len(cols))
+		for i, col := range cols {
+			sel[i] = alias + "." + qi(col) + " AS " + qi(col)
+		}
+		return "(SELECT to_jsonb(d.*) FROM (SELECT " + strings.Join(sel, ", ") + ") d) AS data"
 	}
 
 	if engine == "mssql" {

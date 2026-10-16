@@ -16,16 +16,25 @@ func TestDataColumnExpr_Postgres(t *testing.T) {
 			{Name: "title", FieldType: "text"},
 			{Name: "order", FieldType: "number"},
 			{Name: "group", FieldType: "text"},
+			{Name: "owner", FieldType: "relation", RelationType: domain.RelBelongsTo, RelationTo: "people", RelationFKName: "d"},
 		},
 	}
 	expr := dataColumnExpr("postgres", sc, "r")
 
-	// PG uses to_jsonb: no JSON_OBJECT, no dialect quoting needed.
-	if !strings.Contains(expr, "to_jsonb(r)") {
-		t.Errorf("expected to_jsonb(r) in expression, got: %s", expr)
+	// The object names each field: to_jsonb of the whole row would also serve
+	// a removed field whose drop is still pending.
+	for _, col := range []string{`r."title" AS "title"`, `r."order" AS "order"`, `r."group" AS "group"`} {
+		if !strings.Contains(expr, col) {
+			t.Errorf("%s not projected in: %s", col, expr)
+		}
 	}
-	if strings.Contains(expr, "JSON_OBJECT") {
-		t.Errorf("PG should not use JSON_OBJECT, got: %s", expr)
+	if strings.Contains(expr, "to_jsonb(r)") {
+		t.Errorf("PG must not serialize the whole row, got: %s", expr)
+	}
+	// A bare d would name the column d, a field or a foreign key, instead of
+	// the projected row, and the entry would become that one value.
+	if !strings.Contains(expr, "to_jsonb(d.*)") {
+		t.Errorf("PG must serialize the projected row as d.*, got: %s", expr)
 	}
 }
 
