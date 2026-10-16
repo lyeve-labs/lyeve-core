@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/internal/testhost"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -157,6 +159,108 @@ func TestSettingsRow_OverlappingWritersOfDifferentKeysBothLand(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+// The three writers race: each runs twice at once, all six released together,
+// over rounds that alternate between a stored row and none. Every round ends
+// with every writer's key in the row and the keys none of them touched still
+// there, and no write fails. Without the row lock a writer writes back a row
+// read before another's write, which this loses a few dozen keys to on every
+// dialect, SQL Server included, where the ordered test above cannot lose one.
+//
+// The pool holds twelve connections, so the six writers can all be in the
+// database at once, and the test asserts that six were.
+func TestSettingsRow_RacingWritersLoseNoKey(t *testing.T) {
+	withResolver(t, nil)
+	const rounds, copies, conns = 60, 2, 12
+	for name, open := range map[string]func(*testing.T, int) db.DB{
+		"postgres": testdb.PostgresWithMaxConns, "mysql": testdb.MySQLWithMaxConns, "mssql": testdb.MSSQLWithMaxConns,
+	} {
+		if !testdb.ShouldTest(name) {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			pool := open(t, conns)
+			store := db.NewPluginConfigStore(pool).WithSealer(db.NewConfigSealer("test-master-key-for-settings-row-writers"))
+			ctx := core.WithTenantID(context.Background(), "default")
+			actor := uuid.NewString()
+			ctx = context.WithValue(ctx, auth.ClaimsKey, &auth.Claims{UserID: actor, Roles: []string{"super_admin"}, TenantID: "default"})
+			ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{UserID: actor, Roles: []string{"super_admin"}, TenantID: "default"})
+			writers := settingsRowWriters(pool, store)
+
+			stop, sampled := make(chan struct{}), make(chan int, 1)
+			go func() {
+				peak := 0
+				tick := time.NewTicker(time.Millisecond)
+				defer tick.Stop()
+				for {
+					select {
+					case <-stop:
+						sampled <- peak
+						return
+					case <-tick.C:
+						peak = max(peak, pool.Stats().InUse)
+					}
+				}
+			}()
+
+			lost, failed := 0, 0
+			var firstFailure error
+			for round := range rounds {
+				existing := round%2 == 0
+				require.NoError(t, store.Delete(ctx, config.CoreSettingsOwner))
+				if existing {
+					require.NoError(t, store.Set(ctx, config.CoreSettingsOwner, map[string]any{
+						"CORS_ORIGINS":     "https://www.example.com",
+						"EXAMPLE_PASSWORD": "kept-secret",
+					}, nil))
+				}
+
+				start := make(chan struct{})
+				errs := make(chan error, len(writers)*copies)
+				var wg sync.WaitGroup
+				for _, w := range writers {
+					for range copies {
+						wg.Go(func() {
+							<-start
+							errs <- w.run(ctx)
+						})
+					}
+				}
+				close(start)
+				wg.Wait()
+				close(errs)
+				for err := range errs {
+					if err != nil {
+						failed++
+						if firstFailure == nil {
+							firstFailure = err
+						}
+					}
+				}
+
+				got, err := store.GetResolved(ctx, config.CoreSettingsOwner)
+				require.NoError(t, err)
+				for _, w := range writers {
+					if got[w.key] != w.want {
+						lost++
+					}
+				}
+				if existing {
+					for key, want := range map[string]any{"CORS_ORIGINS": "https://www.example.com", "EXAMPLE_PASSWORD": "kept-secret"} {
+						if got[key] != want {
+							lost++
+						}
+					}
+				}
+			}
+			close(stop)
+
+			assert.Zero(t, failed, "%d writes failed, the first with: %v", failed, firstFailure)
+			assert.Zero(t, lost, "%d keys were lost over %d rounds", lost, rounds)
+			assert.GreaterOrEqual(t, <-sampled, len(writers)*copies, "the writers never held their sessions at once, so they did not race")
 		})
 	}
 }
