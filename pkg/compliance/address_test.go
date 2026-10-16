@@ -64,9 +64,12 @@ func TestAddressTextForms_PlainThenEscapedOnceAndTwice(t *testing.T) {
 		want    []string
 	}{
 		{"ann@x.example", []string{"ann@x.example"}},
-		{"josé@x.example", []string{"josé@x.example"}},
 		{"a&b@x.example", []string{"a&b@x.example", `a\u0026b@x.example`, `a\\u0026b@x.example`}},
 		{`"a b"@x.example`, []string{`"a b"@x.example`, `\"a b\"@x.example`, `\\\"a b\\\"@x.example`}},
+		{"jos\u00e9@x.example", []string{"jos\u00e9@x.example", "jose\u0301@x.example"}},
+		{"Jos\u00e9@X.Example", []string{"Jos\u00e9@X.Example", "jose\u0301@x.example"}},
+		{"Ann@X.Example", []string{"Ann@X.Example"}},
+		{"jos\u00e9&b@x.example", []string{"jos\u00e9&b@x.example", "jose\u0301&b@x.example", "jos\u00e9\\u0026b@x.example", "jos\u00e9\\\\u0026b@x.example"}},
 	} {
 		assert.Equal(t, tc.want, compliance.AddressTextForms(tc.address), tc.address)
 	}
@@ -124,6 +127,31 @@ func TestNamesAddress_WholeAddressOnly(t *testing.T) {
 		{``, false},
 	} {
 		assert.Equal(t, tc.want, compliance.NamesAddress(tc.payload, "ann@x.example"), tc.payload)
+	}
+}
+
+// The text can spell the address in another Unicode form than the request:
+// decomposed, or with a capital the database folds differently from Go. A
+// collation LIKE caught those rows, so the confirmation compares in the form
+// SameAddress uses and keeps the boundary rules.
+func TestNamesAddress_AnyUnicodeForm(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, text, address string
+		want                bool
+	}{
+		{"decomposed text", `{"to":"jose\u0301@x.example"}`, "jos\u00e9@x.example", true},
+		{"decomposed request", `{"to":"jos\u00e9@x.example"}`, "jose\u0301@x.example", true},
+		{"dotted capital I in the text", `{"to":"\u0130nci@x.example"}`, "inci@x.example", true},
+		{"decomposed dotted capital I in the text", "I\u0307nci@x.example", "inci@x.example", true},
+		{"capital sharp s in the text", `{"to":"STRA\u1e9eE@X.EXAMPLE"}`, "stra\u00dfe@x.example", true},
+		{"decomposed text inside a JSON body", mustJSON(t, map[string]any{"body": mustJSON(t, map[string]any{"to": "Jose\u0301 <jose\u0301@x.example>"})}), "jos\u00e9@x.example", true},
+		{"decomposed accent is another person", `{"to":"jose\u0301@x.example"}`, "jose@x.example", false},
+		{"dotless i is another person", `{"to":"\u0131nci@x.example"}`, "\u0130nci@x.example", false},
+		{"decomposed letter before the match", "e\u0301ann@x.example", "ann@x.example", false},
+		{"decomposed longer address", `{"to":"jo\u0301ann@x.example"}`, "ann@x.example", false},
+	} {
+		assert.Equal(t, tc.want, compliance.NamesAddress(tc.text, tc.address), tc.name)
 	}
 }
 

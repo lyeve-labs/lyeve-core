@@ -90,14 +90,24 @@ var dottedCapitalI = strings.NewReplacer("\u0130", "I")
 // escape once more. An escaped form always holds a backslash, so the twice
 // escaped form differs whenever the once escaped one does.
 //
+// The address lowered in Unicode normalization form D is added when it
+// differs from the address lowered in form C. PostgreSQL compares LIKE
+// operands code point by code point, so only that form finds text that spells
+// the address decomposed. MySQL's and SQL Server's collations treat the two
+// forms as equal.
+//
 // Each form still matches inside a longer address, and on MySQL an accented
 // spelling, so confirm every row with NamesAddress.
 func AddressTextForms(address string) []string {
-	escaped := jsonEscaped(address)
-	if escaped == address {
-		return []string{address}
+	forms := []string{address}
+	lower := strings.ToLower(canonicalAddress(address))
+	if nfd := norm.NFD.String(lower); nfd != lower {
+		forms = append(forms, nfd)
 	}
-	return []string{address, escaped, jsonEscaped(escaped)}
+	if escaped := jsonEscaped(address); escaped != address {
+		forms = append(forms, escaped, jsonEscaped(escaped))
+	}
+	return forms
 }
 
 // jsonEscaped is text as it reads inside a JSON string Go's encoder wrote.
@@ -114,10 +124,15 @@ func jsonEscaped(text string) string {
 // address ("\u003c" for "<") and the escape's last letter would read as part
 // of it. A string inside it that holds the address beside an escape is
 // decoded again, up to three levels. Text that is not JSON is read as it is.
+//
+// The address and every string read are compared in the form SameAddress
+// uses, so text that spells the address decomposed, or with a capital İ,
+// still names it, as it did under the collations of MySQL and SQL Server.
 func NamesAddress(text, address string) bool {
 	if text == "" {
 		return false
 	}
+	address = canonicalAddress(address)
 	var doc any
 	if err := json.Unmarshal([]byte(text), &doc); err != nil {
 		return stringNames(text, address, 1)
@@ -162,7 +177,7 @@ func stringNames(text, address string, depth int) bool {
 	if holdsAddress(text, address, false) {
 		return true
 	}
-	lower := strings.ToLower(text)
+	lower := foldedText(text)
 	if !strings.Contains(lower, strings.ToLower(address)) &&
 		!(strings.Contains(text, `\`) && strings.Contains(lower, strings.ToLower(jsonEscaped(address)))) {
 		return false
@@ -185,7 +200,7 @@ func stringNames(text, address string, depth int) bool {
 // naming "joann@x.example" before "ann@x.example" still holds the second.
 // With escapes set, a JSON escape just before the match is a boundary.
 func holdsAddress(text, address string, escapes bool) bool {
-	text, want := strings.ToLower(text), strings.ToLower(address)
+	text, want := foldedText(text), strings.ToLower(address)
 	if want == "" {
 		return false
 	}
@@ -203,6 +218,13 @@ func holdsAddress(text, address string, escapes bool) bool {
 		from = start + size
 	}
 	return false
+}
+
+// foldedText is text in Unicode normalization form C, with İ mapped to I as
+// canonicalAddress maps it, and lowered. It is not trimmed, because the
+// characters around a match decide whether it is the whole address.
+func foldedText(text string) string {
+	return strings.ToLower(dottedCapitalI.Replace(norm.NFC.String(text)))
 }
 
 // The two sides of a match continue an address on different characters.
