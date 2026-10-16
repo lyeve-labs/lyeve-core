@@ -144,7 +144,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 			// an account that exists can be locked, so a status of its own, a
 			// code of its own, or a fast answer all tell a caller the address is
 			// real. TestToken_EnumerationTiming_Unit measures exactly that.
-			slog.WarnContext(r.Context(), "token login refused: account is locked out",
+			slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
 				"user_id", user.ID,
 				"failures", count,
 				"max_attempts", h.MaxFailedAttempts,
@@ -157,7 +157,8 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := auth.VerifyPassword(h.passwordHashAlgo, user.PasswordHash, body.Password); err != nil {
-		slog.InfoContext(r.Context(), "token login failed: password did not verify",
+		attemptCtx := failedAttemptContext(r.Context(), user)
+		slog.InfoContext(attemptCtx, "token login failed: password did not verify",
 			"user_id", user.ID,
 			"credential_supplied", body.Password != "",
 			"hash_present", user.PasswordHash != "",
@@ -173,7 +174,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		// Record failed attempt when risk assessor is available.
 		if h.deviceRiskAssessor != nil {
 			fp := collectFingerprint(r)
-			if recErr := h.deviceRiskAssessor.RecordLogin(r.Context(), user.ID, fp, false); recErr != nil {
+			if recErr := h.deviceRiskAssessor.RecordLogin(attemptCtx, user.ID, fp, false); recErr != nil {
 				slog.Warn("failed to record failed Token attempt", "err", recErr)
 			}
 		}
