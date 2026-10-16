@@ -22,7 +22,8 @@
 # a sibling path, so the build needs the whole workspace checked out as siblings:
 # lyeve-core, lyeve-libs, and one directory per plugin. The binary is static and
 # CGO-free (libwebp embedded as WASM via the `nodynamic` tag), so both arches
-# cross-compile on one amd64 runner, with no native arm runner and no QEMU.
+# cross-compile on one amd64 runner, with no native arm runner. The arm64
+# binary's boot check runs it under QEMU user-mode emulation.
 #
 # This deliberately avoids docker/metadata-action:
 # tags/labels are derived in shell so a GitHub REST API blip can't fail a
@@ -236,12 +237,26 @@ jobs:
           # otherwise. A PAT with write:packages can create the package.
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
-      # For each arch: cross-compile the static binary, then build that arch's
-      # image and push it by digest. No QEMU: the file-prep stage runs on the
-      # native build platform and the runtime stage only copies the binary.
+      # The build starts each arch's binary before it builds that arch's image,
+      # and this runner is amd64, so the arm64 binary runs under QEMU
+      # user-mode emulation. The package ships qemu-aarch64-static.
+      - name: Install QEMU user-mode emulation
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-user-static
+          qemu-aarch64-static --version
+
+      # For each arch: cross-compile the static binary, start it, then build
+      # that arch's image and push it by digest. The image build needs no QEMU:
+      # the file-prep stage runs on the native build platform and the runtime
+      # stage only copies the binary.
       - name: Build & push each arch by digest
         working-directory: lyeve-core
         env:
+          # A binary the runner cannot start fails the build instead of
+          # skipping its boot check.
+          RELEASE_BOOT_EVERY_ARCH: '1'
           VERSION: ${{ env.RELEASE_REF }}
           COMMIT: ${{ github.sha }}
           LICENSE_PUBLIC_KEY_HEX: ${{ secrets.LICENSE_PUBLIC_KEY_HEX }}
