@@ -69,20 +69,18 @@ func (h *providerWindowHandler) put(w http.ResponseWriter, r *http.Request) {
 	}
 	days := int(raw)
 
-	before, err := h.windows.ProviderWindowDays(r.Context(), tenantID)
-	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to read the provider window")
-		return
-	}
 	// Merged into the stored row, which holds the tenant's other engine
-	// settings, under a lock so a concurrent save of another key survives.
-	if err := h.store.Merge(r.Context(), config.CoreSettingsOwner,
-		map[string]any{core.ProviderWindowSettingKey: days}, actorID(r)); err != nil {
+	// settings, under a lock so a concurrent save of another key survives. The
+	// audited old value is the one read under that lock, so two overlapping
+	// saves each name the value they replaced.
+	prior, err := h.store.Merge(r.Context(), config.CoreSettingsOwner,
+		map[string]any{core.ProviderWindowSettingKey: days}, actorID(r))
+	if err != nil {
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save the provider window")
 		return
 	}
 	compliance.RecordAuditFromRequestWithState(r, h.host, "auth.provider_window.update", "tenant", tenantID,
-		map[string]any{"tenant_id": tenantID, "days": before},
+		map[string]any{"tenant_id": tenantID, "days": config.ProviderWindowDaysIn(prior)},
 		map[string]any{"tenant_id": tenantID, "days": days})
 
 	w.Header().Set("Cache-Control", "no-store")

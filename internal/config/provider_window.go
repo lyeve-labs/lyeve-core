@@ -54,11 +54,18 @@ func (p *ProviderWindows) ProviderWindowDays(ctx context.Context, tenantID strin
 			return 0, fmt.Errorf("read provider window: %w", err)
 		}
 	}
+	return ProviderWindowDaysIn(settings), nil
+}
+
+// ProviderWindowDaysIn is the window a tenant's engine settings row holds, as
+// decoded from JSON: the default when the key is absent, and a value outside
+// the bounds held to them.
+func ProviderWindowDaysIn(settings map[string]any) int {
 	days, ok := settings[core.ProviderWindowSettingKey].(float64)
 	if !ok {
-		return core.ProviderWindowDefaultDays, nil
+		return core.ProviderWindowDefaultDays
 	}
-	return int(math.Max(0, math.Min(float64(core.ProviderWindowMaxDays), math.Floor(days)))), nil
+	return int(math.Max(0, math.Min(float64(core.ProviderWindowMaxDays), math.Floor(days))))
 }
 
 // ProviderWindowAdmitsAccount implements core.ProviderWindowProvider.
