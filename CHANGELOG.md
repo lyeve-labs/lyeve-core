@@ -77,6 +77,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: a closed region cannot be the default, and a SCIM connection's deprovision action is `disable` or `delete`.
 - A session's email claim is no longer unique on an install with several tenants. An account a tenant's identity provider created carries its address there, and the same address can sign in to another tenant's account, so identify an account by its id. Migration 011 adds the account's provider address and its last provider sign-in, and runs at the next start.
 - Through the flow plugin release this engine pins: an update of a datasource whose stored secret no longer decrypts answers 409 unless it clears the secret with `"secret": null` or sends a complete new one. It used to answer 503 whatever it sent, so deleting the datasource was the only way out.
+- JSON responses escape U+2028 and U+2029, write an invalid UTF-8 sequence as U+FFFD, and compact a stored JSON value, such as a schema definition or a configuration export, before sending it. The cache tag of such a response changes once. A stored value that is not valid JSON is no longer sent as broken JSON, and its response carries the status with an empty body.
 
 ### Fixed
 

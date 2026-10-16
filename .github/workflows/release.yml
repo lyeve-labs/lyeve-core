@@ -38,6 +38,8 @@
 #   LICENSE_PUBLIC_KEY_HEX - the license verifier's public key, as hex, baked
 #                             into the binary so licenses verify. If unset the
 #                             image boots and no license verifies.
+#   RELEASE_BUILD_SEED: required. The release build seed consumed by release.mk.
+#                             The release builds no image without it.
 
 name: release
 
@@ -243,15 +245,21 @@ jobs:
           VERSION: ${{ env.RELEASE_REF }}
           COMMIT: ${{ github.sha }}
           LICENSE_PUBLIC_KEY_HEX: ${{ secrets.LICENSE_PUBLIC_KEY_HEX }}
+          RELEASE_BUILD_SEED: ${{ secrets.RELEASE_BUILD_SEED }}
         run: |
           set -euo pipefail
+          if [ -z "${RELEASE_BUILD_SEED:-}" ]; then
+            echo "::error::RELEASE_BUILD_SEED is not set in the release environment, so no release image is built."
+            exit 1
+          fi
           mkdir -p "${{ runner.temp }}/digests"
           for arch in ${PLATFORMS}; do
             echo "::group::$arch"
             GOARCH="$arch" make -f ../lyeve-libs/release/release.mk -f Makefile build-lyeve-image \
               VERSION="${VERSION}" \
               COMMIT="${COMMIT}" \
-              LICENSE_PUBLIC_KEY_HEX="${LICENSE_PUBLIC_KEY_HEX:-0000000000000000000000000000000000000000000000000000000000000000}"
+              LICENSE_PUBLIC_KEY_HEX="${LICENSE_PUBLIC_KEY_HEX:-0000000000000000000000000000000000000000000000000000000000000000}" \
+              RELEASE_BUILD_SEED="${RELEASE_BUILD_SEED}"
 
             # Size-budget gate (see BINARY_MAX_MB).
             mb=$(( $(stat -c%s bin/lyeve) / 1024 / 1024 ))
