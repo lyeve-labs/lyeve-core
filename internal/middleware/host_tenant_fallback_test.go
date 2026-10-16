@@ -151,3 +151,42 @@ func TestTenantHeader_HostTenantOfAnAnonymousRequest(t *testing.T) {
 func TestTenantHeader_UnmappedHostHasNoHostTenant(t *testing.T) {
 	assert.Empty(t, hostTenantSeen(t, "", &auth.Claims{UserID: "u1", TenantID: "globex", Roles: []string{"admin"}}))
 }
+
+// fallbackSeen runs one request through TenantHeader after a resolver picked
+// tenant without the host naming it, and returns the request's tenant and the
+// host tenant a handler reads.
+func fallbackSeen(t *testing.T, tenant string, claims *auth.Claims) (string, string) {
+	t.Helper()
+	seen, host, reached := "", "", false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		reached = true
+		seen = mw.TenantIDFromCtx(r)
+		host = core.HostTenantIDFromCtx(r.Context())
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := core.WithFallbackTenantID(req.Context(), tenant)
+	if claims != nil {
+		ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
+	}
+	mw.TenantHeader(true)(next).ServeHTTP(httptest.NewRecorder(), req.WithContext(ctx))
+	assert.True(t, reached)
+	return seen, host
+}
+
+// The only tenant on an install still scopes a request with no credential, but
+// the host it arrived on names no tenant.
+func TestTenantHeader_FallbackTenantScopesTheRequestAndNamesNoHost(t *testing.T) {
+	seen, host := fallbackSeen(t, "acme", nil)
+
+	assert.Equal(t, "acme", seen)
+	assert.Empty(t, host)
+}
+
+// A default-tenant session on the instance's own host of a one-tenant install
+// keeps its own tenant and meets no host tenant to differ from.
+func TestTenantHeader_FallbackTenantLeavesASessionWithNoHost(t *testing.T) {
+	seen, host := fallbackSeen(t, "acme", &auth.Claims{UserID: "u1", TenantID: "default", Roles: []string{"admin"}})
+
+	assert.Equal(t, "default", seen)
+	assert.Empty(t, host)
+}
