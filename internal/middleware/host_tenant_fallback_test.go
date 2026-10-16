@@ -110,3 +110,44 @@ func TestTenantHeader_ApiKeyWithNoTenantIsRefusedOnAMappedDomain(t *testing.T) {
 	assert.False(t, reached)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 }
+
+// hostTenantSeen runs one request through TenantHeader after domain routing put
+// hostTenant on the context, and returns the host tenant a handler reads.
+func hostTenantSeen(t *testing.T, hostTenant string, claims *auth.Claims) string {
+	t.Helper()
+	seen, reached := "", false
+	next := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		reached = true
+		seen = core.HostTenantIDFromCtx(r.Context())
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := req.Context()
+	if hostTenant != "" {
+		ctx = core.WithTenantID(ctx, hostTenant)
+	}
+	if claims != nil {
+		ctx = context.WithValue(ctx, auth.ClaimsKey, claims)
+	}
+	mw.TenantHeader(true)(next).ServeHTTP(httptest.NewRecorder(), req.WithContext(ctx))
+	assert.True(t, reached)
+	return seen
+}
+
+// A session of another tenant decides the request's tenant, but the handler can
+// still learn which tenant the host it arrived on belongs to.
+func TestTenantHeader_HostTenantSurvivesAnotherTenantsSession(t *testing.T) {
+	seen := hostTenantSeen(t, "acme", &auth.Claims{UserID: "u1", TenantID: "globex", Roles: []string{"admin"}})
+
+	assert.Equal(t, "acme", seen)
+}
+
+// A request with no credential takes the host's tenant on both keys.
+func TestTenantHeader_HostTenantOfAnAnonymousRequest(t *testing.T) {
+	assert.Equal(t, "acme", hostTenantSeen(t, "acme", nil))
+}
+
+// A host that maps to no tenant leaves the host tenant empty, whatever the
+// credential names.
+func TestTenantHeader_UnmappedHostHasNoHostTenant(t *testing.T) {
+	assert.Empty(t, hostTenantSeen(t, "", &auth.Claims{UserID: "u1", TenantID: "globex", Roles: []string{"admin"}}))
+}

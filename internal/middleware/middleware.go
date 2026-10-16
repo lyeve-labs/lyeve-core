@@ -306,6 +306,10 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenantID := ""
+			// Domain routing ran above and left the host's tenant on the core
+			// key, which the credential's tenant replaces below. A sign-in
+			// handler still needs the host's answer, so it is kept apart.
+			hostTenant := core.TenantIDFromCtx(r.Context())
 
 			if claims, ok := r.Context().Value(auth.ClaimsKey).(*auth.Claims); ok && claims != nil {
 				// On a multi-tenant install a token naming its tenant in a
@@ -477,6 +481,9 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			// Inject via core key so tracing (which cannot import
 			// internal/middleware) can read the tenant.
 			ctx = core.WithTenantID(ctx, tenantID)
+			if hostTenant != "" {
+				ctx = core.WithHostTenantID(ctx, hostTenant)
+			}
 			// Defense-in-depth: normalize raw header to the validated tenant.
 			// Context is canonical. This ensures code reading X-Tenant-ID
 			// sees the resolved value, never a client-supplied one.
