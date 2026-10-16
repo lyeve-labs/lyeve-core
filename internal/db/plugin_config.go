@@ -144,10 +144,10 @@ func (s *PluginConfigStore) Set(ctx context.Context, pluginName string, cfg map[
 // key.
 //
 // It returns the configuration as it stood before the merge, read under the
-// lock and with every credential replaced by SecretMask, and an empty map when
-// there was no row. A caller that records what it changed reads the old value
-// here: read before the lock, it can be a value a concurrent merge has
-// already replaced.
+// lock and with every top-level credential replaced by SecretMask, as Get does,
+// and an empty map when there was no row. A caller that records what it
+// changed reads the old value here: read before the lock, it can be a value a
+// concurrent merge has already replaced.
 func (s *PluginConfigStore) Merge(ctx context.Context, pluginName string, values map[string]any, updatedBy *uuid.UUID) (map[string]any, error) {
 	var prior map[string]any
 	err := WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {

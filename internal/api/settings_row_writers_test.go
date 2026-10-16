@@ -167,8 +167,9 @@ func TestSettingsRow_OverlappingWritersOfDifferentKeysBothLand(t *testing.T) {
 // over rounds that alternate between a stored row and none. Every round ends
 // with every writer's key in the row and the keys none of them touched still
 // there, and no write fails. Without the row lock a writer writes back a row
-// read before another's write, which this loses a few dozen keys to on every
-// dialect, SQL Server included, where the ordered test above cannot lose one.
+// it read before another writer's write, and over 60 rounds that loses about a
+// hundred keys on every dialect, SQL Server included, where the ordered test
+// above cannot lose one.
 //
 // The pool holds twelve connections, so the six writers can all be in the
 // database at once, and the test asserts that six were.
