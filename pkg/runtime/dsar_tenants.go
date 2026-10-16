@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"slices"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -15,12 +16,24 @@ import (
 // supplies them, which makes the endpoint refuse a cross-tenant request rather
 // than answer a narrower one: an export that covered fewer tenants than it
 // claimed would be worse than no export.
+//
+// The default tenant is added when the roster lacks it. An install set up
+// without tenants and switched to them later has no row for it, yet its
+// accounts with no tenant act in it, and a sweep that skipped it would leave
+// them out of a bundle that still reads as complete.
 func dsarTenantLister(slugs core.TenantSlugsFunc) compliance.TenantLister {
 	if slugs == nil {
 		return nil
 	}
 	return func(ctx context.Context) ([]string, error) {
-		return slugs(ctx)
+		roster, err := slugs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(roster, core.DefaultTenantSlug) {
+			return roster, nil
+		}
+		return append([]string{core.DefaultTenantSlug}, roster...), nil
 	}
 }
 
