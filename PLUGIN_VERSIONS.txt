@@ -17,7 +17,7 @@
 #
 # Generated 2026-10-12T07:29:55Z from origin default branches.
 
-lyeve-libs = fb1c00f7ec81fc45098741ea68095edd6841a230
+lyeve-libs = 81dfbfc9fef304936f5176b11589b1be865377b8
 lyeve-plugin-ab-testing = 9cfbead40d7f2d2e65bb0af42a59d007635529fa
 lyeve-plugin-ai = b6612dd7cccc619454d3aaacf739cfe28a8ff27a
 lyeve-plugin-analytics = b53919536cc1c797dd93a210a762bfabfbf9b306
@@ -30,10 +30,10 @@ lyeve-plugin-captcha = 30a1e6f4a1bccce68789f70e0a57af44c077a2a1
 lyeve-plugin-cluster = 16ee5fc8985fd193d7ea111b7dc6a698837b3722
 lyeve-plugin-content = 5eab1ade48d39536f6d6adbad2a7aa2df6f45df7
 lyeve-plugin-cron = d031da5ac4a4f2601e3177100487eff76ed5228f
-lyeve-plugin-data-export = 73f1cebd761daa1412cc2dfcb5ce06556d86cdb2
+lyeve-plugin-data-export = 19f1a704e179843c9797ee3f01414b628e7c1f5b
 lyeve-plugin-data-residency = 3e04e80ccdea7343bb98428845600e60aaf410b8
-lyeve-plugin-device-fingerprint = e36ac408ae57f8d1802eec762bac685c41a458d9
-lyeve-plugin-email = 5a5e1aa3fd7494477f59e4e37706804cddf43470
+lyeve-plugin-device-fingerprint = e437145ecd3484dbe8802262df59c9a4c299f219
+lyeve-plugin-email = e08b563000a583de5cfe4721cc2663b4c77b37ed
 lyeve-plugin-error-tracking = e9388160884c350e9003cf20b5d1a4c3de89a28c
 lyeve-plugin-events = b714c4f3e08de9884234e53ae347058ada7c558c
 lyeve-plugin-flow = 1c5fe522720f9d81c31a94abda1eb1aefc4cce90
@@ -68,4 +68,4 @@ lyeve-plugin-synthetic-monitoring = a6039686c55c5c4b71d97cf9474a2dc26bb42ffa
 lyeve-plugin-telemetry = 43f87716717137583c36210c564dc71848018e50
 lyeve-plugin-usage = 1f4a20683d0928eb5e70c8e19c09d8cbb4691c52
 lyeve-plugin-waf = 16fc9df6263d158b4cfcafb03255dca6900a3d6d
-lyeve-plugin-webhook = b5024e5181c49f94be2af91126041d337266f5d7
+lyeve-plugin-webhook = 1479bad1d28c640f267ef62ca76cce20ec5b112d
