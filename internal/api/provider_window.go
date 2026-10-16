@@ -1,13 +1,11 @@
 package api
 
 import (
-	"errors"
 	"math"
 	"net/http"
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
-	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -76,19 +74,10 @@ func (h *providerWindowHandler) put(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to read the provider window")
 		return
 	}
-	// Merge onto the stored row: it holds the tenant's other engine settings,
-	// and Set writes the whole row. A credential reads back as the mask, and
-	// the mask submitted back keeps the stored value.
-	merged, err := h.store.Get(r.Context(), config.CoreSettingsOwner)
-	if err != nil && !errors.Is(err, domain.ErrNotFound) {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to read the provider window")
-		return
-	}
-	if merged == nil {
-		merged = map[string]any{}
-	}
-	merged[core.ProviderWindowSettingKey] = days
-	if err := h.store.Set(r.Context(), config.CoreSettingsOwner, merged, actorID(r)); err != nil {
+	// Merged into the stored row, which holds the tenant's other engine
+	// settings, under a lock so a concurrent save of another key survives.
+	if err := h.store.Merge(r.Context(), config.CoreSettingsOwner,
+		map[string]any{core.ProviderWindowSettingKey: days}, actorID(r)); err != nil {
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save the provider window")
 		return
 	}
