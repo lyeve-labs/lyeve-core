@@ -47,38 +47,6 @@ func TestSysUserEraser_BlankIdentifier(t *testing.T) {
 	}
 }
 
-func TestSysUserEraser_ExecCalled(t *testing.T) {
-	mock := mockhost.New(t)
-	eraser := newSysUserEraser(mock.Host())
-	ctx := context.Background()
-	identifier := "test@example.com"
-
-	// Construct the expected SQL the eraser would generate for postgres.
-	expectedSQL := fmt.Sprintf(`UPDATE sys_users
-	 SET email = %s,
-	     password_hash = '',
-	     roles = %s,
-	     token_version = token_version + 1,
-	     updated_at = %s,
-	     sessions_revoked_at = %s,
-	     anonymized = %s,
-	     provider_email = NULL,
-	     provider_seen_at = NULL
-	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = false`,
-		"LOWER(CONCAT('erased-', id::text, '@localhost'))", "'{}'", "NOW()", "NOW()", "true", "id::text")
-
-	// Set up the expectation: return 1 row affected.
-	mock.Spy().OnExec(expectedSQL).ReturnTag(core.CommandTag{RowsAffected: 1})
-
-	n, err := eraser.EraseSubject(ctx, identifier)
-	if err != nil {
-		t.Fatalf("EraseSubject failed: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("expected 1 row affected, got %d", n)
-	}
-}
-
 func TestSysUserEraser_TwoSubjectsNoUniqueViolation(t *testing.T) {
 	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
 		ctx := context.Background()
@@ -195,9 +163,8 @@ func TestSysUserEraser_BumpsTokenVersion(t *testing.T) {
 	})
 }
 
-// revokingHost wraps a mockhost core.Host and records refresh-token
-// revocations so the eraser's session-kill path can be asserted without a real
-// refresh store.
+// revokingHost wraps a core.Host and records refresh-token revocations so the
+// eraser's session-kill path can be asserted without a real refresh store.
 type revokingHost struct {
 	core.Host
 	revoked []string
@@ -209,31 +176,17 @@ func (h *revokingHost) RevokeAllRefreshTokens(_ context.Context, userID string) 
 }
 
 func TestSysUserEraser_RevokesRefreshTokens(t *testing.T) {
-	mock := mockhost.New(t)
-	wrapped := &revokingHost{Host: mock.Host()}
+	host := plugintest.Postgres(t)
+	wrapped := &revokingHost{Host: host}
 	eraser := newSysUserEraser(wrapped)
 
 	ctx := context.Background()
 	subjectID := uuid.New()
-
-	// The eraser resolves the id through the postgres text cast before the
-	// UPDATE, then revokes that id.
-	resolveSQL := `SELECT id::text FROM sys_users WHERE (email = $1 OR provider_email = $3 OR id::text = $2) AND anonymized = false`
-	mock.Spy().OnQuery(resolveSQL).ReturnRows(mockhost.Rows("id").Add(subjectID.String()))
-
-	updateSQL := fmt.Sprintf(`UPDATE sys_users
-	 SET email = %s,
-	     password_hash = '',
-	     roles = %s,
-	     token_version = token_version + 1,
-	     updated_at = %s,
-	     sessions_revoked_at = %s,
-	     anonymized = %s,
-	     provider_email = NULL,
-	     provider_seen_at = NULL
-	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = false`,
-		"LOWER(CONCAT('erased-', id::text, '@localhost'))", "'{}'", "NOW()", "NOW()", "true", "id::text")
-	mock.Spy().OnExec(updateSQL).ReturnTag(core.CommandTag{RowsAffected: 1})
+	if _, err := host.Querier(ctx).Exec(ctx,
+		`INSERT INTO sys_users (id, email, password_hash) VALUES ($1, $2, $3)`,
+		subjectID, "revoked@example.com", "hashed"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
 
 	n, err := eraser.EraseSubject(ctx, subjectID.String())
 	if err != nil {

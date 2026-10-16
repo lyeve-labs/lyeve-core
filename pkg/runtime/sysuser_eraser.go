@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -126,31 +128,23 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	// on MSSQL would be the one row in the table that breaks the rule.
 	erasedEmail := fmt.Sprintf("LOWER(CONCAT('erased-', %s, '@localhost'))", idCast)
 
-	// Resolve the ids before anonymizing: the UPDATE rewrites email, so the
-	// matching key is gone afterwards. The ids drive refresh-token revocation
-	// only, so resolving is skipped when no revoker is wired.
-	revoker, canRevoke := e.host.(core.RefreshTokenRevoker)
-	var ids []uuid.UUID
-	if canRevoke {
-		var err error
-		ids, err = e.resolveSubjectIDs(ctx, q, idCast, boolFalse, identifier)
-		if err != nil {
-			slog.WarnContext(ctx, "sys_users erasure: resolve subject ids", "err", err)
-		}
+	// The subject's accounts are confirmed in Go and erased by id. SQL alone
+	// cannot decide which accounts hold the address: MySQL's collations ignore
+	// accents and read ß as ss, and SQL Server's default collation reads ß
+	// as ss, so a request for an address that holds no account would reach the
+	// account of its variant and erase another person. The ids also drive
+	// refresh-token revocation, and the UPDATE rewrites email, so they are read
+	// first.
+	ids, err := e.resolveSubjectIDs(ctx, q, idCast, boolFalse, identifier)
+	if err != nil {
+		return 0, err
 	}
+	revoker, canRevoke := e.host.(core.RefreshTokenRevoker)
 
-	// Single SQL with dialect-aware id cast. token_version is bumped so the
-	// tokenVersionCheck middleware rejects every access token issued before
-	// the erasure, without waiting for natural expiry. anonymized is set so a
-	// post-erase export (which matches by the still-present id) excludes the
-	// subject.
-	//
-	// The email and id halves take separate parameters. Stored addresses are
-	// lower case, so the email half has to compare against the normalized
-	// identifier or an erasure request naming Foo@x.com would report zero rows
-	// erased on PostgreSQL and answer a subject request with a silent no-op.
-	// The id half keeps the identifier as supplied, because folding a cast id
-	// is not this function's business.
+	// token_version is bumped so the tokenVersionCheck middleware rejects every
+	// access token issued before the erasure, without waiting for natural
+	// expiry. anonymized is set so a post-erase export (which matches by the
+	// still-present id) excludes the subject.
 	//
 	// An address also matches provider_email, where a tenant-local account
 	// keeps the address its provider asserted, and both provider columns are
@@ -159,7 +153,7 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	// A row already erased is skipped by its anonymized flag. An empty
 	// password_hash does not mean erased: an account a SAML provider created
 	// has no password, and the account still holds the person's address.
-	qtext := fmt.Sprintf(`UPDATE sys_users
+	update := fmt.Sprintf(`UPDATE sys_users
 	 SET email = %s,
 	     password_hash = '',
 	     roles = %s,
@@ -169,14 +163,24 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	     anonymized = %s,
 	     provider_email = NULL,
 	     provider_seen_at = NULL
-	 WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, idCast, boolFalse)
+	 WHERE anonymized = %s AND id IN `, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, boolFalse)
 
-	address := core.NormalizeEmail(identifier)
-	tag, err := q.Exec(ctx, qtext, address, identifier, address)
-	if err != nil {
-		return 0, fmt.Errorf("sys_users erasure: %w", err)
+	var n int64
+	for rest := ids; len(rest) > 0; {
+		batch := rest[:min(len(rest), eraseIDBatch)]
+		rest = rest[len(batch):]
+		marks := make([]string, len(batch))
+		args := make([]any, len(batch))
+		for i, id := range batch {
+			marks[i] = "$" + strconv.Itoa(i+1)
+			args[i] = id
+		}
+		tag, err := q.Exec(ctx, update+"("+strings.Join(marks, ", ")+")", args...)
+		if err != nil {
+			return n, fmt.Errorf("sys_users erasure: %w", err)
+		}
+		n += tag.RowsAffected
 	}
-	n := tag.RowsAffected
 
 	// Best-effort: a revoked refresh token cannot mint a fresh access token.
 	// Failures here do not undo the erasure, so they are logged, not returned.
@@ -195,15 +199,26 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	return n, nil
 }
 
-// resolveSubjectIDs returns the ids of the sys_users rows matching identifier
-// before the row is anonymized. It reads the id through the same text cast the
-// UPDATE matches on, then parses it back to a canonical uuid so refresh-token
-// revocation keys by the exact string the refresh store recorded at issue time.
+// eraseIDBatch is how many ids one UPDATE names, well under the 2100
+// parameters SQL Server accepts.
+const eraseIDBatch = 500
+
+// resolveSubjectIDs returns the ids of the unerased sys_users rows that belong
+// to identifier: an account whose email or provider_email is the address, or
+// whose id is identifier. SQL selects the candidates and
+// compliance.SameAddress keeps the rows that hold the address. The id is read
+// through the text cast the id half compares on, then parsed back to a
+// canonical uuid so refresh-token revocation keys by the exact string the
+// refresh store recorded at issue time.
+//
+// The id half keeps the identifier as supplied, because folding a cast id is
+// not this function's business.
 func (e *sysUserEraser) resolveSubjectIDs(ctx context.Context, q core.Querier, idCast, boolFalse, identifier string) ([]uuid.UUID, error) {
-	address := core.NormalizeEmail(identifier)
 	rows, err := q.Query(ctx, fmt.Sprintf(
-		`SELECT %s FROM sys_users WHERE (email = $1 OR provider_email = $3 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
-		address, identifier, address)
+		`SELECT %s, email, provider_email, CASE WHEN %s = $4 THEN 1 ELSE 0 END FROM sys_users
+		 WHERE (%s OR %s OR %s = $4) AND anonymized = %s`,
+		idCast, idCast, compliance.AddressCandidates("email", 1), compliance.AddressCandidates("provider_email", 1), idCast, boolFalse),
+		append(compliance.AddressForms(identifier), identifier)...)
 	if err != nil {
 		return nil, fmt.Errorf("sys_users erasure: resolve: %w", err)
 	}
@@ -211,9 +226,17 @@ func (e *sysUserEraser) resolveSubjectIDs(ctx context.Context, q core.Querier, i
 
 	var ids []uuid.UUID
 	for rows.Next() {
-		var idText string
-		if err := rows.Scan(&idText); err != nil {
+		var (
+			idText, email string
+			provider      sql.NullString
+			byID          int
+		)
+		if err := rows.Scan(&idText, &email, &provider, &byID); err != nil {
 			return nil, fmt.Errorf("sys_users erasure: scan id: %w", err)
+		}
+		if byID == 0 && !compliance.SameAddress(email, identifier) &&
+			(!provider.Valid || !compliance.SameAddress(provider.String, identifier)) {
+			continue
 		}
 		id, err := uuid.Parse(idText)
 		if err != nil {
