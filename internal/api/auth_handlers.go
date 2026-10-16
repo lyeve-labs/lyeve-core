@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
@@ -357,7 +358,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// Anything else turns login into a probe for which tenants an address
 	// belongs to, which is the enumeration property the rest of this handler
 	// spends real effort protecting.
-	actingTenant, actingRoles, err := h.resolveActingTenant(r.Context(), user, body.Tenant)
+	actingTenant, actingRoles, err := h.resolveSignInTenant(r.Context(), user, body.Tenant)
 	if err != nil {
 		respondTenantResolution(w, r, err)
 		return
@@ -530,6 +531,14 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	// Validate the challenge token: must be valid, non-expired, and MFAPending.
 	claims, err := auth.ParseMulti([]string{h.jwtSecret}, body.ChallengeToken)
 	if err != nil || !claims.MFAPending {
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeChallengeExpired, nil)
+		return
+	}
+	// The login that issued the challenge acted in the tenant of the host it
+	// arrived on. A challenge for another tenant presented on a tenant's
+	// mapped domain is not this host's, so it is refused before the second
+	// factor is read or spent.
+	if host := core.HostTenantIDFromCtx(r.Context()); host != "" && claims.TenantID != host {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeChallengeExpired, nil)
 		return
 	}

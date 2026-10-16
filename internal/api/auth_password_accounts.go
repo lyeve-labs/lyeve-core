@@ -24,9 +24,10 @@ import (
 // install-wide email is the fallback. So an address another tenant's provider
 // account holds is answered as a free one: neither read can reach that row.
 //
-// A body tenant the engine never issues names no tenant. The field still
-// chooses which of an account's own memberships the session acts in, which
-// resolveActingTenant decides and limits to those memberships.
+// A body tenant the engine never issues names no tenant. Where the host names
+// no tenant, the field still chooses which of an account's own memberships the
+// session acts in, which resolveSignInTenant decides and limits to those
+// memberships.
 func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant string) (*domain.User, error) {
 	tenant := core.TenantIDFromCtx(ctx)
 	if tenant == "" && core.IsValidTenantSlug(bodyTenant) {

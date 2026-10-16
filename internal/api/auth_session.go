@@ -186,7 +186,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actingTenant, actingRoles, err := h.resolveActingTenant(r.Context(), user, body.Tenant)
+	actingTenant, actingRoles, err := h.resolveSignInTenant(r.Context(), user, body.Tenant)
 	if err != nil {
 		respondTenantResolution(w, r, err)
 		return
