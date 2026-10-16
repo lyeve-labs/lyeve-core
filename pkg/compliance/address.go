@@ -2,9 +2,12 @@ package compliance
 
 import (
 	"encoding/json"
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -29,8 +32,22 @@ import (
 //	// keep a row only when compliance.SameAddress(stored, address)
 //
 // For free text, such as a log line or a JSON payload, the prefilter is a
-// case-insensitive LIKE for each of AddressTextForms, and NamesAddress
-// confirms each row.
+// case-insensitive LIKE for each of AddressTextForms, built with core.ILike
+// and core.ILikeEscapeClause and bound through core.ILikeValue, and
+// NamesAddress confirms each row:
+//
+//	forms := compliance.AddressTextForms(address)
+//	conds, args := make([]string, len(forms)), make([]any, len(forms))
+//	for i, form := range forms {
+//		conds[i] = core.ILike(d, "payload", "$"+strconv.Itoa(i+1)) + core.ILikeEscapeClause(d)
+//		args[i] = core.ILikeValue(d, form)
+//	}
+//	// select where any of conds holds, and keep a row only when
+//	// compliance.NamesAddress(payload, address)
+//
+// Several forms hold a backslash, which PostgreSQL and MySQL read as the
+// escape of a LIKE pattern, so a pattern built by hand looks for other text
+// and misses those rows.
 
 // AddressCandidates returns a SQL condition that is true for every row whose
 // column may hold the address AddressForms binds. Its placeholders start at
@@ -43,9 +60,9 @@ import (
 // comparison, so give it a narrower predicate beside it where one exists.
 func AddressCandidates(column string, first int) string {
 	p := func(i int) string { return "LOWER($" + strconv.Itoa(first+i) + ")" }
-	lowered := "LOWER(" + column + ")"
+	lowered, trimmed := "LOWER("+column+")", "LOWER(LTRIM(RTRIM("+column+")))"
 	return "(" + lowered + " = " + p(0) + " OR " + lowered + " = " + p(1) + " OR " + lowered + " = " + p(2) +
-		" OR LOWER(LTRIM(RTRIM(" + column + "))) = " + p(1) + ")"
+		" OR " + trimmed + " = " + p(1) + " OR " + trimmed + " = " + p(2) + ")"
 }
 
 // AddressForms returns the three values AddressCandidates binds, in order:
@@ -56,56 +73,92 @@ func AddressCandidates(column string, first int) string {
 // where the collation does not know ẞ, and a row stored decomposed on
 // PostgreSQL, which compares lowered values byte for byte. The trimmed
 // column reaches a row stored with a space around the address on the
-// dialects whose comparison keeps the space.
+// dialects whose comparison keeps the space. A row that spells İ as I and a
+// combining dot is confirmed by SameAddress but not selected on PostgreSQL
+// or SQL Server.
 func AddressForms(address string) []any {
 	lower := strings.ToLower(canonicalAddress(address))
 	return []any{address, lower, norm.NFD.String(lower)}
 }
 
 // SameAddress reports whether stored and requested name one address: equal
-// with case folded, once each is trimmed and in Unicode normalization form C.
+// once each is trimmed, put in Unicode normalization form C and lowered.
 // Accents and ß stay significant, so josé@ is not jose@ and straße@ is not
 // strasse@. A decomposed é, a capital ẞ and a trailing space still match.
+// Lowering is all it folds. Unicode case folding would also take ſam@ for
+// sam@, a different address.
 func SameAddress(stored, requested string) bool {
-	return strings.EqualFold(canonicalAddress(stored), canonicalAddress(requested))
+	return strings.ToLower(canonicalAddress(stored)) == strings.ToLower(canonicalAddress(requested)) //nolint:staticcheck // EqualFold would take ſ for s
 }
 
-// canonicalAddress trims the address and puts it in Unicode normalization
-// form C. A sender may store an address with a trailing space, which SQL
-// Server and a padding MySQL collation ignore. Every dialect's LOWER folds the
-// capital İ to i, but Go's simple case folding keeps them apart, so İ becomes
-// I. That runs after NFC, which composes I and a combining dot into İ.
+// canonicalAddress trims the spaces around the address and puts it in
+// Unicode normalization form C. A sender may store an address with a trailing
+// space, which SQL Server and a padding MySQL collation ignore. Only spaces
+// are trimmed, as LTRIM and RTRIM trim them in SQL, so an address beside a tab
+// is another address in Go as it is in the database. Lowering the result
+// folds the capital İ to i, as every dialect's LOWER does, and NFC has already
+// composed I and a combining dot into İ.
 func canonicalAddress(address string) string {
-	return dottedCapitalI.Replace(norm.NFC.String(strings.TrimSpace(address)))
+	return norm.NFC.String(strings.Trim(address, " "))
 }
 
-var dottedCapitalI = strings.NewReplacer("\u0130", "I")
-
-// AddressTextForms returns the spellings of address to look for in free
-// text with a case-insensitive LIKE: as given, and, when it differs, as Go's
-// JSON encoder writes it inside a string, once and twice. SQL Server keeps
-// JSON text as written, so a&b@x.example is stored as a\u0026b@x.example. On
-// every dialect a quote or a backslash in the address stays escaped, and a
-// JSON body sent inside a JSON string escapes the backslash of the inner
-// escape once more. An escaped form always holds a backslash, so the twice
-// escaped form differs whenever the once escaped one does.
+// AddressTextForms returns the spellings of address to look for in free text
+// with a case-insensitive LIKE. The first is the address trimmed and in
+// Unicode normalization form C.
 //
-// The address lowered in Unicode normalization form D is added when it
-// differs from the address lowered in form C. PostgreSQL compares LIKE
-// operands code point by code point, so only that form finds text that spells
-// the address decomposed. MySQL's and SQL Server's collations treat the two
-// forms as equal.
+// The address lowered in form D follows when it differs. PostgreSQL compares
+// LIKE operands code point by code point, so only that form finds text that
+// spells the address decomposed. MySQL's and SQL Server's collations treat the
+// two forms as equal. An address holding ß is also spelled lowered with ß and
+// with ẞ, because the LIKE of MySQL and SQL Server does not take either for
+// the other.
 //
-// Each form still matches inside a longer address, and on MySQL an accented
-// spelling, so confirm every row with NamesAddress.
+// Each of those spellings follows as Go's JSON encoder writes it inside a
+// string, once and twice, when that differs. SQL Server keeps JSON text as
+// written, so a&b@x.example is stored as a\u0026b@x.example. On every dialect
+// a quote or a backslash in the address stays escaped, and a JSON body sent
+// inside a JSON string escapes the backslash of the inner escape once more.
+// The lowered spellings also follow as an encoder that escapes every
+// character outside ASCII writes them, once and twice, which PHP's and
+// Python's encoders do by default: jos\u00e9@x.example. LIKE folds the case of
+// the hex digits but not of the letter they spell, so text that escapes a
+// capital is not found.
+//
+// How many forms there are depends on the address, so build one condition for
+// each. Each form still matches inside a longer address, and on MySQL an
+// accented spelling, so confirm every row with NamesAddress.
 func AddressTextForms(address string) []string {
-	forms := []string{address}
-	lower := strings.ToLower(canonicalAddress(address))
-	if nfd := norm.NFD.String(lower); nfd != lower {
-		forms = append(forms, nfd)
+	address = canonicalAddress(address)
+	lower := strings.ToLower(address)
+	decomposed := norm.NFD.String(lower)
+	spellings := []string{address}
+	if decomposed != lower {
+		spellings = append(spellings, decomposed)
 	}
-	if escaped := jsonEscaped(address); escaped != address {
-		forms = append(forms, escaped, jsonEscaped(escaped))
+	if strings.Contains(lower, "ß") {
+		spellings = append(spellings, lower, strings.ReplaceAll(lower, "ß", "ẞ"))
+	}
+
+	var forms []string
+	add := func(form string) {
+		if !slices.Contains(forms, form) {
+			forms = append(forms, form)
+		}
+	}
+	for _, s := range spellings {
+		add(s)
+	}
+	for _, s := range spellings {
+		if once := jsonEscaped(s); once != s {
+			add(once)
+			add(jsonEscaped(once))
+		}
+	}
+	for _, s := range []string{lower, decomposed} {
+		if once := asciiEscaped(s); once != s {
+			add(once)
+			add(asciiEscaped(once))
+		}
 	}
 	return forms
 }
@@ -114,6 +167,28 @@ func AddressTextForms(address string) []string {
 func jsonEscaped(text string) string {
 	b, _ := json.Marshal(text)
 	return string(b[1 : len(b)-1])
+}
+
+// asciiEscaped is text as it reads inside a JSON string written by an encoder
+// that escapes every character outside ASCII. A quote or a backslash takes a
+// backslash before it, and any other character above U+007F is written as
+// "\u" and four lower-case hex digits, or two such escapes above U+FFFF.
+func asciiEscaped(text string) string {
+	var b strings.Builder
+	for _, r := range text {
+		switch {
+		case r == '"' || r == '\\':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case r < utf8.RuneSelf:
+			b.WriteRune(r)
+		default:
+			for _, u := range utf16.Encode([]rune{r}) {
+				fmt.Fprintf(&b, `\u%04x`, u)
+			}
+		}
+	}
+	return b.String()
 }
 
 // NamesAddress reports whether text names address as a whole, with case
@@ -166,20 +241,20 @@ func valueNames(v any, address string, depth int) bool {
 }
 
 // stringNames reports whether a decoded string holds the address. When the
-// address is there but an escape sits beside it, or the string holds it only
-// JSON escaped, the string may be a JSON document or a string body encoded
-// once more, so each is decoded and read again, up to maxPayloadDepth.
-// Decoding reads the real neighbor, so an escaped letter ("\u00e9" from an
-// encoder that escapes non-ASCII) still refuses a longer address. A string
-// that does not decode, being truncated, holding a raw quote or nested too
-// deep, is read with a JSON escape beside the match counted as a boundary.
+// address is there but an escape sits beside it, or the string holds an
+// escape at all, which may spell the address, the string may be a JSON
+// document or a string body encoded once more, so each is decoded and read
+// again, up to maxPayloadDepth. Decoding reads the real neighbor, so an
+// escaped letter ("\u00e9" from an encoder that escapes non-ASCII) still
+// refuses a longer address, and an address escaped that way is still found.
+// A string that does not decode, being truncated, holding a raw quote or
+// nested too deep, is read with a JSON escape beside the match counted as a
+// boundary.
 func stringNames(text, address string, depth int) bool {
 	if holdsAddress(text, address, false) {
 		return true
 	}
-	lower := foldedText(text)
-	if !strings.Contains(lower, strings.ToLower(address)) &&
-		!(strings.Contains(text, `\`) && strings.Contains(lower, strings.ToLower(jsonEscaped(address)))) {
+	if !strings.Contains(text, `\`) && !strings.Contains(foldedText(text), strings.ToLower(address)) {
 		return false
 	}
 	if depth < maxPayloadDepth {
@@ -220,11 +295,11 @@ func holdsAddress(text, address string, escapes bool) bool {
 	return false
 }
 
-// foldedText is text in Unicode normalization form C, with İ mapped to I as
-// canonicalAddress maps it, and lowered. It is not trimmed, because the
-// characters around a match decide whether it is the whole address.
+// foldedText is text in Unicode normalization form C and lowered, the form
+// SameAddress compares. It is not trimmed, because the characters around a
+// match decide whether it is the whole address.
 func foldedText(text string) string {
-	return strings.ToLower(dottedCapitalI.Replace(norm.NFC.String(text)))
+	return strings.ToLower(norm.NFC.String(text))
 }
 
 // The two sides of a match continue an address on different characters.

@@ -72,13 +72,14 @@ func logSubjectEraserRoster(ctx context.Context, logger *slog.Logger) {
 	)
 }
 
-// EraseSubject anonymizes a sys_users row where identifier matches the
-// email or id column, then revokes the subject's active sessions. Replaces
-// email with a per-row sentinel, clears password_hash, empties roles, and
+// EraseSubject anonymizes every unerased sys_users row that belongs to
+// identifier, as resolveSubjectIDs finds them, then revokes their active
+// sessions. One address can hold an account in each tenant, so one request
+// can erase several. Replaces email with a per-row sentinel, clears
+// password_hash, provider_email and provider_seen_at, empties roles, and
 // bumps token_version so every previously issued JWT is rejected immediately.
-// Skips rows already marked anonymized, so a second erasure is a no-op.
-// Rows affected:
-// 1 for a match, 0 for no match.
+// Skips rows already marked anonymized, so a second erasure is a no-op. It
+// returns the number of rows erased.
 func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return 0, nil

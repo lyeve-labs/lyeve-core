@@ -33,6 +33,10 @@ func TestSameAddress_OnlyTheAddressItself(t *testing.T) {
 		{"decomposed dotted capital I", "inci@x.example", "I\u0307nci@x.example", true},
 		{"dotless i against decomposed dotted capital I", "ınci@x.example", "I\u0307nci@x.example", false},
 		{"longer address", "joann@x.example", "ann@x.example", false},
+		{"long s is another person", "\u017fam@x.example", "sam@x.example", false},
+		{"s is not long s", "sam@x.example", "\u017fam@x.example", false},
+		{"micro sign is not mu", "\u00b5@x.example", "\u03bc@x.example", false},
+		{"tab is another address", "dana@x.example\t", "dana@x.example", false},
 	} {
 		assert.Equal(t, tc.want, compliance.SameAddress(tc.stored, tc.requested), tc.name)
 	}
@@ -50,10 +54,10 @@ func TestAddressForms_RequestThenLoweredNFCAndNFD(t *testing.T) {
 func TestAddressCandidates_NumbersPlaceholdersFromFirst(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t,
-		"(LOWER(email) = LOWER($1) OR LOWER(email) = LOWER($2) OR LOWER(email) = LOWER($3) OR LOWER(LTRIM(RTRIM(email))) = LOWER($2))",
+		"(LOWER(email) = LOWER($1) OR LOWER(email) = LOWER($2) OR LOWER(email) = LOWER($3) OR LOWER(LTRIM(RTRIM(email))) = LOWER($2) OR LOWER(LTRIM(RTRIM(email))) = LOWER($3))",
 		compliance.AddressCandidates("email", 1))
 	assert.Equal(t,
-		"(LOWER(t.to_addr) = LOWER($4) OR LOWER(t.to_addr) = LOWER($5) OR LOWER(t.to_addr) = LOWER($6) OR LOWER(LTRIM(RTRIM(t.to_addr))) = LOWER($5))",
+		"(LOWER(t.to_addr) = LOWER($4) OR LOWER(t.to_addr) = LOWER($5) OR LOWER(t.to_addr) = LOWER($6) OR LOWER(LTRIM(RTRIM(t.to_addr))) = LOWER($5) OR LOWER(LTRIM(RTRIM(t.to_addr))) = LOWER($6))",
 		compliance.AddressCandidates("t.to_addr", 4))
 }
 
@@ -64,12 +68,32 @@ func TestAddressTextForms_PlainThenEscapedOnceAndTwice(t *testing.T) {
 		want    []string
 	}{
 		{"ann@x.example", []string{"ann@x.example"}},
+		{" ann@x.example ", []string{"ann@x.example"}},
+		{"Ann@X.Example", []string{"Ann@X.Example"}},
 		{"a&b@x.example", []string{"a&b@x.example", `a\u0026b@x.example`, `a\\u0026b@x.example`}},
 		{`"a b"@x.example`, []string{`"a b"@x.example`, `\"a b\"@x.example`, `\\\"a b\\\"@x.example`}},
-		{"jos\u00e9@x.example", []string{"jos\u00e9@x.example", "jose\u0301@x.example"}},
-		{"Jos\u00e9@X.Example", []string{"Jos\u00e9@X.Example", "jose\u0301@x.example"}},
-		{"Ann@X.Example", []string{"Ann@X.Example"}},
-		{"jos\u00e9&b@x.example", []string{"jos\u00e9&b@x.example", "jose\u0301&b@x.example", "jos\u00e9\\u0026b@x.example", "jos\u00e9\\\\u0026b@x.example"}},
+		{"jos\u00e9@x.example", []string{
+			"jos\u00e9@x.example", "jose\u0301@x.example",
+			`jos\u00e9@x.example`, `jos\\u00e9@x.example`, `jose\u0301@x.example`, `jose\\u0301@x.example`,
+		}},
+		{"Jos\u00e9@X.Example", []string{
+			"Jos\u00e9@X.Example", "jose\u0301@x.example",
+			`jos\u00e9@x.example`, `jos\\u00e9@x.example`, `jose\u0301@x.example`, `jose\\u0301@x.example`,
+		}},
+		{"jos\u00e9&b@x.example", []string{
+			"jos\u00e9&b@x.example", "jose\u0301&b@x.example",
+			"jos\u00e9\\u0026b@x.example", "jos\u00e9\\\\u0026b@x.example",
+			"jose\u0301\\u0026b@x.example", "jose\u0301\\\\u0026b@x.example",
+			`jos\u00e9&b@x.example`, `jos\\u00e9&b@x.example`, `jose\u0301&b@x.example`, `jose\\u0301&b@x.example`,
+		}},
+		{"stra\u00dfe@x.example", []string{
+			"stra\u00dfe@x.example", "stra\u1e9ee@x.example", `stra\u00dfe@x.example`, `stra\\u00dfe@x.example`,
+		}},
+		{"STRA\u1e9eE@X.EXAMPLE", []string{
+			"STRA\u1e9eE@X.EXAMPLE", "stra\u00dfe@x.example", "stra\u1e9ee@x.example",
+			`stra\u00dfe@x.example`, `stra\\u00dfe@x.example`,
+		}},
+		{"\U00010330@x.example", []string{"\U00010330@x.example", `\ud800\udf30@x.example`, `\\ud800\\udf30@x.example`}},
 	} {
 		assert.Equal(t, tc.want, compliance.AddressTextForms(tc.address), tc.address)
 	}
@@ -152,6 +176,28 @@ func TestNamesAddress_AnyUnicodeForm(t *testing.T) {
 		{"decomposed longer address", `{"to":"jo\u0301ann@x.example"}`, "ann@x.example", false},
 	} {
 		assert.Equal(t, tc.want, compliance.NamesAddress(tc.text, tc.address), tc.name)
+	}
+}
+
+// An encoder that escapes every character outside ASCII spells the address
+// with \u escapes, and the text around it can be encoded again. The check
+// reads the decoded address, in either case of hex digit, and still refuses a
+// longer address or another person.
+func TestNamesAddress_NonASCIIEscaped(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, text string
+		want       bool
+	}{
+		{"once", `{"to":"jos\u00e9@x.example"}`, true},
+		{"twice", `{"body":"{\"to\":\"jos\\u00e9@x.example\"}"}`, true},
+		{"upper-case hex", `{"body":"{\"to\":\"jos\\u00E9@x.example\"}"}`, true},
+		{"decomposed", `{"body":"{\"to\":\"jose\\u0301@x.example\"}"}`, true},
+		{"in a line that is not JSON", `sent to jos\u00e9@x.example`, true},
+		{"longer address", `{"body":"{\"to\":\"xjos\\u00e9@x.example\"}"}`, false},
+		{"another person", `{"body":"{\"to\":\"jose@x.example\"}"}`, false},
+	} {
+		assert.Equal(t, tc.want, compliance.NamesAddress(tc.text, "jos\u00e9@x.example"), tc.name)
 	}
 }
 
