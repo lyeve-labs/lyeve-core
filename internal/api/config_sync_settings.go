@@ -103,9 +103,20 @@ func (s *settingsSection) ApplyConfig(ctx context.Context, tx core.Querier, data
 		return core.ConfigApplied{}, err
 	}
 	tenantID := tenant.ID(ctx)
-	stored, err := readSettingsRow(ctx, tx, tenantID)
+	stored, err := lockSettingsRow(ctx, tx, s.dialect, tenantID)
 	if err != nil {
 		return core.ConfigApplied{}, &core.ConfigApplyError{Key: settingsSectionName, Err: err}
+	}
+	if stored == nil && len(want) > 0 {
+		// A row lock needs a row. Creating it first makes a writer that is
+		// creating it too wait for this transaction, rather than both writing
+		// a row that holds only their own keys.
+		if _, err := tx.Exec(ctx, db.PluginConfigCreateSQL(s.dialect), tenantID, config.CoreSettingsOwner); err != nil {
+			return core.ConfigApplied{}, &core.ConfigApplyError{Key: settingsSectionName, Err: fmt.Errorf("create settings: %w", err)}
+		}
+		if stored, err = lockSettingsRow(ctx, tx, s.dialect, tenantID); err != nil {
+			return core.ConfigApplied{}, &core.ConfigApplyError{Key: settingsSectionName, Err: err}
+		}
 	}
 	plan := planSettings(want, stored, opts.Prune)
 	if len(plan.Problems) > 0 {
@@ -202,12 +213,11 @@ func planSettings(want, stored map[string]any, prune bool) core.ConfigPlan {
 	return plan
 }
 
-// readSettingsRow reads the admin layer row as stored, sealed credentials and
-// all, through q.
-func readSettingsRow(ctx context.Context, q core.Querier, tenantID string) (map[string]any, error) {
-	row, err := q.QueryRow(ctx,
-		`SELECT config FROM sys_plugin_config WHERE tenant_id = $1 AND plugin_name = $2`,
-		tenantID, config.CoreSettingsOwner)
+// lockSettingsRow reads the admin layer row as stored, sealed credentials and
+// all, through q, and locks it until q's transaction ends so no other writer
+// rewrites it in between.
+func lockSettingsRow(ctx context.Context, q core.Querier, dialect, tenantID string) (map[string]any, error) {
+	row, err := q.QueryRow(ctx, db.PluginConfigLockSQL(dialect), tenantID, config.CoreSettingsOwner)
 	if err != nil {
 		return nil, fmt.Errorf("read settings: %w", err)
 	}

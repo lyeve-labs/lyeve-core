@@ -76,10 +76,12 @@ func (s *PluginConfigStore) GetResolved(ctx context.Context, pluginName string) 
 }
 
 func (s *PluginConfigStore) getRaw(ctx context.Context, pluginName string) (map[string]any, error) {
+	return s.readRaw(ctx, `SELECT config FROM sys_plugin_config WHERE tenant_id = $1 AND plugin_name = $2`, pluginName)
+}
+
+func (s *PluginConfigStore) readRaw(ctx context.Context, query, pluginName string) (map[string]any, error) {
 	var raw jsonColumn
-	row, qErr := s.pool.QueryRow(ctx,
-		`SELECT config FROM sys_plugin_config WHERE tenant_id = $1 AND plugin_name = $2`,
-		tenant.ID(ctx), pluginName)
+	row, qErr := s.pool.QueryRow(ctx, query, tenant.ID(ctx), pluginName)
 	if qErr != nil {
 		return nil, fmt.Errorf("get plugin config %q: %w", pluginName, qErr)
 	}
@@ -130,6 +132,34 @@ func (s *PluginConfigStore) Set(ctx context.Context, pluginName string, cfg map[
 		return fmt.Errorf("save plugin config %q: %w", pluginName, err)
 	}
 	return nil
+}
+
+// Merge sets values on top of a plugin's stored configuration and keeps every
+// other key it holds, credentials included. It creates the row when there is
+// none.
+//
+// The row is read and written in one transaction under a row lock, so two
+// merges of different keys at the same time both land: without it, each would
+// write back the row it read and the later one would drop the earlier one's
+// key.
+func (s *PluginConfigStore) Merge(ctx context.Context, pluginName string, values map[string]any, updatedBy *uuid.UUID) error {
+	return WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {
+		// Created first because a row lock needs a row: two writers that both
+		// found none would each write a row of their own keys alone.
+		if _, err := s.pool.Exec(ctx, PluginConfigCreateSQL(s.pool.Engine()), tenant.ID(ctx), pluginName); err != nil {
+			return fmt.Errorf("create plugin config %q: %w", pluginName, err)
+		}
+		stored, err := s.readRaw(ctx, PluginConfigLockSQL(s.pool.Engine()), pluginName)
+		if err != nil {
+			return err
+		}
+		// Credentials go in masked, and Set keeps the stored value for a mask.
+		merged := maskValues(stored)
+		for key, value := range values {
+			merged[key] = value
+		}
+		return s.Set(ctx, pluginName, merged, updatedBy)
+	})
 }
 
 // Delete removes a plugin's stored configuration, returning it to schema
@@ -197,3 +227,31 @@ func pluginConfigUpsertQuery(engine string) string {
 // that writes the row inside a transaction of its own. Its arguments are
 // tenant_id, plugin_name, the config as JSON text and updated_by.
 func PluginConfigUpsertSQL(engine string) string { return pluginConfigUpsertQuery(engine) }
+
+// PluginConfigCreateSQL inserts an empty row for a tenant and plugin unless one
+// exists. A writer that finds the row being created by another transaction
+// waits for that transaction to end. Its arguments are tenant_id and
+// plugin_name.
+func PluginConfigCreateSQL(engine string) string {
+	switch engine {
+	case "mysql":
+		return `INSERT INTO sys_plugin_config (tenant_id, plugin_name, config) VALUES ($1, $2, '{}')
+		 ON DUPLICATE KEY UPDATE tenant_id = tenant_id`
+	case "mssql":
+		return `INSERT INTO sys_plugin_config (tenant_id, plugin_name, config)
+		 SELECT $1, $2, '{}'
+		 WHERE NOT EXISTS (SELECT 1 FROM sys_plugin_config WITH (UPDLOCK, HOLDLOCK) WHERE tenant_id = $1 AND plugin_name = $2)`
+	default:
+		return `INSERT INTO sys_plugin_config (tenant_id, plugin_name, config) VALUES ($1, $2, '{}')
+		 ON CONFLICT (tenant_id, plugin_name) DO NOTHING`
+	}
+}
+
+// PluginConfigLockSQL reads a row's config and locks the row until the
+// transaction ends. Its arguments are tenant_id and plugin_name.
+func PluginConfigLockSQL(engine string) string {
+	if engine == "mssql" {
+		return `SELECT config FROM sys_plugin_config WITH (UPDLOCK, ROWLOCK) WHERE tenant_id = $1 AND plugin_name = $2`
+	}
+	return `SELECT config FROM sys_plugin_config WHERE tenant_id = $1 AND plugin_name = $2 FOR UPDATE`
+}
