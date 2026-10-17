@@ -47,6 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the OAuth, SAML and magic-link plugin releases this engine pins: a sign-in completed on one tenant's domain while the request carries another tenant's session is refused. An OAuth callback or a SAML assertion there answers 403, and a magic link answers as an unknown link does and is not spent. Each used to sign the person in to the session's tenant on that domain.
 - On PostgreSQL, a content read served a field removed from its content type until the removal was applied, and served, as empty values, the fields another tenant's definition of the same content type holds. Reads now build each entry from its content type's own fields, as they already did on MySQL and SQL Server.
 - A wrong password typed on one tenant's domain for an account of another tenant is logged and recorded under the account's own tenant. The domain's admins used to read in their own log stream that the address held an account elsewhere on the install, and its id.
+- On a tenant's own domain, a password sign-in or a token request acts in that domain's tenant. It admits an account whose home is that tenant, a member of the tenant with the roles its membership grants, and a super admin. Any other account is answered exactly as an address nobody holds, whether its password is right or wrong: nothing checks its password, counts the attempt toward a lockout, records its device or writes a log line. Such an account used to sign in to its own tenant on that domain, and wrong passwords typed there could lock it.
+- A second factor for a sign-in that began in another tenant is refused on a tenant's own domain before the code is checked.
 
 ### Added
 
@@ -80,6 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A session's email claim is no longer unique on an install with several tenants. An account a tenant's identity provider created carries its address there, and the same address can sign in to another tenant's account, so identify an account by its id. Migration 011 adds the account's provider address and its last provider sign-in, and runs at the next start.
 - Through the flow plugin release this engine pins: an update of a datasource whose stored secret no longer decrypts answers 409 unless it clears the secret with `"secret": null` or sends a complete new one. It used to answer 503 whatever it sent, so deleting the datasource was the only way out.
 - JSON responses escape U+2028 and U+2029, write an invalid UTF-8 sequence as U+FFFD, and compact a stored JSON value, such as a schema definition or a configuration export, before sending it. The cache tag of such a response changes once. A stored value that is not valid JSON is no longer sent as broken JSON, and its response carries the status with an empty body.
+- A super admin who signs in on a tenant's own domain acts in that domain's tenant. They used to act in their home tenant there.
 
 ### Fixed
 

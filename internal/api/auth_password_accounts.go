@@ -28,7 +28,26 @@ import (
 // no tenant, the field still chooses which of an account's own memberships the
 // session acts in, which resolveSignInTenant decides and limits to those
 // memberships.
+//
+// On a tenant's mapped domain an account the domain's tenant does not admit is
+// not found, so it takes the unknown-address path before its password or its
+// lockout is read (see hostAdmitsAccount).
 func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant string) (*domain.User, error) {
+	u, err := h.findPasswordAccount(ctx, email, bodyTenant)
+	if err != nil {
+		return nil, err
+	}
+	admitted, err := h.hostAdmitsAccount(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	if !admitted {
+		return nil, domain.ErrNotFound
+	}
+	return u, nil
+}
+
+func (h *AuthHandler) findPasswordAccount(ctx context.Context, email, bodyTenant string) (*domain.User, error) {
 	tenant := core.TenantIDFromCtx(ctx)
 	if tenant == "" && core.IsValidTenantSlug(bodyTenant) {
 		tenant = bodyTenant
@@ -43,6 +62,31 @@ func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant str
 		}
 	}
 	return h.users.GetByEmail(ctx, email)
+}
+
+// hostAdmitsAccount reports whether a sign-in on the request's host may go on
+// for user. A host that names no tenant admits every account. A mapped domain
+// admits its own accounts, members of its tenant and super admins. Any other
+// account is answered as an unknown address, so a failed attempt there counts
+// nothing, locks nothing and records nothing, and the domain's tenant cannot
+// tell an address another tenant holds from a free one.
+func (h *AuthHandler) hostAdmitsAccount(ctx context.Context, user *domain.User) (bool, error) {
+	host := core.HostTenantIDFromCtx(ctx)
+	if host == "" || user.TenantID == host || hasRole(user.Roles, "super_admin") {
+		return true, nil
+	}
+	if h.memberships == nil {
+		return false, nil
+	}
+	_, err := h.memberships.Get(ctx, user.ID, host)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, core.ErrNotFound):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // failedAttemptContext is the context a failed password sign-in logs and

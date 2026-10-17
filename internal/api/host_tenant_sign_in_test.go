@@ -21,6 +21,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
 // hostSignIn holds one dialect's accounts for the sign-in tests below. Every
@@ -72,6 +73,7 @@ func (s *hostSignIn) account(t *testing.T, home string, roles []string) string {
 type signIn struct {
 	code    int
 	body    string
+	header  http.Header
 	cookie  bool
 	tenant  string
 	roles   []string
@@ -114,7 +116,7 @@ func (s *hostSignIn) send(t *testing.T, door string, h host, email, password, bo
 	rec := httptest.NewRecorder()
 	start := time.Now()
 	apimw.TenantHeader(true)(s.door(door)).ServeHTTP(rec, req)
-	out := signIn{code: rec.Code, body: rec.Body.String(), cookie: len(rec.Result().Cookies()) > 0, elapsed: time.Since(start)}
+	out := signIn{code: rec.Code, body: rec.Body.String(), header: rec.Header(), cookie: len(rec.Result().Cookies()) > 0, elapsed: time.Since(start)}
 	if rec.Code == http.StatusOK {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -127,29 +129,102 @@ func (s *hostSignIn) send(t *testing.T, door string, h host, email, password, bo
 }
 
 // On a tenant's mapped domain an account that is neither at home there, nor a
-// member, nor a super admin gets the answer a wrong password gets, in status,
-// body and timing, and no session.
-func TestPasswordSignIn_AnotherTenantsAccountOnADomainAnswersAsAWrongPassword(t *testing.T) {
+// member, nor a super admin is an unknown address. With the right password or
+// a wrong one it gets the answer an unknown address gets, in status, body,
+// headers, cookies and timing, and no session.
+func TestPasswordSignIn_AnotherTenantsAccountOnADomainAnswersAsAnUnknownAddress(t *testing.T) {
 	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
 		s := newHostSignIn(t, pool)
 		for _, door := range signInDoorsNames {
-			// A fresh pair per door, and fewer wrong passwords than lock an
-			// account: a locked account pays the dummy compare instead.
-			refused := s.account(t, "acme", []string{"editor"})
-			wrong := s.account(t, "acme", []string{"editor"})
-			var refusedTimes, wrongTimes []time.Duration
-			for i := 0; i < s.handler.MaxFailedAttempts-1; i++ {
-				w := s.send(t, door, globexDomain, wrong, "not-the-password", "")
-				require.Equal(t, http.StatusUnauthorized, w.code, door)
-				got := s.send(t, door, globexDomain, refused, providerTestPassword, "")
-				assert.Equal(t, w.code, got.code, "%s: status", door)
-				assert.Equal(t, w.body, got.body, "%s: body", door)
-				assert.False(t, got.cookie, "%s: a session cookie was set", door)
-				refusedTimes = append(refusedTimes, got.elapsed)
-				wrongTimes = append(wrongTimes, w.elapsed)
+			foreign := s.account(t, "acme", []string{"editor"})
+			unknown := "host-" + uuid.NewString()[:8] + "@example.com"
+			var foreignTimes, unknownTimes []time.Duration
+			for i := 0; i <= s.handler.MaxFailedAttempts; i++ {
+				for _, password := range []string{providerTestPassword, "not-the-password"} {
+					want := s.send(t, door, globexDomain, unknown, password, "")
+					require.Equal(t, http.StatusUnauthorized, want.code, door)
+					got := s.send(t, door, globexDomain, foreign, password, "")
+					assert.Equal(t, want.code, got.code, "%s: status", door)
+					assert.Equal(t, want.body, got.body, "%s: body", door)
+					assert.Equal(t, want.header, got.header, "%s: headers", door)
+					assert.False(t, got.cookie, "%s: a session cookie was set", door)
+					foreignTimes = append(foreignTimes, got.elapsed)
+					unknownTimes = append(unknownTimes, want.elapsed)
+				}
 			}
-			ratio := float64(median(refusedTimes)) / float64(median(wrongTimes))
-			assert.True(t, ratio >= 0.5 && ratio <= 2.0, "%s: timing ratio %.2f, wrong password %v", door, ratio, median(wrongTimes))
+			ratio := float64(median(foreignTimes)) / float64(median(unknownTimes))
+			assert.True(t, ratio >= 0.5 && ratio <= 2.0, "%s: timing ratio %.2f, unknown address %v", door, ratio, median(unknownTimes))
+		}
+	})
+}
+
+// tracingRiskAssessor records the device history attempts and the risk
+// assessments a sign-in asks for.
+type tracingRiskAssessor struct {
+	*recordingRiskAssessor
+	assessed []uuid.UUID
+}
+
+func (a *tracingRiskAssessor) Assess(_ context.Context, userID uuid.UUID, _ security.DeviceFingerprint) (*security.RiskAssessment, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.assessed = append(a.assessed, userID)
+	return &security.RiskAssessment{}, nil
+}
+
+func (a *tracingRiskAssessor) assessedFor(userID uuid.UUID) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, id := range a.assessed {
+		if id == userID {
+			n++
+		}
+	}
+	return n
+}
+
+// An unknown address leaves nothing behind, so neither may another tenant's
+// account on a tenant's mapped domain: no failed attempt counted, no device
+// history row, no risk assessment and no log record, under either tenant.
+func TestPasswordSignIn_AnotherTenantsAccountOnADomainLeavesNoTrace(t *testing.T) {
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		s := newHostSignIn(t, pool)
+		devices := &tracingRiskAssessor{recordingRiskAssessor: &recordingRiskAssessor{}}
+		s.handler.WithDeviceRiskAssessor(devices)
+		logsFor := captureStampedLogs(t)
+		for _, door := range signInDoorsNames {
+			address := s.account(t, "acme", []string{"editor"})
+			u, err := s.users.GetByEmail(ctx, address)
+			require.NoError(t, err)
+			for i := 0; i <= s.handler.MaxFailedAttempts; i++ {
+				s.send(t, door, globexDomain, address, "not-the-password", "")
+				s.send(t, door, globexDomain, address, providerTestPassword, "")
+			}
+			count, err := s.handler.lockoutChecker.CountRecentFailures(ctx, u.ID, time.Now().Add(-s.handler.LockoutWindow))
+			require.NoError(t, err)
+			assert.Zero(t, count, "%s: failed attempts counted", door)
+			assert.Empty(t, devices.tenantsFor(u.ID), "%s: device history rows", door)
+			assert.Zero(t, devices.assessedFor(u.ID), "%s: risk assessments", door)
+			assert.Empty(t, logsFor(u.ID), "%s: log records naming the account", door)
+		}
+	})
+}
+
+// Wrong passwords on a tenant's mapped domain never lock another tenant's
+// account: it still signs in with its password on the instance host.
+func TestPasswordSignIn_AnotherTenantsAccountCannotBeLockedFromADomain(t *testing.T) {
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		s := newHostSignIn(t, pool)
+		for _, door := range signInDoorsNames {
+			address := s.account(t, "acme", []string{"editor"})
+			for i := 0; i < 2*s.handler.MaxFailedAttempts; i++ {
+				s.send(t, door, globexDomain, address, "not-the-password", "")
+			}
+			got := s.send(t, door, instanceHost, address, providerTestPassword, "")
+			assert.Equal(t, http.StatusOK, got.code, "%s: refused after wrong passwords on globex's domain", door)
+			assert.Equal(t, "acme", got.tenant, door)
 		}
 	})
 }
