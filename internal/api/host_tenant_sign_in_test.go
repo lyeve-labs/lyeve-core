@@ -331,3 +331,69 @@ func TestMFAVerify_ChallengeForAnotherTenantOnADomainIsRefused(t *testing.T) {
 		assert.Contains(t, body, string(i18n.CodeMFANotConfigured), "%s: the factor check never ran", name)
 	}
 }
+
+// A refresh family continues on a tenant's mapped domain only when it acts in
+// that tenant. A family of another tenant there was planted by an earlier
+// login that signed the account's home tenant on the domain, and it ends
+// instead of renewing that session. Elsewhere every family refreshes as before.
+func TestRefresh_FamilyOfAnotherTenantOnADomainEnds(t *testing.T) {
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		s := newHostSignIn(t, pool)
+		store := auth.NewRefreshTokenStore(auth.NewMemoryBackend(), "host-sign-in-test")
+		s.handler.WithRefreshTokenStore(store, time.Hour)
+
+		family := func(address, tenant string) string {
+			u, err := s.users.GetByEmail(ctx, address)
+			require.NoError(t, err)
+			issued, err := store.IssueForSession(ctx, u.ID.String(), tenant, u.TokenVersion, time.Hour)
+			require.NoError(t, err)
+			return issued.RefreshToken
+		}
+		refresh := func(h host, token string) signIn {
+			raw, err := json.Marshal(map[string]string{"refresh_token": token})
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(string(raw)))
+			req.Header.Set("Content-Type", "application/json")
+			req = req.WithContext(h(req.Context()))
+			rec := httptest.NewRecorder()
+			apimw.TenantHeader(true)(http.HandlerFunc(s.handler.Refresh)).ServeHTTP(rec, req)
+			out := signIn{code: rec.Code, body: rec.Body.String(), cookie: len(rec.Result().Cookies()) > 0}
+			if rec.Code == http.StatusOK {
+				var resp map[string]any
+				require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+				tok, _ := resp["token"].(string)
+				claims, err := auth.Parse(s.secret, tok)
+				require.NoError(t, err, "body=%q", rec.Body.String())
+				out.tenant = claims.TenantID
+			}
+			return out
+		}
+
+		plantedToken := family(s.acme, "acme")
+		planted := refresh(globexDomain, plantedToken)
+		assert.Equal(t, http.StatusUnauthorized, planted.code, "an acme family on globex's domain")
+		assert.False(t, planted.cookie, "an acme family on globex's domain set a cookie")
+		// The refusal rotated the token, so presenting it again is reuse unless
+		// the refusal ended the family first.
+		_, err := store.Rotate(ctx, plantedToken, time.Hour)
+		assert.ErrorIs(t, err, auth.ErrFamilyRevoked, "the refused family was not ended")
+
+		super := refresh(globexDomain, family(s.super, "acme"))
+		assert.Equal(t, http.StatusUnauthorized, super.code, "a super admin's acme family on globex's domain")
+
+		own := refresh(globexDomain, family(s.globex, "globex"))
+		assert.Equal(t, http.StatusOK, own.code, "globex's own family")
+		assert.Equal(t, "globex", own.tenant)
+
+		member := refresh(globexDomain, family(s.member, "globex"))
+		assert.Equal(t, http.StatusOK, member.code, "a member's globex family")
+		assert.Equal(t, "globex", member.tenant)
+
+		for name, h := range map[string]host{"instance host": instanceHost, "sole tenant fallback": soleTenantHost} {
+			got := refresh(h, family(s.acme, "acme"))
+			assert.Equal(t, http.StatusOK, got.code, "an acme family on the %s", name)
+			assert.Equal(t, "acme", got.tenant, name)
+		}
+	})
+}

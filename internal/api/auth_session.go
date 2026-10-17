@@ -291,6 +291,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A sign-in on a tenant's mapped domain acts in that tenant, so a family of
+	// any other tenant presented there comes from an earlier login that signed
+	// the account's home tenant on the domain. It ends here rather than renew
+	// that session's cookie on a host it does not belong to.
+	if host := core.HostTenantIDFromCtx(r.Context()); host != "" && rotated.TenantID != host {
+		if err := h.refreshTokenStore.RevokeFamily(r.Context(), rotated.FamilyID); err != nil {
+			slog.Warn("revoke refresh family presented on another tenant's domain", "err", err)
+		}
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeUnauthorized, nil)
+		return
+	}
+
 	// Load user data for the new access token claims.
 	userID, err := uuid.Parse(rotated.UserID)
 	if err != nil {

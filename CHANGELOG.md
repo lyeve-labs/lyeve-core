@@ -48,6 +48,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - On PostgreSQL, a content read served a field removed from its content type until the removal was applied, and served, as empty values, the fields another tenant's definition of the same content type holds. Reads now build each entry from its content type's own fields, as they already did on MySQL and SQL Server.
 - A wrong password typed on one tenant's domain for an account of another tenant is logged and recorded under the account's own tenant. The domain's admins used to read in their own log stream that the address held an account elsewhere on the install, and its id.
 - On a tenant's own domain, a password sign-in or a token request acts in that domain's tenant. It admits an account whose home is that tenant, a member of the tenant with the roles its membership grants, and a super admin. Any other account is answered exactly as an address nobody holds, whether its password is right or wrong: nothing checks its password, counts the attempt toward a lockout, records its device or writes a log line. Such an account used to sign in to its own tenant on that domain, and wrong passwords typed there could lock it.
+- A refresh token for a session of another tenant is refused on a tenant's own domain, and that session ends. Earlier releases could leave such a session on a domain when an account of another tenant signed in there.
 - A second factor for a sign-in that began in another tenant is refused on a tenant's own domain before the code is checked.
 
 ### Added
