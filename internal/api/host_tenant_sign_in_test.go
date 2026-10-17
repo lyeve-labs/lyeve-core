@@ -300,6 +300,9 @@ func TestPasswordSignIn_OnTheInstanceHostIsUnchanged(t *testing.T) {
 				outsider := s.send(t, door, h, nonMember, providerTestPassword, "globex")
 				assert.Equal(t, wrong.code, outsider.code, "%s: a non-member naming globex", at)
 				assert.Equal(t, wrong.body, outsider.body, "%s: a non-member naming globex", at)
+				outsider = s.send(t, door, h, nonMember, providerTestPassword, core.DefaultTenantSlug)
+				assert.Equal(t, wrong.code, outsider.code, "%s: a non-member naming the default tenant", at)
+				assert.Equal(t, wrong.body, outsider.body, "%s: a non-member naming the default tenant", at)
 			}
 		}
 	})
