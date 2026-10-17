@@ -80,7 +80,7 @@ type engineHost struct {
 	// Wired by SetAdminSeatMembers (runtime boot, once the membership
 	// reader is resolved). Atomic because plugins that started earlier may
 	// already be serving a write. Until then the admin seat guard counts the
-	// accounts' own roles only.
+	// accounts' own roles only, and SignSessionToken signs the row's roles.
 	seatMembers atomic.Pointer[membershipBox]
 
 	// Wired by RegisterEmailSender (the registering plugin's Start). Nil-safe:
