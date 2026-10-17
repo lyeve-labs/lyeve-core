@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - On a tenant's own domain, a password sign-in or a token request acts in that domain's tenant. It admits an account whose home is that tenant, a member of the tenant with the roles its membership grants, and a super admin. Any other account is answered exactly as an address nobody holds, whether its password is right or wrong: nothing checks its password, counts the attempt toward a lockout, records its device or writes a log line. Such an account used to sign in to its own tenant on that domain, and wrong passwords typed there could lock it.
 - A refresh token for a session of another tenant is refused on a tenant's own domain, and that session ends. Earlier releases could leave such a session on a domain when an account of another tenant signed in there.
 - A second factor for a sign-in that began in another tenant is refused on a tenant's own domain before the code is checked.
+- A session signed for a passkey, single sign-on or magic link sign-in carries the roles the account holds in its own tenant, a membership that changed them included. Such a session used to carry the roles on the account itself, so an administrator demoted through a membership signed in again as an administrator.
 
 ### Added
 

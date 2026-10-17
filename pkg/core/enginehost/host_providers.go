@@ -324,9 +324,16 @@ func (h *engineHost) Secrets(key string) (vals []string, found bool) {
 
 // SignSessionToken implements SessionTokenSigner. Signs using the host's
 // internal signing key (EdDSA when wired, else HMAC-SHA256 with the first
-// configured secret). The caller supplies only the session identity. The
-// host controls the signing material so compromised plugins cannot forge
-// tokens with arbitrary secrets or roles.
+// configured secret). The host controls the signing material so compromised
+// plugins cannot forge tokens with arbitrary secrets or roles.
+//
+// The roles argument is ignored whenever the host has a database. The roles
+// come from the account, as the engine's own sign-in gives them in the
+// account's home tenant: the home membership's roles when one exists,
+// otherwise the roles on the user row. A caller passes the row's roles, so
+// honoring the argument would sign an administrator a membership demoted as
+// an administrator again. The parameter stays so no plugin has to change. A
+// host with no database has no account to read and signs the roles as passed.
 func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, email string, roles []string) (string, error) {
 	expiry := h.cfg.JWTExpirySecs
 	if expiry <= 0 {
@@ -357,17 +364,45 @@ func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 	if facts.inactive {
 		return "", core.ErrAccountInactive
 	}
+	if h.rawDB != nil {
+		if roles, err = h.homeRoles(ctx, userID, facts); err != nil {
+			return "", err
+		}
+	}
 	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion)
+}
+
+// homeRoles is the roles a session acting in the account's home tenant
+// carries, by the rule the engine's own sign-in applies there. A membership
+// for the home tenant overrides the row, for super_admin too. No membership
+// leaves the row's roles. Any other reader error refuses to sign, because a
+// token signed past it would carry roles the membership may have taken away.
+func (h *engineHost) homeRoles(ctx context.Context, userID uuid.UUID, facts sessionFacts) ([]string, error) {
+	reader := h.membershipReader()
+	if reader == nil {
+		return facts.roles, nil
+	}
+	m, err := reader.Get(ctx, userID, facts.tenantID)
+	switch {
+	case err == nil:
+		return m.Roles, nil
+	case errors.Is(err, core.ErrNotFound):
+		return facts.roles, nil
+	default:
+		return nil, fmt.Errorf("home membership: %w", err)
+	}
 }
 
 // sessionFacts is what a session token needs from the account row.
 type sessionFacts struct {
 	tenantID     string
 	tokenVersion int
+	roles        []string
 	inactive     bool // disabled, erased, or past expires_at
 }
 
-// sessionFactsFor reads the tenant and token version stamped on a user row.
+// sessionFactsFor reads the tenant, token version and roles stamped on a user
+// row.
 //
 // It goes to the master pool directly rather than through h.pool, because
 // h.pool routes through the tenant-isolated connection when the request context
@@ -393,8 +428,8 @@ func (h *engineHost) sessionFactsFor(ctx context.Context, userID uuid.UUID) (ses
 	var expiresAt sql.NullTime
 	// lyeve:cross-tenant sys_users the account signing in names its own tenant. There is no session yet to scope this by
 	row := master.QueryRowContext(ctx,
-		`SELECT tenant_id, token_version, disabled, anonymized, expires_at FROM sys_users WHERE id = `+placeholder, userID)
-	if err := row.Scan(&f.tenantID, &f.tokenVersion, &disabled, &anonymized, &expiresAt); err != nil {
+		`SELECT tenant_id, token_version, roles, disabled, anonymized, expires_at FROM sys_users WHERE id = `+placeholder, userID)
+	if err := row.Scan(&f.tenantID, &f.tokenVersion, db.NewRolesScanner(&f.roles), &disabled, &anonymized, &expiresAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sessionFacts{}, core.ErrAccountInactive
 		}
