@@ -18,7 +18,6 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
-	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
@@ -538,7 +537,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	// arrived on. A challenge for another tenant presented on a tenant's
 	// mapped domain is not this host's, so it is refused before the second
 	// factor is read or spent.
-	if host := core.HostTenantIDFromCtx(r.Context()); host != "" && claims.TenantID != host {
+	if host := signInHostTenant(r.Context()); host != "" && claims.TenantID != host {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeChallengeExpired, nil)
 		return
 	}

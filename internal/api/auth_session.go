@@ -295,7 +295,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// any other tenant presented there comes from an earlier login that signed
 	// the account's home tenant on the domain. It ends here rather than renew
 	// that session's cookie on a host it does not belong to.
-	if host := core.HostTenantIDFromCtx(r.Context()); host != "" && rotated.TenantID != host {
+	if host := signInHostTenant(r.Context()); host != "" && rotated.TenantID != host {
 		if err := h.refreshTokenStore.RevokeFamily(r.Context(), rotated.FamilyID); err != nil {
 			slog.Warn("revoke refresh family presented on another tenant's domain", "err", err)
 		}

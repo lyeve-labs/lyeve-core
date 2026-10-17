@@ -81,13 +81,15 @@ type signIn struct {
 }
 
 // host names where a request arrives: a mapped domain, the instance host of
-// an install with one tenant, or the instance host of one with several.
+// an install with one tenant, the instance host of one with several, or that
+// host mapped to the default tenant so anonymous reads there name a tenant.
 type host func(context.Context) context.Context
 
 var (
-	globexDomain   host = func(ctx context.Context) context.Context { return core.WithTenantID(ctx, "globex") }
-	soleTenantHost host = func(ctx context.Context) context.Context { return core.WithFallbackTenantID(ctx, "acme") }
-	instanceHost   host = func(ctx context.Context) context.Context { return ctx }
+	globexDomain      host = func(ctx context.Context) context.Context { return core.WithTenantID(ctx, "globex") }
+	soleTenantHost    host = func(ctx context.Context) context.Context { return core.WithFallbackTenantID(ctx, "acme") }
+	instanceHost      host = func(ctx context.Context) context.Context { return ctx }
+	defaultTenantHost host = func(ctx context.Context) context.Context { return core.WithTenantID(ctx, core.DefaultTenantSlug) }
 )
 
 // signInDoorsNames are the engine's two password sign-ins.
@@ -264,11 +266,12 @@ func TestPasswordSignIn_OnADomainActsInTheDomainsTenant(t *testing.T) {
 
 // A host that names no tenant (the instance's own host, with one tenant or
 // several) signs in as before: the home tenant, or the body's tenant for a
-// member or a super admin.
+// member or a super admin. So does a host mapped to the default tenant, which
+// is the install's shared host and not a tenant's own domain.
 func TestPasswordSignIn_OnTheInstanceHostIsUnchanged(t *testing.T) {
 	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
 		s := newHostSignIn(t, pool)
-		hosts := map[string]host{"instance host": instanceHost, "sole tenant fallback": soleTenantHost}
+		hosts := map[string]host{"instance host": instanceHost, "sole tenant fallback": soleTenantHost, "host mapped to the default tenant": defaultTenantHost}
 		for hostName, h := range hosts {
 			for _, door := range signInDoorsNames {
 				at := fmt.Sprintf("%s on the %s", door, hostName)
@@ -290,8 +293,11 @@ func TestPasswordSignIn_OnTheInstanceHostIsUnchanged(t *testing.T) {
 				assert.Equal(t, http.StatusOK, super.code, at)
 				assert.Equal(t, "globex", super.tenant, at)
 
-				wrong := s.send(t, door, h, s.acme, "not-the-password", "")
-				outsider := s.send(t, door, h, s.acme, providerTestPassword, "globex")
+				// A fresh account each time, so the wrong passwords across every
+				// host and door stay under the lockout that would refuse s.acme.
+				nonMember := s.account(t, "acme", []string{"editor"})
+				wrong := s.send(t, door, h, nonMember, "not-the-password", "")
+				outsider := s.send(t, door, h, nonMember, providerTestPassword, "globex")
 				assert.Equal(t, wrong.code, outsider.code, "%s: a non-member naming globex", at)
 				assert.Equal(t, wrong.body, outsider.body, "%s: a non-member naming globex", at)
 			}
@@ -301,7 +307,9 @@ func TestPasswordSignIn_OnTheInstanceHostIsUnchanged(t *testing.T) {
 
 // An MFA challenge completes only where its sign-in could have started. On a
 // tenant's mapped domain a challenge for another tenant is refused before the
-// second factor is read, and elsewhere it goes on to the factor check.
+// second factor is read, and elsewhere it goes on to the factor check. A host
+// mapped to the default tenant is elsewhere, since every tenant's sign-in may
+// begin there.
 func TestMFAVerify_ChallengeForAnotherTenantOnADomainIsRefused(t *testing.T) {
 	t.Parallel()
 	h := NewAuthHandler(&fakeUserStore{}, &failingMFAStore{}, nil, "secret", 3600, false)
@@ -321,7 +329,7 @@ func TestMFAVerify_ChallengeForAnotherTenantOnADomainIsRefused(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, code)
 	assert.Contains(t, body, string(i18n.CodeChallengeExpired))
 
-	for name, at := range map[string]host{"the domain's own tenant": globexDomain, "the instance host": instanceHost} {
+	for name, at := range map[string]host{"the domain's own tenant": globexDomain, "the instance host": instanceHost, "a host mapped to the default tenant": defaultTenantHost} {
 		tenant := "acme"
 		if name == "the domain's own tenant" {
 			tenant = "globex"
@@ -335,7 +343,8 @@ func TestMFAVerify_ChallengeForAnotherTenantOnADomainIsRefused(t *testing.T) {
 // A refresh family continues on a tenant's mapped domain only when it acts in
 // that tenant. A family of another tenant there was planted by an earlier
 // login that signed the account's home tenant on the domain, and it ends
-// instead of renewing that session. Elsewhere every family refreshes as before.
+// instead of renewing that session. Elsewhere every family refreshes as before,
+// on a host mapped to the default tenant too.
 func TestRefresh_FamilyOfAnotherTenantOnADomainEnds(t *testing.T) {
 	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
 		ctx := context.Background()
@@ -390,10 +399,36 @@ func TestRefresh_FamilyOfAnotherTenantOnADomainEnds(t *testing.T) {
 		assert.Equal(t, http.StatusOK, member.code, "a member's globex family")
 		assert.Equal(t, "globex", member.tenant)
 
-		for name, h := range map[string]host{"instance host": instanceHost, "sole tenant fallback": soleTenantHost} {
+		for name, h := range map[string]host{"instance host": instanceHost, "sole tenant fallback": soleTenantHost, "host mapped to the default tenant": defaultTenantHost} {
 			got := refresh(h, family(s.acme, "acme"))
 			assert.Equal(t, http.StatusOK, got.code, "an acme family on the %s", name)
 			assert.Equal(t, "acme", got.tenant, name)
 		}
 	})
+}
+
+// Only the default tenant's canonical slug makes a mapped host shared. Every
+// other host tenant holds a sign-in to itself, a spelling of the default
+// tenant the engine never issues included, which resolveActingTenant refuses.
+func TestSignInHostTenant_OnlyTheDefaultTenantsSlugIsShared(t *testing.T) {
+	t.Parallel()
+	cases := map[string]struct {
+		at   host
+		want string
+	}{
+		"instance host":                     {instanceHost, ""},
+		"sole tenant fallback":              {soleTenantHost, ""},
+		"host mapped to the default tenant": {defaultTenantHost, ""},
+		"another tenant's domain":           {globexDomain, "globex"},
+		"a spelling never issued": {func(ctx context.Context) context.Context {
+			return core.WithTenantID(ctx, "Default")
+		}, "Default"},
+	}
+	for name, c := range cases {
+		var got string
+		probe := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = signInHostTenant(r.Context()) })
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		apimw.TenantHeader(true)(probe).ServeHTTP(httptest.NewRecorder(), req.WithContext(c.at(req.Context())))
+		assert.Equal(t, c.want, got, name)
+	}
 }
