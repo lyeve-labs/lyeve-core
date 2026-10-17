@@ -11,7 +11,10 @@ var (
 
 // SetUserProvisioner implements core.UserProvisionerSetter. Called by the
 // plugin that supplies just-in-time provisioning, from its Start.
-func (h *engineHost) SetUserProvisioner(p core.UserProvisioner) { h.userProvisioner = p }
+func (h *engineHost) SetUserProvisioner(p core.UserProvisioner) error {
+	h.userProvisioner = p
+	return nil
+}
 
 // UserProvisioner implements core.UserProvisionerProvider. Returns the
 // registered provisioner, or nil when no plugin has registered one.

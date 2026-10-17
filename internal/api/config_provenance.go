@@ -7,7 +7,6 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
-	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -154,23 +153,10 @@ func configSaveHandler(store *db.PluginConfigStore, reloader PluginConfigReloade
 			return
 		}
 
-		// Merge onto what is already stored rather than replacing it: a save
-		// carries the fields one screen edited, and Set writes the whole row.
-		// A credential reads back as the mask, and submitting the mask leaves
-		// the stored value alone, so untouched secrets survive the round trip.
-		merged, err := store.Get(r.Context(), config.CoreSettingsOwner)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to load stored settings")
-			return
-		}
-		if merged == nil {
-			merged = map[string]any{}
-		}
-		for key, value := range accepted {
-			merged[key] = value
-		}
-
-		if err := store.Set(r.Context(), config.CoreSettingsOwner, merged, actorID(r)); err != nil {
+		// Merged onto what is already stored rather than replacing it: a save
+		// carries the fields one screen edited, and a concurrent save of other
+		// keys must survive it.
+		if _, err := store.Merge(r.Context(), config.CoreSettingsOwner, accepted, actorID(r)); err != nil {
 			if errors.Is(err, db.ErrNoSealer) {
 				httpx.ErrorReq(w, r, http.StatusPreconditionFailed,
 					"cannot store a credential without an encryption key: set ENCRYPTION_KEY")

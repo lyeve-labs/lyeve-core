@@ -101,9 +101,11 @@ func TestMigrationLock_UnknownDialectIsANoop(t *testing.T) {
 // a silent no-op.
 func TestMigrationLock_LockAndUnlockAgreeOnDialects(t *testing.T) {
 	for _, d := range []string{"postgres", "postgresql", "mysql", "mssql", "sqlserver"} {
-		require.NotEmptyf(t, lockSQLFor(d), "no lock statement for %s", d)
-		require.NotEmptyf(t, unlockSQLFor(d), "no unlock statement for %s", d)
+		require.NotEmptyf(t, lockSQLFor(d, migrationLockName), "no lock statement for %s", d)
+		require.NotEmptyf(t, unlockSQLFor(d, migrationLockName), "no unlock statement for %s", d)
+		require.Containsf(t, lockSQLFor(d, "k"), "'k'", "the lock for %s does not name its key", d)
+		require.Containsf(t, unlockSQLFor(d, "k"), "'k'", "the release for %s does not name its key", d)
 	}
-	require.Empty(t, lockSQLFor("cockroach"))
-	require.Empty(t, unlockSQLFor("cockroach"))
+	require.Empty(t, lockSQLFor("cockroach", migrationLockName))
+	require.Empty(t, unlockSQLFor("cockroach", migrationLockName))
 }

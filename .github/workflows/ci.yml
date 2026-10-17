@@ -152,6 +152,10 @@ jobs:
         run: go mod verify
         env:
           GOWORK: off
+      # The release workflow decides which image tags a release ref moves from
+      # this script alone, so its rules are tested before any tag reaches it.
+      - name: image tag rules
+        run: bash .github/scripts/image-tags_test.sh
       - name: gofmt
         run: |
           unformatted=$(gofmt -l .)

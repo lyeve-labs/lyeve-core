@@ -4,25 +4,34 @@
 # linux/arm64) and pushes ghcr.io/lyeve-labs/lyeve-core with three tags:
 #   X.Y.Z (immutable), X.Y (rolling minor) and latest
 #
+# A release candidate tag, `vX.Y.Z-rc.N`, runs the same suite and the same
+# build and publishes one tag, X.Y.Z-rc.N. It never moves X.Y or latest.
+# .github/scripts/image-tags.sh holds both rules and refuses any other tag.
+#
 # The image tags carry no `v`: the tag step strips it (${RELEASE_REF#v}),
 # so the git tag v0.22.0 publishes as :0.22.0. A `v`-prefixed image tag does
 # not exist.
 #
 # Triggers on a vX.Y.Z tag push, or on manual workflow_dispatch with a `tag`
 # input to rebuild an existing tag (e.g. when a push lands during an Actions
-# outage). Both resolve RELEASE_REF and publish identical artifacts.
+# outage). Both resolve RELEASE_REF and publish identical artifacts. Dispatch
+# on the tag itself (`--ref vX.Y.Z -f tag=vX.Y.Z`), because the secrets below
+# live in the `release` environment and a run from a branch cannot enter it.
 #
 # cmd/lyeve blank-imports every plugin, and each plugin replaces lyeve-core with
 # a sibling path, so the build needs the whole workspace checked out as siblings:
 # lyeve-core, lyeve-libs, and one directory per plugin. The binary is static and
 # CGO-free (libwebp embedded as WASM via the `nodynamic` tag), so both arches
-# cross-compile on one amd64 runner, with no native arm runner and no QEMU.
+# cross-compile on one amd64 runner, with no native arm runner. The arm64
+# binary's boot check runs it under QEMU user-mode emulation.
 #
 # This deliberately avoids docker/metadata-action:
 # tags/labels are derived in shell so a GitHub REST API blip can't fail a
 # release. GHCR, Actions runners, and Git are the only services needed.
 #
-# Required secrets:
+# Required secrets. Both stored ones belong to the `release` environment,
+# which admits only a `v*` tag ref. Keep them out of the repository's own
+# secrets, which a run dispatched from any branch could read.
 #   GITHUB_TOKEN - built-in, pushes to GHCR.
 #   WORKSPACE_READ_TOKEN - PAT / GitHub App token with read on the
 #                             lyeve-labs/lyeve-plugin-* and lyeve-libs repos
@@ -30,6 +39,8 @@
 #   LICENSE_PUBLIC_KEY_HEX - the license verifier's public key, as hex, baked
 #                             into the binary so licenses verify. If unset the
 #                             image boots and no license verifies.
+#   RELEASE_BUILD_SEED: required. The release build seed consumed by release.mk.
+#                             The release builds no image without it.
 
 name: release
 
@@ -42,7 +53,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing vX.Y.Z tag to (re)build and publish'
+        description: 'Existing vX.Y.Z or vX.Y.Z-rc.N tag to (re)build and publish'
         required: true
         type: string
 
@@ -91,6 +102,7 @@ jobs:
     name: build, push & tag
     needs: test
     runs-on: ubuntu-24.04
+    environment: release
     permissions:
       contents: read
       packages: write # pushes the image to GHCR
@@ -105,15 +117,16 @@ jobs:
           persist-credentials: false
 
       # A dispatch input is free-form. A bad tag would otherwise build under a
-      # nonsense version. Fail fast unless it is a real vX.Y.Z on this repo.
+      # nonsense version. Fail fast unless it is a real vX.Y.Z or vX.Y.Z-rc.N
+      # tag on this repo.
       - name: Validate release ref
         working-directory: lyeve-core
         run: |
           set -euo pipefail
-          case "${RELEASE_REF}" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::RELEASE_REF '${RELEASE_REF}' is not a vX.Y.Z tag"; exit 1 ;;
-          esac
+          if ! bash .github/scripts/image-tags.sh "${RELEASE_REF}" >/dev/null; then
+            echo "::error::RELEASE_REF '${RELEASE_REF}' is not a vX.Y.Z or vX.Y.Z-rc.N tag"
+            exit 1
+          fi
           if ! git rev-parse -q --verify "refs/tags/${RELEASE_REF}" >/dev/null; then
             echo "::error::tag ${RELEASE_REF} does not exist in this repo"
             exit 1
@@ -224,24 +237,44 @@ jobs:
           # otherwise. A PAT with write:packages can create the package.
           password: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
 
-      # For each arch: cross-compile the static binary, then build that arch's
-      # image and push it by digest. No QEMU: the file-prep stage runs on the
-      # native build platform and the runtime stage only copies the binary.
+      # The build starts each arch's binary before it builds that arch's image,
+      # and this runner is amd64, so the arm64 binary runs under QEMU
+      # user-mode emulation. The package ships qemu-aarch64-static.
+      - name: Install QEMU user-mode emulation
+        run: |
+          set -euo pipefail
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends qemu-user-static
+          qemu-aarch64-static --version
+
+      # For each arch: cross-compile the static binary, start it, then build
+      # that arch's image and push it by digest. The image build needs no QEMU:
+      # the file-prep stage runs on the native build platform and the runtime
+      # stage only copies the binary.
       - name: Build & push each arch by digest
         working-directory: lyeve-core
         env:
+          # A binary the runner cannot start fails the build instead of
+          # skipping its boot check.
+          RELEASE_BOOT_EVERY_ARCH: '1'
           VERSION: ${{ env.RELEASE_REF }}
           COMMIT: ${{ github.sha }}
           LICENSE_PUBLIC_KEY_HEX: ${{ secrets.LICENSE_PUBLIC_KEY_HEX }}
+          RELEASE_BUILD_SEED: ${{ secrets.RELEASE_BUILD_SEED }}
         run: |
           set -euo pipefail
+          if [ -z "${RELEASE_BUILD_SEED:-}" ]; then
+            echo "::error::RELEASE_BUILD_SEED is not set in the release environment, so no release image is built."
+            exit 1
+          fi
           mkdir -p "${{ runner.temp }}/digests"
           for arch in ${PLATFORMS}; do
             echo "::group::$arch"
             GOARCH="$arch" make -f ../lyeve-libs/release/release.mk -f Makefile build-lyeve-image \
               VERSION="${VERSION}" \
               COMMIT="${COMMIT}" \
-              LICENSE_PUBLIC_KEY_HEX="${LICENSE_PUBLIC_KEY_HEX:-0000000000000000000000000000000000000000000000000000000000000000}"
+              LICENSE_PUBLIC_KEY_HEX="${LICENSE_PUBLIC_KEY_HEX:-0000000000000000000000000000000000000000000000000000000000000000}" \
+              RELEASE_BUILD_SEED="${RELEASE_BUILD_SEED}"
 
             # Size-budget gate (see BINARY_MAX_MB).
             mb=$(( $(stat -c%s bin/lyeve) / 1024 / 1024 ))
@@ -269,15 +302,19 @@ jobs:
             echo "::endgroup::"
           done
 
-      # refs/tags/v1.2.3 -> 1.2.3, 1.2 and latest, all in shell with no REST API.
+      # v1.2.3 -> 1.2.3, 1.2 and latest. v1.2.3-rc.1 -> 1.2.3-rc.1 alone.
+      # All in shell with no REST API.
       - name: Create manifest list & push tags
         working-directory: ${{ runner.temp }}/digests
         run: |
+          set -euo pipefail
           ver="${RELEASE_REF#v}"
-          minor="${ver%.*}"
           img="${REGISTRY}/${IMAGE_NAME}"
-          docker buildx imagetools create \
-            -t "${img}:${ver}" -t "${img}:${minor}" -t "${img}:latest" \
+          args=()
+          while read -r t; do args+=(-t "${img}:${t}"); done \
+            < <(bash "${GITHUB_WORKSPACE}/lyeve-core/.github/scripts/image-tags.sh" "${RELEASE_REF}")
+          echo "Publishing: ${args[*]}"
+          docker buildx imagetools create "${args[@]}" \
             $(printf "${img}@sha256:%s " *)
           docker buildx imagetools inspect "${img}:${ver}"
 

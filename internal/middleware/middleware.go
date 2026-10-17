@@ -223,7 +223,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 			}
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 				return
 			}
 			for _, n := range nets {
@@ -232,7 +232,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 					return
 				}
 			}
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 		})
 	}, nil
 }
@@ -306,8 +306,31 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenantID := ""
+			// Domain routing ran above and left the host's tenant on the core
+			// key, which the credential's tenant replaces below. A sign-in
+			// handler still needs the host's answer, so it is kept apart. A
+			// tenant the resolver picked without the host naming it, such as
+			// the only tenant an install has, is not the host's.
+			hostTenant := core.TenantIDFromCtx(r.Context())
+			if core.IsFallbackTenant(r.Context()) {
+				hostTenant = ""
+			}
 
 			if claims, ok := r.Context().Value(auth.ClaimsKey).(*auth.Claims); ok && claims != nil {
+				// On a multi-tenant install a token naming its tenant in a
+				// spelling the engine never issues is refused here. Scoping a
+				// tenant connection to it would fail too, but a request that
+				// never reads, such as a stream, never scopes one and would
+				// run under that name. A single-tenant install scopes no
+				// connection, so its accounts keep whatever name they carry.
+				if multiTenant && claims.TenantID != "" && !core.IsValidTenantSlug(claims.TenantID) {
+					slog.WarnContext(r.Context(), "refusing token whose tenant is not a canonical slug",
+						"user_id", claims.UserID, "path", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					fmt.Fprintf(w, `{"error":"invalid token tenant"}`)
+					return
+				}
 				// JWT tenant claims: always honored. In single-tenant mode,
 				// still extracted so RequireTenantID has a tenant context.
 				if multiTenant || claims.TenantID != "" {
@@ -463,6 +486,9 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			// Inject via core key so tracing (which cannot import
 			// internal/middleware) can read the tenant.
 			ctx = core.WithTenantID(ctx, tenantID)
+			if hostTenant != "" {
+				ctx = core.WithHostTenantID(ctx, hostTenant)
+			}
 			// Defense-in-depth: normalize raw header to the validated tenant.
 			// Context is canonical. This ensures code reading X-Tenant-ID
 			// sees the resolved value, never a client-supplied one.

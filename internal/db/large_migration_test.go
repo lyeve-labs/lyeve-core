@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // largeDatasetRows returns the target row count from LARGE_DATASET_ROWS env var
@@ -91,48 +94,35 @@ func seedLargeTable(t *testing.T, db *sql.DB, dialect string, rows int) (tableNa
 		}
 		insertDuration = time.Since(start)
 	} else {
-		// MySQL and MSSQL: insert in batches.
-		// MSSQL limits to 1000 rows per INSERT; MySQL handles up to ~10K comfortably.
+		// MySQL and SQL Server insert in batches. SQL Server takes at most
+		// 1,000 rows in one VALUES list, and MySQL handles 10,000 comfortably.
 		start := time.Now()
 		batchSize := 10_000
 		if dialect == "mssql" {
 			batchSize = 1_000
 		}
-		batches := rows / batchSize
-		for b := 0; b < batches; b++ {
-			var batchSQL string
-			switch dialect {
-			case "mysql":
-				batchSQL = fmt.Sprintf(`INSERT INTO %s (data, num) VALUES `, tableName)
-			case "mssql":
-				batchSQL = fmt.Sprintf(`INSERT INTO %s (data, num) VALUES `, tableName)
+		for _, batch := range seedBatches(rows, batchSize) {
+			values := make([]string, 0, batch.last-batch.first+1)
+			for idx := batch.first; idx <= batch.last; idx++ {
+				values = append(values, fmt.Sprintf("('row-%d-data', %d)", idx, idx))
 			}
-			values := make([]string, 0, batchSize)
-			for i := 0; i < batchSize; i++ {
-				idx := b*batchSize + i + 1
-				if dialect == "mysql" {
-					values = append(values, fmt.Sprintf("('%s', %d)", fmt.Sprintf("row-%d-data", idx), idx))
-				} else {
-					values = append(values, fmt.Sprintf("('%s', %d)", fmt.Sprintf("row-%d-data", idx), idx))
-				}
-			}
-			for i, v := range values {
-				if i > 0 {
-					batchSQL += ","
-				}
-				batchSQL += v
-			}
+			batchSQL := fmt.Sprintf(`INSERT INTO %s (data, num) VALUES %s`, tableName, strings.Join(values, ","))
 			if _, err := db.ExecContext(ctx, batchSQL); err != nil {
-				t.Fatalf("batch insert %d (%s): %v", b, dialect, err)
+				t.Fatalf("insert rows %d to %d (%s): %v", batch.first, batch.last, dialect, err)
 			}
 		}
 		insertDuration = time.Since(start)
 	}
 
-	// Verify row count
+	// A table seeded short fails here. Later it would read as a wrong count
+	// after the ALTER, or as errors from the concurrent readers, which both
+	// point away from the seeding.
 	var count int
 	if err := db.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", tableName)).Scan(&count); err != nil {
 		t.Fatalf("count seed rows: %v", err)
+	}
+	if count != rows {
+		t.Fatalf("seeded %s with %d rows, asked for %d", tableName, count, rows)
 	}
 	t.Logf("seeded %s with %d rows in %v", tableName, count, insertDuration.Round(time.Millisecond))
 
@@ -149,6 +139,7 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "postgres")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -196,9 +187,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 
 		// Verify index was created
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count, "index should exist")
 
 		// The read runs after index creation. The lock test below covers
@@ -218,9 +209,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 		t.Logf("PG CREATE INDEX CONCURRENTLY: %v", concDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count)
 	})
 
@@ -236,9 +227,9 @@ func TestLargeMigration_LockDetection_Postgres(t *testing.T) {
 
 		// Verify column exists and has correct default
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE status = 'active'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have status='active'")
 	})
 
@@ -262,6 +253,7 @@ func TestLargeMigration_ConcurrentAccess_Postgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "postgres")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -407,9 +399,9 @@ func TestLargeMigration_ConcurrentAccess_Postgres(t *testing.T) {
 
 	// Verify data integrity
 	var catCount int
-	db.QueryRowContext(context.Background(),
+	require.NoError(t, db.QueryRowContext(context.Background(),
 		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE category = 'general'", tableName),
-	).Scan(&catCount)
+	).Scan(&catCount))
 	assert.Equal(t, rows, catCount, "all rows should have category='general'")
 }
 
@@ -422,6 +414,7 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -469,10 +462,10 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 		t.Logf("MySQL CREATE INDEX: %v", idxDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM information_schema.statistics WHERE index_name = ?`,
 			indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Greater(t, count, 0, "index should exist")
 	})
 
@@ -487,9 +480,9 @@ func TestLargeMigration_LockDetection_MySQL(t *testing.T) {
 		t.Logf("MySQL ADD COLUMN with default: %v", addColDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE status = 'active'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have status='active'")
 	})
 
@@ -526,6 +519,7 @@ func TestLargeMigration_ConcurrentAccess_MySQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -659,9 +653,9 @@ func TestLargeMigration_ConcurrentAccess_MySQL(t *testing.T) {
 	assert.LessOrEqual(t, writeErrs, totalWrites/10, "write errors < 10%%")
 
 	var catCount int
-	db.QueryRowContext(context.Background(),
+	require.NoError(t, db.QueryRowContext(context.Background(),
 		fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE region = 'us-east-1'", tableName),
-	).Scan(&catCount)
+	).Scan(&catCount))
 	assert.Equal(t, rows, catCount, "all rows should have region='us-east-1'")
 }
 
@@ -674,6 +668,7 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large migration test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx := context.Background()
 	rows := largeDatasetRows()
@@ -711,10 +706,10 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 		t.Logf("MSSQL CREATE INDEX (offline): %v", idxDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			`SELECT COUNT(*) FROM sys.indexes WHERE name = @p1`,
 			indexName,
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, 1, count, "index should exist")
 	})
 
@@ -768,9 +763,9 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 		t.Logf("MSSQL ADD COLUMN + UPDATE + DEFAULT: %v", colDuration.Round(time.Millisecond))
 
 		var count int
-		db.QueryRowContext(ctx,
+		require.NoError(t, db.QueryRowContext(ctx,
 			fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE category = 'general'", tableName),
-		).Scan(&count)
+		).Scan(&count))
 		assert.Equal(t, rows, count, "all rows should have category='general'")
 	})
 }
@@ -783,6 +778,7 @@ func TestLargeMigration_ConcurrentAccess_MSSQL(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping concurrent access test in short mode")
 	}
+	testdialect.Require(t, "mssql")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -932,6 +928,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// PostgreSQL
 	t.Run("postgres", func(t *testing.T) {
+		testdialect.Require(t, "postgres")
 		ctx := context.Background()
 		ctr, err := postgres.RunContainer(ctx,
 			testcontainers.WithImage("postgres:16-alpine"),
@@ -978,6 +975,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// MySQL
 	t.Run("mysql", func(t *testing.T) {
+		testdialect.Require(t, "mysql")
 		ctx := context.Background()
 		ctr, err := mysql.Run(ctx, "mysql:8",
 			mysql.WithDatabase("lyeve_test"),
@@ -1032,6 +1030,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 
 	// MSSQL
 	t.Run("mssql", func(t *testing.T) {
+		testdialect.Require(t, "mssql")
 		ctx := context.Background()
 		ctr, err := tcmssql.Run(ctx,
 			"mcr.microsoft.com/azure-sql-edge:latest",

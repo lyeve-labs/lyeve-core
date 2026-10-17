@@ -31,11 +31,24 @@ func (h *engineHost) Storage() core.Storage { return h.storage }
 
 // SetStorage implements StorageSetter. Called by plugins that provide
 // alternative storage backends (e.g., S3) to replace the default Local driver.
-func (h *engineHost) SetStorage(s core.Storage) { h.storage = s }
+func (h *engineHost) SetStorage(s core.Storage) error {
+	h.storage = s
+	return nil
+}
 
 // RegisterEmailSender implements EmailSenderRegistrar. Called by the plugin
 // that supplies a mailer, from its Start, for transactional email.
-func (h *engineHost) RegisterEmailSender(s core.EmailSender) { h.emailSender = s }
+func (h *engineHost) RegisterEmailSender(s core.EmailSender) error {
+	h.emailSender = s
+	return nil
+}
+
+// RegisterOwnedRole implements core.HostRoleOwnerRegistrar. A scoped host
+// calls it under the plugin's name with the role's own registrar as set, so
+// one plugin cannot replace or clear a role another plugin holds.
+func (h *engineHost) RegisterOwnedRole(owner string, role core.HostRole, clear bool, set func() error) error {
+	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
+}
 
 // WithFlowRegistry wires the registry of flow node and trigger types the
 // activator builds from started plugins. Called once at boot, after the
@@ -70,8 +83,9 @@ func (h *engineHost) EmailSender() core.EmailSender { return h.emailSender }
 // RegisterFlowDefinitionValidator implements FlowDefinitionValidatorRegistrar.
 // Called by the plugin that runs flows, in Start with its validator and in
 // Stop with nil.
-func (h *engineHost) RegisterFlowDefinitionValidator(v core.FlowDefinitionValidator) {
+func (h *engineHost) RegisterFlowDefinitionValidator(v core.FlowDefinitionValidator) error {
 	h.flowValidator = v
+	return nil
 }
 
 // FlowDefinitionValidator implements FlowDefinitionValidatorProvider. Returns
@@ -83,8 +97,9 @@ func (h *engineHost) FlowDefinitionValidator() core.FlowDefinitionValidator {
 // RegisterFlowInvoker implements FlowInvokerRegistrar. Called by the plugin
 // that runs flows, with its invoker when it activates and with nil when it
 // deactivates.
-func (h *engineHost) RegisterFlowInvoker(inv core.FlowInvoker) {
+func (h *engineHost) RegisterFlowInvoker(inv core.FlowInvoker) error {
 	h.flowInvoker = inv
+	return nil
 }
 
 // FlowInvoker implements FlowInvokerProvider. Returns the registered invoker,
@@ -119,8 +134,9 @@ func (h *engineHost) APIRoutes() core.APIRoutes {
 // RegisterPermissionChecker implements PermissionCheckerRegistrar. Called by
 // the plugin that owns the rules, with its checker in Start and with nil in
 // Stop, so authorization follows that plugin's lifecycle.
-func (h *engineHost) RegisterPermissionChecker(c core.PermissionChecker) {
+func (h *engineHost) RegisterPermissionChecker(c core.PermissionChecker) error {
 	h.permissionChecker = c
+	return nil
 }
 
 // PermissionChecker implements PermissionCheckerProvider. Never nil: with no
@@ -137,8 +153,9 @@ func (h *engineHost) PermissionChecker() core.PermissionChecker {
 // RegisterContentLocalizer implements ContentLocalizerRegistrar. Called by
 // the plugin that owns translations, in Start with its localizer and in Stop
 // with nil.
-func (h *engineHost) RegisterContentLocalizer(l core.ContentLocalizer) {
+func (h *engineHost) RegisterContentLocalizer(l core.ContentLocalizer) error {
 	h.contentLocalizer = l
+	return nil
 }
 
 // ContentLocalizer implements ContentLocalizerProvider. Returns the
@@ -170,8 +187,9 @@ func (h *engineHost) ConfigSections() []core.ConfigSection {
 // RegisterContentEntryWriter implements ContentEntryWriterRegistrar. Called
 // by the plugin that owns the editorial store, with its writer when it
 // activates and with nil in Stop.
-func (h *engineHost) RegisterContentEntryWriter(w core.ContentEntryWriter) {
+func (h *engineHost) RegisterContentEntryWriter(w core.ContentEntryWriter) error {
 	h.contentEntryWriter = w
+	return nil
 }
 
 // ContentEntryWriter implements ContentEntryWriterProvider. Returns the
@@ -236,8 +254,9 @@ func (h *engineHost) WithContentStore(store *db.ContentStore) {
 // owns schema definitions calls it in Start with its engine and in Stop with
 // nil. This module builds no schema engine, so the registered one is the only
 // one the install has.
-func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) {
+func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) error {
 	h.suppliedSchema = e
+	return nil
 }
 
 // Schema implements core.Host.Schema. It is whatever a plugin registered, and
@@ -305,9 +324,16 @@ func (h *engineHost) Secrets(key string) (vals []string, found bool) {
 
 // SignSessionToken implements SessionTokenSigner. Signs using the host's
 // internal signing key (EdDSA when wired, else HMAC-SHA256 with the first
-// configured secret). The caller supplies only the session identity. The
-// host controls the signing material so compromised plugins cannot forge
-// tokens with arbitrary secrets or roles.
+// configured secret). The host controls the signing material so compromised
+// plugins cannot forge tokens with arbitrary secrets or roles.
+//
+// The roles argument is ignored whenever the host has a database. The roles
+// come from the account, as the engine's own sign-in gives them in the
+// account's home tenant: the home membership's roles when one exists,
+// otherwise the roles on the user row. A caller passes the row's roles, so
+// honoring the argument would sign an administrator a membership demoted as
+// an administrator again. The parameter stays so no plugin has to change. A
+// host with no database has no account to read and signs the roles as passed.
 func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, email string, roles []string) (string, error) {
 	expiry := h.cfg.JWTExpirySecs
 	if expiry <= 0 {
@@ -338,17 +364,45 @@ func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 	if facts.inactive {
 		return "", core.ErrAccountInactive
 	}
+	if h.rawDB != nil {
+		if roles, err = h.homeRoles(ctx, userID, facts); err != nil {
+			return "", err
+		}
+	}
 	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion)
+}
+
+// homeRoles is the roles a session acting in the account's home tenant
+// carries, by the rule the engine's own sign-in applies there. A membership
+// for the home tenant overrides the row, for super_admin too. No membership
+// leaves the row's roles. Any other reader error refuses to sign, because a
+// token signed past it would carry roles the membership may have taken away.
+func (h *engineHost) homeRoles(ctx context.Context, userID uuid.UUID, facts sessionFacts) ([]string, error) {
+	reader := h.membershipReader()
+	if reader == nil {
+		return facts.roles, nil
+	}
+	m, err := reader.Get(ctx, userID, facts.tenantID)
+	switch {
+	case err == nil:
+		return m.Roles, nil
+	case errors.Is(err, core.ErrNotFound):
+		return facts.roles, nil
+	default:
+		return nil, fmt.Errorf("home membership: %w", err)
+	}
 }
 
 // sessionFacts is what a session token needs from the account row.
 type sessionFacts struct {
 	tenantID     string
 	tokenVersion int
+	roles        []string
 	inactive     bool // disabled, erased, or past expires_at
 }
 
-// sessionFactsFor reads the tenant and token version stamped on a user row.
+// sessionFactsFor reads the tenant, token version and roles stamped on a user
+// row.
 //
 // It goes to the master pool directly rather than through h.pool, because
 // h.pool routes through the tenant-isolated connection when the request context
@@ -374,8 +428,8 @@ func (h *engineHost) sessionFactsFor(ctx context.Context, userID uuid.UUID) (ses
 	var expiresAt sql.NullTime
 	// lyeve:cross-tenant sys_users the account signing in names its own tenant. There is no session yet to scope this by
 	row := master.QueryRowContext(ctx,
-		`SELECT tenant_id, token_version, disabled, anonymized, expires_at FROM sys_users WHERE id = `+placeholder, userID)
-	if err := row.Scan(&f.tenantID, &f.tokenVersion, &disabled, &anonymized, &expiresAt); err != nil {
+		`SELECT tenant_id, token_version, roles, disabled, anonymized, expires_at FROM sys_users WHERE id = `+placeholder, userID)
+	if err := row.Scan(&f.tenantID, &f.tokenVersion, db.NewRolesScanner(&f.roles), &disabled, &anonymized, &expiresAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return sessionFacts{}, core.ErrAccountInactive
 		}
@@ -388,8 +442,9 @@ func (h *engineHost) sessionFactsFor(ctx context.Context, userID uuid.UUID) (ses
 // RegisterRecordRevisionStore implements RecordRevisionStoreRegistrar.
 // Called by the plugin that keeps revision snapshots in Start with its store
 // and in Stop with nil.
-func (h *engineHost) RegisterRecordRevisionStore(s core.RecordRevisionStore) {
+func (h *engineHost) RegisterRecordRevisionStore(s core.RecordRevisionStore) error {
 	h.recordRevisionStore = s
+	return nil
 }
 
 // RecordRevisionStore implements RecordRevisionStoreProvider. Returns the

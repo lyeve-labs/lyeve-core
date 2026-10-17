@@ -47,7 +47,9 @@ type StorageProvider interface {
 }
 
 // StorageSetter allows a plugin to replace the default storage backend
-// (e.g., swap Local for S3 after activation).
+// (e.g., swap Local for S3 after activation). Through ScopedHost it needs
+// CapStorage, and only the plugin that set a backend may replace or clear
+// it. A refusal comes back as the error.
 type StorageSetter interface {
-	SetStorage(Storage)
+	SetStorage(Storage) error
 }

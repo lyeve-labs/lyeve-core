@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 )
 
 // AdminGate checks whether the request has admin-level auth (JWT with
@@ -58,7 +60,8 @@ func Handler(enabled bool, adminGate AdminGate) func(http.Handler) http.Handler 
 
 			data, err := report.MarshalIndent()
 			if err != nil {
-				http.Error(w, `{"error":"debug marshal failed"}`, http.StatusInternalServerError)
+				slog.ErrorContext(r.Context(), "debug: encode report", "err", err)
+				httpx.ErrorReq(w, r, http.StatusInternalServerError, "debug marshal failed")
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

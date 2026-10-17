@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db/dialect"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/tenant"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Populate resolves relation fields listed in populateFields and attaches
@@ -78,7 +80,7 @@ func (s *ContentStore) Populate(ctx context.Context, c *domain.Content, populate
 			c.Data[fieldName] = out
 
 		case domain.RelManyToMany:
-			related, _, err := s.ListRelated(ctx, c.SchemaName, c.ID, f, 500, 0)
+			related, _, err := s.ListRelated(ctx, c.SchemaName, c.ID, f, 500, 0, true)
 			if err != nil {
 				c.Data[fieldName] = []map[string]any{}
 				continue
@@ -228,8 +230,12 @@ const maxPopulateDepth = 10
 const maxBatchSize = 500
 
 // GetByIDs returns multiple content rows by their UUID primary keys in a single
-// query. Items found in the item cache are returned directly. Only uncached IDs
-// are fetched from the database. Results are written back to the item cache.
+// query. Items found in the item cache are served from it, and only uncached
+// IDs are fetched from the database and written back to the cache. Every row
+// returned is the caller's own copy, as GetByID's are: population writes the
+// related record into the row's Data, so a cached row handed out as it is
+// would carry one request's relations into every later read of that row, and
+// two requests writing it at once end the process. See content_clone.go.
 // Returns a map keyed by UUID for O(1) lookup. IDs that are not found are
 // silently omitted from the result map (same behavior as GetByID returning
 // ErrNotFound for a missing ID: the caller assigns nil to that field).
@@ -244,10 +250,10 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 	// Check item cache first.
 	tenantID := tenant.ID(ctx)
 	for _, id := range ids {
-		if s.itemCache != nil {
+		if s.itemCache != nil && writeTx(ctx) == nil {
 			key := cacheItemKey(tenantID, schemaName, id)
 			if cached, ok := s.itemCache.Get(ctx, key); ok {
-				result[id] = cached
+				result[id] = cloneContent(cached)
 				continue
 			}
 		}
@@ -302,9 +308,8 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 				return nil, scanErr
 			}
 			result[c.ID] = c
-			// Write back to item cache.
-			if s.itemCache != nil {
-				_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, c.ID), c, 0)
+			if s.itemCache != nil && writeTx(ctx) == nil {
+				_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, c.ID), cloneContent(c), 0) // err suppressed: cache is best-effort
 			}
 		}
 		if err := rows.Err(); err != nil {
@@ -400,9 +405,9 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 		return map[uuid.UUID][]*domain.Content{}, nil
 	}
 
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return nil, fmt.Errorf("list related batch: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return nil, fmt.Errorf("list related batch: ensure pivot tenant column: %w", err)
@@ -508,7 +513,8 @@ func (s *ContentStore) PopulateWithConfigBatch(ctx context.Context, items []*dom
 // RelationGate decides, per target schema, whether a populated relation may
 // be served and what of each related record may be seen. ok false leaves the
 // relation unpopulated. mask, when not nil, is applied to every related
-// record before it is written into the parent.
+// record before it is written into the parent, and a nil from it hides that
+// record: a to-one relation is served as null and a to-many one leaves it out.
 type RelationGate func(ctx context.Context, target string) (mask func(map[string]any) map[string]any, ok bool)
 
 // PopulateGated is PopulateWithConfigBatch with every relation, at every
@@ -621,15 +627,19 @@ type relationPopulate struct {
 	gate    RelationGate
 }
 
-// mask applies the requested projection, then the gate's mask, to one
-// flattened related record. The projection can only narrow, so the gate's
-// mask has the last word on what is served.
+// mask applies the gate's mask, then the requested projection, to one
+// flattened related record. The gate sees the whole record, so it can judge
+// a field the projection would drop, such as the status. A nil from the gate
+// hides the record, and the caller serves the relation as absent.
 func (r relationPopulate) mask(flat map[string]any) map[string]any {
-	if m := r.masks[r.name]; len(m) > 0 {
-		flat = applyFieldMask(flat, m)
-	}
 	if r.relMask != nil {
 		flat = r.relMask(flat)
+		if flat == nil {
+			return nil
+		}
+	}
+	if m := r.masks[r.name]; len(m) > 0 {
+		flat = applyFieldMask(flat, m)
 	}
 	return flat
 }
@@ -702,9 +712,11 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 			items[i].Data[fieldName] = nil
 			continue
 		}
-		flat := flattenContent(related)
-		flat = rel.mask(flat)
-		items[i].Data[fieldName] = flat
+		if flat := rel.mask(flattenContent(related)); flat != nil {
+			items[i].Data[fieldName] = flat
+		} else {
+			items[i].Data[fieldName] = nil
+		}
 	}
 }
 
@@ -752,9 +764,11 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 			item.Data[fieldName] = nil
 			continue
 		}
-		flat := flattenContent(children[0])
-		flat = rel.mask(flat)
-		item.Data[fieldName] = flat
+		if flat := rel.mask(flattenContent(children[0])); flat != nil {
+			item.Data[fieldName] = flat
+		} else {
+			item.Data[fieldName] = nil
+		}
 	}
 }
 
@@ -801,9 +815,9 @@ func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain
 		}
 		out := make([]map[string]any, 0, len(children))
 		for _, r := range children {
-			flat := flattenContent(r)
-			flat = rel.mask(flat)
-			out = append(out, flat)
+			if flat := rel.mask(flattenContent(r)); flat != nil {
+				out = append(out, flat)
+			}
 		}
 		item.Data[fieldName] = out
 	}
@@ -850,20 +864,22 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 		}
 		out := make([]map[string]any, 0, len(children))
 		for _, r := range children {
-			flat := flattenContent(r)
-			flat = rel.mask(flat)
-			out = append(out, flat)
+			if flat := rel.mask(flattenContent(r)); flat != nil {
+				out = append(out, flat)
+			}
 		}
 		item.Data[fieldName] = out
 	}
 }
 
 // ListRelated returns items from the target schema related to id via a
-// many_to_many pivot table.
-func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int) ([]*domain.Content, int, error) {
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+// many_to_many pivot table. A soft-deleted target is never listed, and an
+// unpublished one only when drafts is true. The total counts what the same
+// filter would serve, so a page count never reveals a hidden row.
+func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int, drafts bool) ([]*domain.Content, int, error) {
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list related: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return nil, 0, fmt.Errorf("list related: ensure pivot tenant column: %w", err)
@@ -874,20 +890,26 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 	pivotName = s.qualify(pivotName)
 	tenantID := tenant.ID(ctx)
 
-	// Total count, scoped to the caller's tenant.
-	var total int
-	row, qErr := s.pool.QueryRow(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), id, tenantID)
-	if qErr != nil {
-		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", qErr)
-	} else if err := row.Scan(&total); err != nil {
-		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", err)
-	}
-
 	// Resolve target schema for data column expression.
 	relSchema, relErr := s.schemas.GetByName(ctx, f.RelationTo)
 	if relErr != nil {
 		return nil, 0, fmt.Errorf("list related: resolve schema %q: %w", f.RelationTo, relErr)
+	}
+	visible := draftWhere(relSchema, "t", drafts)
+	if relSchema.WithSoftDelete {
+		visible += " AND t.deleted_at IS NULL"
+	}
+
+	// Total count, scoped to the caller's tenant.
+	var total int
+	row, qErr := s.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s t JOIN %s p ON p.%s = t.id
+			WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3%s`,
+			targetTable, pivotName, bCol, aCol, visible), id, tenantID, tenantID)
+	if qErr != nil {
+		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", qErr)
+	} else if err := row.Scan(&total); err != nil {
+		slog.Warn("content: relation count query failed, pagination total defaults to 0", "table", pivotName, "err", err)
 	}
 
 	// Dialect-aware pagination ($4=limit, $5=offset; $1 is the relation id,
@@ -898,11 +920,11 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 		       %s
 		FROM %s t
 		JOIN %s p ON p.%s = t.id
-		WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3
+		WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3%s
 		ORDER BY t.created_at DESC
 		%s`,
 		dataColumnExpr(s.pool.Engine(), relSchema, "t"),
-		targetTable, pivotName, bCol, aCol, relPagination,
+		targetTable, pivotName, bCol, aCol, visible, relPagination,
 	), id, tenantID, tenantID, limit, offset)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list related %s->%s: %w", schemaName, f.RelationTo, err)
@@ -923,10 +945,15 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 // SetRelations replaces all many_to_many pivot rows for (schemaName, id, field)
 // with the provided targetIDs, scoped to the calling tenant. Runs in a
 // transaction.
+//
+// Both ends are held to the tenant, because the pivot's keys are not: a
+// source row the tenant does not hold is domain.ErrNotFound, and a target it
+// does not hold refuses the whole set as a validation error naming the field.
+// Another tenant's row is refused exactly as a row nobody holds.
 func (s *ContentStore) SetRelations(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, targetIDs []uuid.UUID) error {
-	pivotName := f.RelationThrough
-	if pivotName == "" {
-		pivotName = domain.PivotTableName(schemaName, f.RelationTo)
+	pivotName, err := s.pivotTable(ctx, schemaName, f)
+	if err != nil {
+		return fmt.Errorf("set relations: %w", err)
 	}
 	if err := s.ensureTable(ctx, pivotName); err != nil {
 		return fmt.Errorf("set relations: ensure pivot tenant column: %w", err)
@@ -935,32 +962,39 @@ func (s *ContentStore) SetRelations(ctx context.Context, schemaName string, id u
 	aCol := strings.TrimPrefix(domain.TableName(schemaName), "_") + "_id"
 	bCol := strings.TrimPrefix(domain.TableName(f.RelationTo), "_") + "_id"
 
-	// tx is a raw *sql.Tx and bypasses the pool's placeholder rewrite, so the
-	// statements are rewritten here for the target engine before execution.
-	engine := s.pool.Engine()
-	d := dialect.Must(engine)
+	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("set relations begin tx: %w", err)
-	}
-	defer tx.Rollback() //nolint:errcheck // deferred rollback. Commit result takes precedence
-
-	delQ, delArgs := rewritePlaceholders(
-		fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), engine, []any{id, tenantID})
-	if _, err := tx.ExecContext(ctx, delQ, delArgs...); err != nil {
-		return fmt.Errorf("set relations delete: %w", err)
-	}
-
-	insBase := dialect.InsertDoNothing(d, pivotName, []string{TenantColumnName, aCol, bCol}, []string{aCol, bCol})
+	source := []core.RelationValue{{Field: f.Name, Target: schemaName, Value: id}}
+	targets := make([]core.RelationValue, 0, len(targetIDs))
 	for _, tid := range targetIDs {
-		insQ, insArgs := rewritePlaceholders(insBase, engine, []any{tenantID, id, tid})
-		if _, err := tx.ExecContext(ctx, insQ, insArgs...); err != nil {
-			return fmt.Errorf("set relations insert: %w", err)
-		}
+		targets = append(targets, core.RelationValue{Field: f.Name, Target: f.RelationTo, Value: tid})
 	}
-	return tx.Commit()
+	if err := s.ensureTargetTables(ctx, append(source, targets...)); err != nil {
+		return err
+	}
+	return WriteInTransaction(ctx, s.pool, func(ctx context.Context) error {
+		if err := s.checkRelationTargets(ctx, source); err != nil {
+			if errors.Is(err, domain.ErrValidation) {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if err := s.checkRelationTargets(ctx, targets); err != nil {
+			return err
+		}
+		if _, err := s.pool.Exec(ctx,
+			fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND tenant_id = $2`, pivotName, aCol), id, tenantID); err != nil {
+			return fmt.Errorf("set relations delete: %w", err)
+		}
+		insert := dialect.InsertDoNothing(d, pivotName, []string{TenantColumnName, aCol, bCol}, []string{aCol, bCol})
+		for _, tid := range targetIDs {
+			if _, err := s.pool.Exec(ctx, insert, tenantID, id, tid); err != nil {
+				return fmt.Errorf("set relations insert: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // flattenContent merges Content.Data + id/created_at/updated_at into one map.

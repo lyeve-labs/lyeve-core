@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -105,4 +106,73 @@ func TestRouteDoc_EngineWritesNothingForAPluginRoute(t *testing.T) {
 	require.Contains(t, declared.Paths, "/api/admin/webhooks")
 	assert.Len(t, declared.Paths["/api/admin/webhooks"], 1, "only the declared method is documented")
 	assert.Equal(t, "GET /api/admin/webhooks", declared.Paths["/api/admin/webhooks"]["get"].Summary)
+}
+
+// A Doc's response media types become the content of each success response
+// that carries a body, each with the schema it names, and of no other
+// response: an error answers the engine's JSON envelope and a 204 nothing.
+func TestRouteDoc_MediaTypesDescribeTheSuccessBody(t *testing.T) {
+	row := map[string]any{"type": "object", "required": []any{"id"}}
+	doc := buildOpenAPIDoc(nil, []plugin.PluginRoutes{{Name: "reports", Routes: []plugin.RouteDecl{
+		{Method: http.MethodGet, Pattern: "/api/admin/reports/export", Group: plugin.GroupAdmin, Handler: servesOK(),
+			Doc: &core.RouteDoc{
+				Responses:          map[int]string{http.StatusOK: "The rows", http.StatusBadRequest: "An unknown format"},
+				ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "application/x-ndjson", Schema: row}},
+			}},
+		{Method: http.MethodPost, Pattern: "/api/admin/reports/runs", Group: plugin.GroupAdmin, Handler: servesOK(),
+			Doc: &core.RouteDoc{
+				Responses:          map[int]string{http.StatusCreated: "The run, as it goes", http.StatusNoContent: "Nothing to run", http.StatusNotFound: "No such report"},
+				ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/event-stream"}},
+			}},
+		{Method: http.MethodGet, Pattern: "/api/v1/reports/{id}/chart", Group: plugin.GroupAuth, Handler: servesOK(),
+			Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "image/*"}, {MediaType: "csv"}}}},
+	}}}, openAPIOptions{})
+
+	export := doc.Paths["/api/admin/reports/export"]["get"]
+	require.NotNil(t, export)
+	assert.Equal(t, openAPIResponse{Description: "The rows", Content: map[string]openAPIMediaType{
+		"text/csv": {}, "application/x-ndjson": {Schema: row},
+	}}, export.Responses["200"])
+	assert.Equal(t, map[string]any{"description": "An unknown format"}, export.Responses["400"])
+
+	runs := doc.Paths["/api/admin/reports/runs"]["post"]
+	require.NotNil(t, runs)
+	assert.Equal(t, openAPIResponse{Description: "The run, as it goes", Content: map[string]openAPIMediaType{"text/event-stream": {}}}, runs.Responses["201"])
+	assert.Equal(t, map[string]any{"description": "Nothing to run"}, runs.Responses["204"])
+	assert.Equal(t, map[string]any{"description": "No such report"}, runs.Responses["404"])
+
+	// The 200 the document writes for a Doc that names no response takes the
+	// types, and one that is not type/subtype is left out.
+	chart := doc.Paths["/api/v1/reports/{id}/chart"]["get"]
+	require.NotNil(t, chart)
+	assert.Equal(t, openAPIResponse{Description: "OK", Content: map[string]openAPIMediaType{"image/*": {}}}, chart.Responses["200"])
+}
+
+// A Doc that names no response media type, or only ones the document leaves
+// out, is documented exactly as before the field existed: a description per
+// response and no content.
+func TestRouteDoc_WithoutMediaTypesKeepsItsResponses(t *testing.T) {
+	operation := func(types []core.RouteMediaType) string {
+		t.Helper()
+		doc := buildOpenAPIDoc(nil, []plugin.PluginRoutes{{Name: "reports", Routes: []plugin.RouteDecl{
+			{Method: http.MethodGet, Pattern: "/api/admin/reports", Group: plugin.GroupAdmin, Handler: servesOK(),
+				Doc: &core.RouteDoc{Summary: "List reports", Responses: map[int]string{http.StatusOK: "The reports", http.StatusForbidden: "Not an admin"}, ResponseMediaTypes: types}},
+		}}}, openAPIOptions{})
+		raw, err := json.Marshal(doc.Paths["/api/admin/reports"]["get"])
+		require.NoError(t, err)
+		return string(raw)
+	}
+
+	unset := operation(nil)
+	var op struct {
+		Responses map[string]map[string]any `json:"responses"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(unset), &op))
+	assert.Equal(t, map[string]map[string]any{
+		"200": {"description": "The reports"},
+		"403": {"description": "Not an admin"},
+	}, op.Responses)
+
+	assert.JSONEq(t, unset, operation([]core.RouteMediaType{}))
+	assert.JSONEq(t, unset, operation([]core.RouteMediaType{{MediaType: ""}, {MediaType: "csv"}, {MediaType: "*/csv"}}))
 }

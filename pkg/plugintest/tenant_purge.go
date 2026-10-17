@@ -32,7 +32,7 @@ func RunTenantPurges(t T, host core.Host, p core.Plugin, slug string) map[string
 	}
 	covered := core.CoveredTableSet()
 
-	ctx := context.Background()
+	ctx, end := core.WithTenantPurgeOutcomes(context.Background())
 	tx, err := host.Querier(ctx).Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin the purge transaction: %v", err)
@@ -41,13 +41,16 @@ func RunTenantPurges(t T, host core.Host, p core.Plugin, slug string) map[string
 	for _, h := range core.TenantPurgeHandlers() {
 		if err := h(ctx, tx, slug); err != nil {
 			_ = tx.Rollback(ctx)
+			end(ctx, false)
 			t.Fatalf("tenant purge of %s: %v", p.Name(), err)
 			return nil
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
+		end(ctx, false)
 		t.Fatalf("commit the purge transaction: %v", err)
 		return nil
 	}
+	end(ctx, true)
 	return covered
 }

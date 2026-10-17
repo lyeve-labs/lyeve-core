@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -120,14 +121,17 @@ type CORSConfig struct {
 	AllowCredentials bool
 	PreflightMaxAge  int    // seconds, default 3600 (1 hour)
 	AllowMethods     string // comma-separated, default "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-	AllowHeaders     string // comma-separated, default "Content-Type, Authorization, X-API-Key, X-Tenant-ID, X-Correlation-ID"
+	// AllowHeaders is comma-separated. The routers pass CORS_ALLOW_HEADERS
+	// with every header a declared route reads added to it.
+	AllowHeaders string
 
 	// ExposeHeaders names the response headers a cross-origin script is
 	// allowed to read. The Fetch Standard exposes only the CORS-safelisted
 	// ones by default, so without this a browser client cannot read the
 	// request id it needs for a bug report, nor the rate-limit values it
 	// needs to back off with, even though both are on the response.
-	// Read from CORS_EXPOSE_HEADERS. Empty omits the header entirely.
+	// The routers pass CORS_EXPOSE_HEADERS with every header a declared
+	// route exposes added to it. Empty omits the header entirely.
 	ExposeHeaders string // comma-separated
 
 	// AllowedDomains is a suffix allowlist for dynamic CORS origins supplied
@@ -536,7 +540,12 @@ func tokenVersionCheck(getTokenVersion func(ctx context.Context, userID string) 
 				next.ServeHTTP(w, r)
 				return
 			}
-			currentVersion, err := getTokenVersion(r.Context(), claims.UserID)
+			// Never the read that takes the request's tenant connection.
+			// Taken here, before any handler runs, it would stay with a
+			// handler that streams until its client leaves, and a few idle
+			// streams would hold the whole pool. sys_users is the engine's
+			// own table, so the row is the same on any connection.
+			currentVersion, err := getTokenVersion(db.WithoutTakingTenantConn(r.Context()), claims.UserID)
 			if err != nil {
 				slog.WarnContext(r.Context(), "token version check failed, rejecting",
 					"err", err, "user_id", claims.UserID)
@@ -585,7 +594,7 @@ func tokenVersionGetter(s tokenVersionStore) func(ctx context.Context, userID st
 
 // externalUsers is the store trustedIssuerAuth keeps issuers' users in.
 type externalUsers interface {
-	EnsureExternalUser(ctx context.Context, id uuid.UUID, email, passwordHash string, roles []string, tenantID string) (*domain.User, error)
+	EnsureExternalUser(ctx context.Context, id uuid.UUID, providerEmail, passwordHash string, roles []string, tenantID string) (*domain.User, error)
 	SessionsRevokedAt(ctx context.Context, id uuid.UUID) (*time.Time, error)
 }
 
@@ -623,7 +632,9 @@ func trustedIssuerAuth(policies []auth.IssuerPolicy, users externalUsers, seats 
 				}
 				local, unavailable, seatErr := admitExternal(r.Context(), p, token, ext, users, seats)
 				if seatErr != nil {
-					admitAdminSeat(w, r, seatErr)
+					// The caller is an issuer's user, not an operator of this
+					// install, so the refusal carries no link to buy one.
+					admitAdminSeat(w, r, seatErr, nil)
 					return
 				}
 				if unavailable {
@@ -657,18 +668,19 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 		return nil, false, nil
 	}
 	id := auth.ExternalUserID(p.Issuer, ext.UserID)
-	// The token's email labels the account and is unique across the install,
-	// so an unverified one could squat an address a person will need. Without
-	// a verified email, and for a machine token with none, a reserved domain
-	// gives a unique address that can never collide with a person's.
-	email := id.String() + "@external.invalid"
+	// The account belongs to the policy's tenant alone and stores the
+	// tenant-local key as its email, so the address cannot collide with
+	// another tenant's account. Only a verified address is kept as the one the
+	// issuer asserted: an unverified one could claim a person's address in
+	// this tenant. A machine token with none signs in under the key.
+	providerEmail := ""
 	if ext.Email != "" && auth.EmailVerified(token) {
-		email = ext.Email
+		providerEmail = ext.Email
 	}
 	var u *domain.User
 	seatErr, err = core.WriteWithAdminSeat(ctx, seats, id, roles, func(ctx context.Context) error {
 		var err error
-		u, err = users.EnsureExternalUser(ctx, id, email, auth.ExternalIssuerMarker, roles, tenant)
+		u, err = users.EnsureExternalUser(ctx, id, providerEmail, auth.ExternalIssuerMarker, roles, tenant)
 		return err
 	})
 	if seatErr != nil {
@@ -677,7 +689,7 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 	if err != nil {
 		if errors.Is(err, domain.ErrConflict) {
 			// The driver's text names the email. The reason is enough here.
-			slog.WarnContext(ctx, "trusted issuer account refused: the email or tenant belongs to another account", "issuer", p.Issuer)
+			slog.WarnContext(ctx, "trusted issuer account refused: the address or tenant belongs to another account", "issuer", p.Issuer)
 			return nil, false, nil
 		}
 		slog.ErrorContext(ctx, "trusted issuer account unavailable", "issuer", p.Issuer)
@@ -698,7 +710,7 @@ func admitExternal(ctx context.Context, p auth.IssuerPolicy, token string, ext *
 	}
 	return &auth.Claims{
 		UserID:           u.ID.String(),
-		Email:            u.Email,
+		Email:            u.SignInEmail(),
 		Roles:            u.Roles,
 		TenantID:         u.TenantID,
 		TokenType:        "session",

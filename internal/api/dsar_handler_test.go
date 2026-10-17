@@ -102,8 +102,8 @@ func TestDSARHandler_Export_Success(t *testing.T) {
 	if audit.calls[0].Action != "gdpr.export" {
 		t.Errorf("expected audit action 'gdpr.export', got %q", audit.calls[0].Action)
 	}
-	if audit.calls[0].ResourceID != "user@example.com" {
-		t.Errorf("expected audit resource_id 'user@example.com', got %q", audit.calls[0].ResourceID)
+	if want := compliance.SubjectDigest("user@example.com"); audit.calls[0].ResourceID != want {
+		t.Errorf("expected audit resource_id %q, got %q", want, audit.calls[0].ResourceID)
 	}
 }
 

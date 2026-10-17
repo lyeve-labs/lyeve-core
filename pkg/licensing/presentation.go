@@ -97,6 +97,34 @@ func PresentationRoute(fn func(context.Context) Presentation) core.RouteDecl {
 	}
 }
 
+// CeilingLinker is a Manager that says where an operator lifts a capacity
+// ceiling the license states. The engine puts the answer in its refusal of a
+// write past that ceiling, so a console can offer the way forward beside the
+// count. The engine holds no such destination of its own.
+type CeilingLinker interface {
+	// CeilingURL is where an operator lifts the ceiling named cap: an https
+	// URL, a path on the console, or empty when the implementation offers
+	// none.
+	CeilingURL(cap string) string
+}
+
+// CeilingURL is where the licensing implementation m sends an operator to
+// lift the ceiling named cap, or empty when m is no CeilingLinker or offers
+// none. A URL that is neither an https URL nor a path on the console is
+// dropped, as a presentation link is, so a refusal never carries another
+// scheme for a console to render.
+func CeilingURL(m any, cap string) string {
+	linker, ok := m.(CeilingLinker)
+	if !ok {
+		return ""
+	}
+	u := linker.CeilingURL(cap)
+	if u == "" || !servableURL(u) {
+		return ""
+	}
+	return u
+}
+
 // servableURL reports whether u is an https URL with a host, or a path on the
 // console: one leading slash, and no second slash or backslash after it that
 // a browser would read as the start of a host.

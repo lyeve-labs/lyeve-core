@@ -1,9 +1,11 @@
 package api
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 )
 
@@ -20,10 +22,17 @@ func poolHealthHandler(provider observability.PoolHealthProvider) http.HandlerFu
 			return
 		}
 
-		snapshot := provider.PoolHealth(r.Context())
-		w.Header().Set("Content-Type", "application/json")
-		if err := jsonpool.WriteJSON(w, snapshot); err != nil {
-			http.Error(w, `{"error":"failed to encode response"}`, http.StatusInternalServerError)
+		// The snapshot is encoded in full before anything is written. A value
+		// JSON cannot hold, such as a NaN latency from a provider, then fails
+		// the encode alone, and the answer is still free to be the error
+		// envelope.
+		body, err := jsonpool.MarshalJSON(provider.PoolHealth(r.Context()))
+		if err != nil {
+			slog.ErrorContext(r.Context(), "pool health: encode snapshot", "err", err)
+			httpx.ErrorReq(w, r, http.StatusInternalServerError, "failed to encode response")
+			return
 		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body) // err suppressed: response write to client
 	}
 }

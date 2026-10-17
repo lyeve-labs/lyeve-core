@@ -246,6 +246,19 @@ func subjectRef(identifier string) string {
 // the fan-out logs, so the lines of one erasure run still correlate.
 func SubjectRef(identifier string) string { return subjectRef(identifier) }
 
+// SubjectDigest is how an audit entry names the subject of an export or an
+// erasure: "sha256:" and the hex SHA-256 of the identifier as the request
+// gave it. The audit log outlives the erasure, so it must not keep the
+// address the erasure removed, but it has to prove the request happened.
+// Anyone holding the identifier can recompute the digest and find the entry,
+// and the log alone does not say who it was about. The whole digest is kept,
+// unlike subjectRef's prefix, because the entry is evidence rather than a
+// correlation key.
+func SubjectDigest(identifier string) string {
+	sum := sha256.Sum256([]byte(identifier))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 // slowEraser is the point past which an eraser is reported even though it
 // matched nothing. A no-match that takes this long is a scan, and a scan is
 // what makes the fan-out miss the write timeout.

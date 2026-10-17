@@ -301,10 +301,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// pings against the pool to pre-fill to the configured MinConns.
 	db.WarmupConnections(ctx, pool, int(poolOpts.MinConns))
 
-	// Sonic JSON prewarm
-	// Prime sonic's JIT compiler with common CMS response shapes so the
+	// JSON encoder prewarm
+	// Prime the encoder's per-type cache with common CMS response shapes so the
 	// first real request doesn't stall on encoder compilation.
-	poolpkg.PrewarmSonic()
+	poolpkg.PrewarmJSON()
 
 	// Latency tracker
 	// Per-endpoint p50/p95/p99 latency histograms for the /api/admin/debug/latency

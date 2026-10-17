@@ -14,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
@@ -116,7 +117,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := h.users.GetByEmail(r.Context(), body.Email)
+	user, err := h.passwordAccount(r.Context(), body.Email, body.Tenant)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			// Enumeration prevention: unknown email -> dummy bcrypt compare.
@@ -143,7 +144,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 			// an account that exists can be locked, so a status of its own, a
 			// code of its own, or a fast answer all tell a caller the address is
 			// real. TestToken_EnumerationTiming_Unit measures exactly that.
-			slog.WarnContext(r.Context(), "token login refused: account is locked out",
+			slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
 				"user_id", user.ID,
 				"failures", count,
 				"max_attempts", h.MaxFailedAttempts,
@@ -156,7 +157,8 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := auth.VerifyPassword(h.passwordHashAlgo, user.PasswordHash, body.Password); err != nil {
-		slog.InfoContext(r.Context(), "token login failed: password did not verify",
+		attemptCtx := failedAttemptContext(r.Context(), user)
+		slog.InfoContext(attemptCtx, "token login failed: password did not verify",
 			"user_id", user.ID,
 			"credential_supplied", body.Password != "",
 			"hash_present", user.PasswordHash != "",
@@ -172,7 +174,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		// Record failed attempt when risk assessor is available.
 		if h.deviceRiskAssessor != nil {
 			fp := collectFingerprint(r)
-			if recErr := h.deviceRiskAssessor.RecordLogin(r.Context(), user.ID, fp, false); recErr != nil {
+			if recErr := h.deviceRiskAssessor.RecordLogin(attemptCtx, user.ID, fp, false); recErr != nil {
 				slog.Warn("failed to record failed Token attempt", "err", recErr)
 			}
 		}
@@ -180,13 +182,17 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	actingTenant, actingRoles, err := h.resolveActingTenant(r.Context(), user, body.Tenant)
+	if !h.respondIfPasswordSignInRefused(w, r, user) {
+		return
+	}
+
+	actingTenant, actingRoles, err := h.resolveSignInTenant(r.Context(), user, body.Tenant)
 	if err != nil {
 		respondTenantResolution(w, r, err)
 		return
 	}
 
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, actingRoles, actingTenant, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -285,6 +291,18 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A sign-in on a tenant's mapped domain acts in that tenant, so a family of
+	// any other tenant presented there comes from an earlier login that signed
+	// the account's home tenant on the domain. It ends here rather than renew
+	// that session's cookie on a host it does not belong to.
+	if host := signInHostTenant(r.Context()); host != "" && rotated.TenantID != host {
+		if err := h.refreshTokenStore.RevokeFamily(r.Context(), rotated.FamilyID); err != nil {
+			slog.Warn("revoke refresh family presented on another tenant's domain", "err", err)
+		}
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeUnauthorized, nil)
+		return
+	}
+
 	// Load user data for the new access token claims.
 	userID, err := uuid.Parse(rotated.UserID)
 	if err != nil {
@@ -341,7 +359,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, actingRoles, actingTenant, user.TokenVersion)
+	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -364,14 +382,20 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeUser strips password_hash from the response.
+//
+// A tenant-local account answers with the address its provider asserted as
+// its email, so a console keeps one shape for every account, and tenant_local
+// marks it: the account belongs to its tenant alone and its stored email is a
+// key.
 func safeUser(u *domain.User) map[string]any {
 	out := map[string]any{
-		"id":         u.ID.String(),
-		"email":      u.Email,
-		"roles":      u.Roles,
-		"tenant_id":  u.TenantID,
-		"disabled":   u.Disabled,
-		"created_at": u.CreatedAt,
+		"id":           u.ID.String(),
+		"email":        u.SignInEmail(),
+		"tenant_local": core.IsTenantLocalEmail(u.ID, u.Email),
+		"roles":        u.Roles,
+		"tenant_id":    u.TenantID,
+		"disabled":     u.Disabled,
+		"created_at":   u.CreatedAt,
 	}
 	if u.ExpiresAt != nil {
 		out["expires_at"] = u.ExpiresAt

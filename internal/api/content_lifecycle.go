@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -122,18 +124,35 @@ func (h *ContentHandler) ListRevisions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// A revision is a snapshot of a state the row passed through, drafts
+	// included. A caller who cannot read drafts gets the history of a row
+	// they can read, and only its published states.
+	drafts := h.draftResponse(w, r, schemaName)
+	if !drafts {
+		current, err := h.store.GetByID(r.Context(), schemaName, id)
+		if err != nil {
+			storeError(w, r, err, "failed to list revisions")
+			return
+		}
+		if !isPublished(current.Data) {
+			httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
+			return
+		}
+	}
 	revisions, err := store.ListRecordRevisions(r.Context(), schemaName, id)
 	if err != nil {
 		revisionError(w, r, err, "failed to list revisions")
 		return
 	}
-	if revisions == nil {
-		revisions = []core.RecordRevision{}
+	served := make([]core.RecordRevision, 0, len(revisions))
+	for _, rev := range revisions {
+		if !drafts && !isPublished(rev.Data) {
+			continue
+		}
+		rev.Data = mask(rev.Data)
+		served = append(served, rev)
 	}
-	for i := range revisions {
-		revisions[i].Data = mask(revisions[i].Data)
-	}
-	respond(w, http.StatusOK, revisions)
+	respond(w, http.StatusOK, served)
 }
 
 // RestoreRevision replaces current content data with a historical revision snapshot.
@@ -174,13 +193,62 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	h.snapshot(r, schemaName, id, existing.Data)
-	item, err := h.store.Update(r.Context(), schemaName, id, rev.Data, existing.UpdatedAt)
+	item, err := h.store.Update(r.Context(), schemaName, id, withoutStatus(rev.Data), existing.UpdatedAt)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), "failed to restore revision")
+		if !relationRefused(w, r, err) {
+			httpx.ErrorReq(w, r, httpStatus(err), "failed to restore revision")
+		}
 		return
 	}
 	item.Data = mask(item.Data)
 	respond(w, http.StatusOK, item)
+}
+
+// contentStreamHeartbeat is how often a change stream with nothing to send
+// writes a comment line. It sits inside every timeout between the engine and
+// a browser: the API listener's 15 second write timeout and the 60 second
+// idle timeout most proxies and load balancers apply to a response that has
+// gone quiet.
+const contentStreamHeartbeat = 10 * time.Second
+
+// contentStreamEvents are the writes a change stream sends, one event each.
+// The API document lists the same names, so a client generated from it knows
+// every event the stream can carry.
+var contentStreamEvents = []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete}
+
+// The comment lines a change stream writes: the first line of every stream,
+// a format taking the schema name, and the heartbeat. A comment carries no
+// event, so an EventSource never reports one. The API document quotes both.
+const (
+	contentStreamConnectedComment = ": connected to %s stream"
+	contentStreamHeartbeatComment = ": heartbeat"
+	// contentStreamErrorEvent names the one event the stream sends with an
+	// event field: the last one, saying why the stream stopped.
+	contentStreamErrorEvent = "error"
+)
+
+// streamHeartbeatInterval is the handler's heartbeat, or the default when
+// none was set.
+func (h *ContentHandler) streamHeartbeatInterval() time.Duration {
+	if h.streamHeartbeat > 0 {
+		return h.streamHeartbeat
+	}
+	return contentStreamHeartbeat
+}
+
+// warnNoStreamDeadline logs that change streams cannot hold their own write
+// deadline. Every stream through the same chain fails the same way, so it is
+// said once.
+func (h *ContentHandler) warnNoStreamDeadline(err error) {
+	warn := func() {
+		slog.Warn("content: change streams cannot extend their write deadline, so each ends at the server's write timeout. A response writer in the middleware chain does not implement Unwrap.",
+			"err", err)
+	}
+	if h.streamDeadlineWarn == nil {
+		warn()
+		return
+	}
+	h.streamDeadlineWarn.Do(warn)
 }
 
 // Stream sends a Server-Sent Events stream of content change events for a schema.
@@ -191,7 +259,32 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 // stream keeps only the events of the caller's own tenant, and each payload
 // goes through the field mask and the after-response hooks a read applies,
 // so the stream serves no field that GET would withhold from this caller.
+//
+// The read grant, the draft grant, the mask and whether the schema has draft
+// and publish are asked again for every event, not held from the open. A
+// stream lives for hours, and an operator who revokes a read, takes away
+// draft access, hides a field or switches draft and publish on expects the
+// next event to obey it, not the next reconnect. A refused read ends the stream
+// after an error event, and so does a rule store that cannot answer, because
+// an event it cannot judge is not sent. A change that may be to a draft is
+// skipped while the caller may not read drafts, and the stream stays open.
+//
+// The credential is held to the same terms for as long as the stream lives.
+// A token ends the stream when it expires, and each event first asks whether
+// the credential still admits the caller, so a sign-out, a password a super
+// admin sets, an erasure or a revoked key ends it at the next event.
+//
+// The server's write deadline is set once, when it reads the request, and the
+// first write after it fails and ends the stream. So every write moves the
+// deadline two heartbeats ahead first, and a comment line every heartbeat
+// keeps an idle stream inside it.
+//
+// None of those checks reads on the request's tenant connection. Each reads
+// the engine's own tables, which resolve the same on any connection, and the
+// first read on the request's connection would take it for as long as the
+// stream stays open. So an idle stream holds no connection between changes.
 func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
+	r = r.WithContext(db.WithoutTakingTenantConn(r.Context()))
 	schemaName := chi.URLParam(r, "schema")
 	if !h.runBeforeRequest(w, r, schemaName, "list") {
 		return
@@ -199,8 +292,7 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
-	if !maskOK {
+	if _, ok := h.maskFor(w, r, schemaName); !ok {
 		return
 	}
 
@@ -226,8 +318,8 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	// The copy matters: the event's map is shared with every other
 	// subscriber, and the after-response hooks below delete keys from the map
 	// they are handed.
-	hookIDs := make([]string, 0, 3)
-	for _, et := range []hooks.EventType{hooks.AfterCreate, hooks.AfterUpdate, hooks.AfterDelete} {
+	hookIDs := make([]string, 0, len(contentStreamEvents))
+	for _, et := range contentStreamEvents {
 		id := h.hooks.RegisterDynamic(schemaName, et, func(_ context.Context, ev hooks.Event) error {
 			if ev.TenantID != callerTenant {
 				return nil
@@ -246,22 +338,127 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	_, _ = fmt.Fprintf(w, ": connected to %s stream\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
+	heartbeat := h.streamHeartbeatInterval()
+	deadline := httpx.NewStreamDeadline(w, 2*heartbeat, h.warnNoStreamDeadline)
+	if !deadline.Hold() {
+		return
+	}
+	// end sends the error event that says why the stream stops. The caller
+	// returns after it.
+	end := func(err error) {
+		if !deadline.Hold() {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "event: "+contentStreamErrorEvent+"\ndata: {\"error\":%q}\n\n", streamEndReason(err)) // err suppressed: SSE write, client may have disconnected
+		flusher.Flush()
+	}
+	var expired <-chan time.Time
+	if c := claimsFromCtx(r); c != nil && c.ExpiresAt != nil {
+		expiry := time.NewTimer(time.Until(c.ExpiresAt.Time))
+		defer expiry.Stop()
+		expired = expiry.C
+	}
+	_, _ = fmt.Fprintf(w, contentStreamConnectedComment+"\n\n", schemaName) // err suppressed: SSE write, client may have disconnected
 	flusher.Flush()
+
+	ticker := time.NewTicker(heartbeat)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ticker.C:
+			if !deadline.Hold() {
+				return
+			}
+			_, _ = fmt.Fprint(w, contentStreamHeartbeatComment+"\n\n") // err suppressed: SSE write, client may have disconnected
+			flusher.Flush()
+		case <-expired:
+			end(errCredentialEnded)
+			return
 		case c := <-ch:
+			mask, send, err := h.streamAccess(r, schemaName, c.data)
+			if err != nil {
+				end(err)
+				return
+			}
+			if !send {
+				continue
+			}
 			data := mask(c.data)
 			h.runAfterResponse(r, schemaName, "list", data)
 			payload, err := jsonpool.MarshalJSON(map[string]any{"event": c.event, "schema": schemaName, "data": data})
 			if err != nil {
 				continue
 			}
+			if !deadline.Hold() {
+				return
+			}
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload) // err suppressed: SSE write, client may have disconnected
 			flusher.Flush()
 		}
+	}
+}
+
+// streamAccess asks whether the caller may still read schema and resolves
+// the mask that applies now. It is the open's checks without a response,
+// because by the time an event arrives the headers have been sent. send is
+// false for a change that may be to a draft when the caller may not read
+// drafts now, which skips that change without ending the stream.
+func (h *ContentHandler) streamAccess(r *http.Request, schema string, data map[string]any) (mask func(map[string]any) map[string]any, send bool, err error) {
+	if h.streamCredential != nil {
+		if err := h.streamCredential(r); err != nil {
+			return nil, false, err
+		}
+	}
+	if err := h.authorize(r, schema, "read"); err != nil {
+		return nil, false, err
+	}
+	if !core.ContentEventPublished(h.streamDraftPublish(r, schema), data) && !h.canReadDrafts(r, schema) {
+		return nil, false, nil
+	}
+	mask, err = h.fieldMask(r, schema)
+	if err != nil {
+		return nil, false, err
+	}
+	return mask, true, nil
+}
+
+// streamDraftPublish reports whether schema has draft and publish now. It is
+// asked for every event, because an operator can switch the mode on while a
+// stream is open and every change after that may be a draft. On a schema with
+// draft and publish a change without a status counts as one: a writer that
+// sends only the columns it changed may be writing a draft. A schema the
+// source cannot read is treated as having draft and publish, so a failed
+// lookup withholds a change rather than sending it. A handler built with no
+// source at all has no schema that could have one.
+func (h *ContentHandler) streamDraftPublish(r *http.Request, schema string) bool {
+	if h.schemas == nil {
+		return false
+	}
+	sc, err := h.schemas.GetByName(r.Context(), schema)
+	if err != nil || sc == nil {
+		return true
+	}
+	return sc.WithDraftPublish
+}
+
+// streamEndReason is the message the error event carries, in the words the
+// content routes answer with, and never the rule store's own text.
+func streamEndReason(err error) string {
+	switch {
+	case errors.Is(err, errCredentialEnded):
+		return "credential expired or revoked"
+	case errors.Is(err, errNoCaller):
+		return "authentication required"
+	case errors.Is(err, errSchemaNotAllowed):
+		return "schema not allowed for this credential"
+	case errors.Is(err, errScopeDenied):
+		return "insufficient scope"
+	case errors.Is(err, errPermissionDenied):
+		return "permission denied"
+	default:
+		return "access could not be checked"
 	}
 }

@@ -5,13 +5,16 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-
-	"github.com/lyeve-labs/lyeve-core/pkg/engine"
-	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
+	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
 )
 
 // maxLRUBuckets is the eviction threshold for stale rate-limit buckets.
@@ -182,25 +185,85 @@ func DefaultPublicRateLimits() (map[string]PublicRateLimitConfig, *PublicRateLim
 	return configs, global
 }
 
-// Verify checks that every route wrapped via Wrap/WrapFunc has a matching
-// per-endpoint rate-limit config. Returns an error listing unconfigured
-// routes. Call before the server starts listening.
+// credentialRoute matches the patterns of the routes that stand between a
+// public caller and a credential: everything under an auth segment, on the
+// admin API, the Content API or bare.
+var credentialRoute = regexp.MustCompile(`^(/api/(admin|v1))?/auth(/|$)`)
+
+// CredentialRoute reports whether pattern is a route that guards a
+// credential. Such a route needs a limit of its own: the general cap is set
+// for reading, not for guessing passwords, and no administrator may move its
+// limit at runtime.
+func CredentialRoute(pattern string) bool {
+	return credentialRoute.MatchString(pattern)
+}
+
+// Verify checks that every wrapped route is limited as it should be. A route
+// with no limit of its own runs on the global cap, the general limit every
+// public route shares, which is the intended state for a route that guards no
+// credential. Verify names a credential route with no limit of its own,
+// global cap or not, and with no global cap every route with no limit of its
+// own, because those run unlimited. Call before the server starts listening.
 func (l *PublicEndpointRateLimiter) Verify() error {
-	var missing []string
+	var credential, unlimited []string
 	for key := range l.wrapped {
-		if _, ok := l.configs[key]; !ok {
-			missing = append(missing, key)
+		method, pattern, _ := strings.Cut(key, ":")
+		if _, _, ok := l.ownConfig(method, pattern); ok {
+			continue
+		}
+		switch {
+		case l.global == nil:
+			unlimited = append(unlimited, key)
+		case CredentialRoute(pattern):
+			credential = append(credential, key)
 		}
 	}
-	if len(missing) == 0 {
+	sort.Strings(credential)
+	sort.Strings(unlimited)
+	var problems []string
+	if len(credential) > 0 {
+		problems = append(problems, fmt.Sprintf("%d credential route(s) have no per-endpoint config: %s",
+			len(credential), strings.Join(credential, ", ")))
+	}
+	if len(unlimited) > 0 {
+		problems = append(problems, fmt.Sprintf("%d wrapped route(s) have no per-endpoint config and there is no global cap: %s",
+			len(unlimited), strings.Join(unlimited, ", ")))
+	}
+	if len(problems) == 0 {
 		return nil
 	}
-	globalNote := " (no global cap)"
-	if l.global != nil {
-		globalNote = " (global cap present but no per-endpoint config)"
+	return fmt.Errorf("public rate limiter: %s", strings.Join(problems, ". "))
+}
+
+// GeneralRoutes lists, sorted, the wrapped routes that run on the general
+// limit: those with no limit of their own that guard no credential.
+func (l *PublicEndpointRateLimiter) GeneralRoutes() []string {
+	var out []string
+	for key := range l.wrapped {
+		method, pattern, _ := strings.Cut(key, ":")
+		if _, _, ok := l.ownConfig(method, pattern); !ok && !CredentialRoute(pattern) {
+			out = append(out, key)
+		}
 	}
-	return fmt.Errorf("public rate limiter: %d wrapped route(s) have no per-endpoint config%s: %s",
-		len(missing), globalNote, strings.Join(missing, ", "))
+	sort.Strings(out)
+	return out
+}
+
+// ownConfig is the limit of its own a route runs on, and the key of the
+// bucket it spends. HEAD does a GET's work, so a HEAD route with no entry
+// follows its GET route's entry and spends that route's bucket.
+func (l *PublicEndpointRateLimiter) ownConfig(method, pattern string) (string, PublicRateLimitConfig, bool) {
+	key := method + ":" + pattern
+	if cfg, ok := l.configs[key]; ok {
+		return key, cfg, true
+	}
+	if method == http.MethodHead {
+		key = http.MethodGet + ":" + pattern
+		if cfg, ok := l.configs[key]; ok {
+			return key, cfg, true
+		}
+	}
+	return "", PublicRateLimitConfig{}, false
 }
 
 // Wrap applies per-IP rate limiting to an http.Handler keyed by
@@ -221,11 +284,17 @@ func (l *PublicEndpointRateLimiter) WrapFunc(method, pattern string) func(http.H
 }
 
 func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next http.Handler) http.Handler {
-	cfg, ok := l.configs[method+":"+pattern]
-	if !ok && l.global == nil {
-		// No per-endpoint config and no global cap: pass through.
-		return next
+	endpointKey, cfg, ok := l.ownConfig(method, pattern)
+	// HEAD does a GET's work. With no limit of its own and none on its GET
+	// route, it follows the GET route's operator limit and spends the same
+	// bucket, so lowering a route covers both methods.
+	limitMethod := method
+	if method == http.MethodHead {
+		limitMethod = http.MethodGet
 	}
+	endpoint := limitMethod + " " + pattern
+	customKey := "custom:" + limitMethod + ":" + pattern
+	credential := CredentialRoute(pattern)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Health probes are exempt: they are supposed to be frequent.
@@ -239,8 +308,6 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 			return
 		}
 
-		endpointKey := method + ":" + pattern
-
 		// Per-endpoint check.
 		if ok {
 			bucketKey := endpointKey + ":" + ip
@@ -250,6 +317,18 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 				writePublicRateLimitResponse(w, cfg.Burst, resetAt)
 				return
 			}
+		} else if custom, set := core.ResolvePublicRouteLimit(endpoint); set && !credential {
+			// An operator's limit on a route on the general limit replaces
+			// the general limit there, so the global cap is not checked.
+			// Its bucket is its own: the general one is not spent either.
+			allowed, remaining, resetAt := l.check(customKey+":"+ip, custom.Rate, custom.Burst)
+			setPublicRateLimitHeaders(w, custom.Burst, remaining, resetAt)
+			if !allowed {
+				writePublicRateLimitResponse(w, custom.Burst, resetAt)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
 		}
 
 		// Global aggregate check.

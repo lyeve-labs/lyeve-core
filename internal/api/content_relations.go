@@ -1,12 +1,14 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
 )
@@ -15,7 +17,9 @@ import (
 // GET /api/v1/content/{schema}/{id}/relations/{field}
 //
 // The items belong to the field's target schema, so the caller needs read on
-// both, and the target's field mask applies to what is returned.
+// both, and the target's field mask applies to what is returned. The field
+// itself belongs to the source schema, so a field the source's mask hides
+// answers 403: the items say which records the hidden field links to.
 func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
 	if !h.checkPermission(w, r, schemaName, "read") {
@@ -27,6 +31,18 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fieldName := chi.URLParam(r, "field")
+	hidden, err := core.ContentHiddenFields(r.Context(), h.checker(), requestClaims(r), schemaName)
+	switch {
+	case errors.Is(err, errNoCaller):
+		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
+		return
+	case err != nil:
+		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		return
+	case hidden.Names(fieldName):
+		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
+		return
+	}
 	limit, err := reqparse.QueryInt(r, "limit", contentListDefaultLimit)
 	if err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: limit")
@@ -53,7 +69,20 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, total, err := h.store.ListRelated(r.Context(), schemaName, id, f, limit, offset)
+	// The relations of a row the caller cannot read are not theirs to list.
+	if !h.draftResponse(w, r, schemaName) {
+		parent, err := h.store.GetByID(r.Context(), schemaName, id)
+		if err != nil {
+			storeError(w, r, err, "failed to list related")
+			return
+		}
+		if !isPublished(parent.Data) {
+			httpx.ErrorReq(w, r, http.StatusNotFound, "not found")
+			return
+		}
+	}
+
+	items, total, err := h.store.ListRelated(r.Context(), schemaName, id, f, limit, offset, h.draftResponse(w, r, f.RelationTo))
 	if err != nil {
 		httpx.ErrorReq(w, r, httpStatus(err), "failed to list related")
 		return
@@ -104,7 +133,9 @@ func (h *ContentHandler) SetRelations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.SetRelations(r.Context(), schemaName, id, f, targetIDs); err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), "failed to set relations")
+		if !relationRefused(w, r, err) {
+			httpx.ErrorReq(w, r, httpStatus(err), "failed to set relations")
+		}
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

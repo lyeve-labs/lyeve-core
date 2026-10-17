@@ -92,6 +92,43 @@ func (h *AuthHandler) resolveActingTenant(ctx context.Context, user *domain.User
 	return m.TenantID, m.Roles, nil
 }
 
+// signInHostTenant returns the tenant a sign-in on the request's host is held
+// to, or "" when the host holds it to none. A host mapped to the default tenant
+// is the install's shared host, where every tenant's users reach the console,
+// so it holds a sign-in to no tenant, as an unmapped host does. The mapping
+// still lets anonymous reads there resolve the default tenant.
+//
+// A mapping names its tenant by the canonical slug, which is how the engine
+// names the default tenant everywhere. A spelling the engine never issues is
+// not the default tenant, so it stays held, and resolveActingTenant refuses it.
+func signInHostTenant(ctx context.Context) string {
+	host := core.HostTenantIDFromCtx(ctx)
+	if host == core.DefaultTenantSlug {
+		return ""
+	}
+	return host
+}
+
+// resolveSignInTenant is resolveActingTenant for a credential sign-in, which
+// acts in the tenant of the host it arrives on when that host names one. A
+// mapped domain names its tenant, so the account must be at home there, a
+// member there or a super admin, and a requested tenant naming any other is
+// refused as a non-member is. A host that names no tenant (the instance's own
+// host, one mapped to the default tenant, or one the sole-tenant fallback
+// resolved) leaves requested to decide.
+//
+// Without this, an account of one tenant signing in on another tenant's domain
+// would get a session of its home tenant set on that domain.
+func (h *AuthHandler) resolveSignInTenant(ctx context.Context, user *domain.User, requested string) (string, []string, error) {
+	if host := signInHostTenant(ctx); host != "" {
+		if requested != "" && requested != host {
+			return "", nil, errNotAMember
+		}
+		requested = host
+	}
+	return h.resolveActingTenant(ctx, user, requested)
+}
+
 // hasRole reports whether roles contains name.
 func hasRole(roles []string, name string) bool {
 	for _, r := range roles {

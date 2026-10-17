@@ -570,6 +570,29 @@ func WithLazyTenantConn(ctx context.Context, lc *LazyTenantConn) context.Context
 	return context.WithValue(ctx, lazyTenantConnKey{}, lc)
 }
 
+// WithoutTakingTenantConn returns ctx for queries that must not take the
+// request's tenant connection. While the request has not taken it yet, a query
+// made with the returned context borrows a pool connection for that query
+// alone. Once the request holds it, ctx comes back unchanged and the query
+// runs on it, because asking the pool for a second connection while holding
+// one is how a burst of requests ends up each waiting on the others. The
+// tenant, the claims and every other value on ctx stay.
+//
+// It is for reads of the engine's own tables, which keep tenants apart by
+// their tenant_id column and resolve the same on any connection. A handler
+// that streams for hours then holds a connection only if it, or something
+// before it, read on the request's context.
+func WithoutTakingTenantConn(ctx context.Context) context.Context {
+	if TenantConn(ctx) != nil {
+		return ctx
+	}
+	lc := LazyTenantConnFromCtx(ctx)
+	if lc == nil || lc.Acquired() != nil {
+		return ctx
+	}
+	return context.WithValue(ctx, lazyTenantConnKey{}, (*LazyTenantConn)(nil))
+}
+
 // LazyTenantConnFromCtx returns the LazyTenantConn stored on ctx, or nil.
 func LazyTenantConnFromCtx(ctx context.Context) *LazyTenantConn {
 	lc, _ := ctx.Value(lazyTenantConnKey{}).(*LazyTenantConn)

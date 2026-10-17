@@ -103,9 +103,11 @@ const (
 // ContentEntryWriterRegistrar is implemented by the engine host. The plugin
 // that owns the editorial store calls it when it activates and again with
 // nil when it stops, so the registration follows the plugin's lifecycle,
-// not the process.
+// not the process. Through ScopedHost a registration needs
+// CapContentEntryWriter, and only the plugin that registered the writer may
+// replace or clear it. A refusal comes back as the error.
 type ContentEntryWriterRegistrar interface {
-	RegisterContentEntryWriter(w ContentEntryWriter)
+	RegisterContentEntryWriter(w ContentEntryWriter) error
 }
 
 // ContentEntryWriterProvider is implemented by the engine host and forwarded

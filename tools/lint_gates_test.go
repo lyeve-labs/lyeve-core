@@ -787,3 +787,100 @@ func TestLintBareGoroutines(t *testing.T) {
 		}
 	})
 }
+
+// TestLintDialectGates verifies that lint-dialect-gates.sh passes the
+// repository, fails a database server a test starts without asking whether the
+// run covers its dialect, and accepts a check that comes first and names that
+// dialect or a variable.
+func TestLintDialectGates(t *testing.T) {
+	t.Parallel()
+
+	script := lintScript(t, "lint-dialect-gates.sh")
+
+	run := func(t *testing.T, source string) ([]byte, error) {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "server_test.go"), []byte(source), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		return exec.Command("bash", script, dir).CombinedOutput()
+	}
+	const header = "package x\n\nimport (\n" +
+		"\t\"testing\"\n\n" +
+		"\t\"github.com/testcontainers/testcontainers-go\"\n" +
+		"\ttcmssql \"github.com/testcontainers/testcontainers-go/modules/mssql\"\n" +
+		"\t\"github.com/testcontainers/testcontainers-go/modules/mysql\"\n" +
+		"\t\"github.com/testcontainers/testcontainers-go/modules/postgres\"\n\n" +
+		"\t\"github.com/lyeve-labs/lyeve-core/internal/testdb\"\n" +
+		"\t\"github.com/lyeve-labs/lyeve-core/internal/testdialect\"\n" +
+		"\t\"github.com/lyeve-labs/lyeve-core/pkg/plugintest\"\n" +
+		")\n\n"
+	refused := func(t *testing.T, body, want string) {
+		t.Helper()
+		out, err := run(t, header+body)
+		if err == nil {
+			t.Fatalf("expected the start to fail the lint, got exit 0:\n%s", out)
+		}
+		if !strings.Contains(string(out), want) {
+			t.Errorf("expected %q in the output, got:\n%s", want, out)
+		}
+	}
+	accepted := func(t *testing.T, body string) {
+		t.Helper()
+		if out, err := run(t, header+body); err != nil {
+			t.Fatalf("expected the start to pass, got: %v\n%s", err, out)
+		}
+	}
+
+	t.Run("repository_passes", func(t *testing.T) {
+		out, err := exec.Command("bash", script).CombinedOutput()
+		if err != nil {
+			t.Fatalf("expected every database server start to ask first, got: %v\n%s", err, out)
+		}
+	})
+
+	t.Run("unasked_start_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\tmysql.Run(nil, \"mysql:8\")\n}\n",
+			"server_test.go:17 starts a mysql server without asking whether the run covers mysql")
+	})
+
+	t.Run("check_after_the_start_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\ttcmssql.Run(nil, \"img\")\n\ttestdialect.Require(t, \"mssql\")\n}\n",
+			"starts a mssql server without asking")
+	})
+
+	t.Run("check_for_another_dialect_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\ttestdialect.Require(t, \"postgres\")\n\tmysql.Run(nil, \"mysql:8\")\n}\n",
+			"starts a mysql server without asking")
+	})
+
+	t.Run("older_run_container_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\tpostgres.RunContainer(nil)\n}\n",
+			"starts a postgres server without asking")
+	})
+
+	t.Run("generic_start_of_a_database_image_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\ttestcontainers.Run(nil, \"mcr.microsoft.com/azure-sql-edge:latest\")\n}\n",
+			"starts a mssql server without asking")
+	})
+
+	t.Run("generic_start_of_another_image_accepted", func(t *testing.T) {
+		accepted(t, "func TestX(t *testing.T) {\n\ttestcontainers.Run(nil, \"redis:7\")\n}\n")
+	})
+
+	t.Run("each_accepted_check", func(t *testing.T) {
+		accepted(t, "func TestA(t *testing.T) {\n\ttestdialect.Require(t, \"mysql\")\n\tmysql.Run(nil, \"mysql:8\")\n}\n\n"+
+			"func TestB(t *testing.T) {\n\tif !testdialect.Enabled(\"mssql\") {\n\t\tt.Skip()\n\t}\n\ttcmssql.Run(nil, \"img\")\n}\n\n"+
+			"func TestC(t *testing.T) {\n\tif !testdb.ShouldTest(\"postgres\") {\n\t\tt.Skip()\n\t}\n\tpostgres.Run(nil, \"postgres:16\")\n}\n\n"+
+			"func TestD(t *testing.T) {\n\tplugintest.SkipDialect(t, \"postgres\")\n\tpostgres.Run(nil, \"postgres:16\")\n}\n")
+	})
+
+	t.Run("check_for_an_unknown_dialect_caught", func(t *testing.T) {
+		refused(t, "func TestX(t *testing.T) {\n\ttestdialect.Require(t, \"mssq\")\n\ttcmssql.Run(nil, \"img\")\n}\n",
+			"asks about \"mssq\", which is not a dialect CI_DIALECT names")
+	})
+
+	t.Run("check_on_a_variable_accepted", func(t *testing.T) {
+		accepted(t, "func TestX(t *testing.T) {\n\tfor _, d := range []string{\"mysql\"} {\n\t\tif !testdb.ShouldTest(d) {\n\t\t\tcontinue\n\t\t}\n\t\tmysql.Run(nil, \"mysql:8\")\n\t}\n}\n")
+	})
+}

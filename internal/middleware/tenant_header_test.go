@@ -249,7 +249,7 @@ func TestTenantHeader_NonSuperAdmin_XTenantID_Ignored_But_TenantID_Honored(t *te
 			req := httptest.NewRequest(http.MethodGet, "/", nil)
 			req.Header.Set("X-Tenant-ID", "header_override")
 			claims := &auth.Claims{
-				TenantID: "jwt-tenant",
+				TenantID: "jwt_tenant",
 				Roles:    []string{role},
 			}
 			ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -258,7 +258,7 @@ func TestTenantHeader_NonSuperAdmin_XTenantID_Ignored_But_TenantID_Honored(t *te
 			w := httptest.NewRecorder()
 			m(next).ServeHTTP(w, req)
 
-			if tenant != "jwt-tenant" {
+			if tenant != "jwt_tenant" {
 				t.Errorf("role=%s: got %q, want 'jwt-tenant'", role, tenant)
 			}
 		})
@@ -344,7 +344,7 @@ func TestTenantHeader_SuperAdmin_XTenantID_EmptyString_FallsBack(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Tenant-ID", "") // empty string header
 	claims := &auth.Claims{
-		TenantID: "jwt-acme",
+		TenantID: "jwt_acme",
 		Roles:    []string{"super_admin"},
 	}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -353,7 +353,7 @@ func TestTenantHeader_SuperAdmin_XTenantID_EmptyString_FallsBack(t *testing.T) {
 	w := httptest.NewRecorder()
 	m(next).ServeHTTP(w, req)
 
-	if tenant != "jwt-acme" {
+	if tenant != "jwt_acme" {
 		t.Errorf("super_admin empty X-Tenant-ID: got %q, want 'jwt-acme'", tenant)
 	}
 }

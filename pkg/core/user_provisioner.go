@@ -16,9 +16,11 @@ type UserProvisioner interface {
 
 // UserProvisionerSetter is implemented by the engine host. A plugin that
 // keeps a directory of provisioned accounts registers its provisioner
-// through it.
+// through it. Through ScopedHost it needs CapUserProvisioner, and only the
+// plugin that set a provisioner may replace or clear it. A refusal comes
+// back as the error.
 type UserProvisionerSetter interface {
-	SetUserProvisioner(p UserProvisioner)
+	SetUserProvisioner(p UserProvisioner) error
 }
 
 // UserProvisionerProvider is implemented by the engine host. A plugin that
@@ -37,9 +39,12 @@ func (h *ScopedHost) UserProvisioner() UserProvisioner {
 	return nil
 }
 
-// SetUserProvisioner forwards to inner if it implements UserProvisionerSetter.
-func (h *ScopedHost) SetUserProvisioner(p UserProvisioner) {
-	if s, ok := h.inner.(UserProvisionerSetter); ok {
-		s.SetUserProvisioner(p)
-	}
+// SetUserProvisioner forwards to inner if it implements UserProvisionerSetter,
+// for a plugin holding CapUserProvisioner. The provisioner creates accounts
+// with the roles an identity provider asserts, so no other plugin may
+// replace it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) SetUserProvisioner(p UserProvisioner) error {
+	s, ok := h.inner.(UserProvisionerSetter)
+	return h.registerRole(HostRoleUserProvisioner, "SetUserProvisioner", CapUserProvisioner, ok, p == nil,
+		func() error { return s.SetUserProvisioner(p) })
 }

@@ -21,7 +21,7 @@ func TestDriverDSN_MySQLForcesMultiStatements(t *testing.T) {
 		{
 			name: "no existing parameters",
 			dsn:  "user:pw@tcp(db:3306)/lyeve",
-			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true",
+			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true&parseTime=true",
 		},
 		{
 			name: "existing parameters",
@@ -31,17 +31,17 @@ func TestDriverDSN_MySQLForcesMultiStatements(t *testing.T) {
 		{
 			name: "scheme is stripped and the flag still added",
 			dsn:  "mysql://user:pw@tcp(db:3306)/lyeve",
-			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true",
+			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true&parseTime=true",
 		},
 		{
 			name: "already set is left alone",
 			dsn:  "user:pw@tcp(db:3306)/lyeve?multiStatements=true",
-			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true",
+			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=true&clientFoundRows=true&parseTime=true",
 		},
 		{
 			name: "explicitly disabled is not silently flipped",
 			dsn:  "user:pw@tcp(db:3306)/lyeve?multiStatements=false",
-			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=false&clientFoundRows=true",
+			want: "user:pw@tcp(db:3306)/lyeve?multiStatements=false&clientFoundRows=true&parseTime=true",
 		},
 	}
 
@@ -71,7 +71,7 @@ func TestDriverDSN_MySQLHoldsTheLocationAtUTC(t *testing.T) {
 		{
 			name: "a named zone is rewritten",
 			dsn:  "user:pw@tcp(db:3306)/lyeve?loc=Etc%2FGMT%2B3",
-			want: "user:pw@tcp(db:3306)/lyeve?loc=UTC&multiStatements=true&clientFoundRows=true",
+			want: "user:pw@tcp(db:3306)/lyeve?loc=UTC&multiStatements=true&clientFoundRows=true&parseTime=true",
 		},
 		{
 			name: "no location is left to the default",

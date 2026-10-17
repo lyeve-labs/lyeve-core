@@ -119,7 +119,7 @@ func TestContentStore_DeleteAppliesEveryReferentialAction(t *testing.T) {
 			t.Error("a comment on a surviving post was deleted")
 		}
 		// Pivot: her pairing goes, his stays.
-		left, _, err := store.ListRelated(ctx, "rda_posts", byBob, reviewers, 10, 0)
+		left, _, err := store.ListRelated(ctx, "rda_posts", byBob, reviewers, 10, 0, true)
 		if err != nil {
 			t.Fatalf("list reviewers: %v", err)
 		}

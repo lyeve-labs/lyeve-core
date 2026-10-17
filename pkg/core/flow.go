@@ -70,14 +70,21 @@ type FlowNodeSpec struct {
 // The tenant travels in ctx, set with WithTenantID, and a node reads it with
 // TenantIDFromCtx. It is never in Config: a flow runs as its tenant, and a
 // node that could name another one would be a way across the boundary.
+//
+// Publisher is the user who published the version being run, with the roles
+// they hold in the run's tenant now. A node that reads or writes content under
+// the access rules acts as the publisher, never as whoever started the run
+// and never with more than the publisher holds. Nil means the runner does not
+// know who published, and such a node refuses to run rather than guess.
 type FlowInvocation struct {
-	TenantID string
-	NodeID   string
-	Config   map[string]any
-	Inputs   map[string][]any
-	DryRun   bool
-	Eval     func(expr string, extra map[string]any) (any, error)
-	Log      func(level, msg string, fields map[string]any)
+	TenantID  string
+	NodeID    string
+	Config    map[string]any
+	Inputs    map[string][]any
+	DryRun    bool
+	Eval      func(expr string, extra map[string]any) (any, error)
+	Log       func(level, msg string, fields map[string]any)
+	Publisher *AuthClaims
 }
 
 // FlowResult carries a node's outputs, keyed by output port.
@@ -171,8 +178,11 @@ type FlowDefinitionValidator interface {
 
 // FlowDefinitionValidatorRegistrar is implemented by the engine host. The
 // plugin that runs flows calls it in Start, and again in Stop with nil.
+// Through ScopedHost a registration needs CapFlowRegistry, and only the
+// plugin that registered the validator may replace or clear it. A refusal
+// comes back as the error.
 type FlowDefinitionValidatorRegistrar interface {
-	RegisterFlowDefinitionValidator(v FlowDefinitionValidator)
+	RegisterFlowDefinitionValidator(v FlowDefinitionValidator) error
 }
 
 // FlowDefinitionValidatorProvider is implemented by the engine host. Nil
@@ -262,8 +272,11 @@ type FlowInvokeResult struct {
 // FlowInvokerRegistrar is implemented by the engine host. The plugin that
 // runs flows calls it when it activates and again with nil when it
 // deactivates, so the registration follows the license, not the process.
+// Through ScopedHost a registration needs CapFlowRegistry, and only the
+// plugin that registered the invoker may replace or clear it. A refusal
+// comes back as the error.
 type FlowInvokerRegistrar interface {
-	RegisterFlowInvoker(inv FlowInvoker)
+	RegisterFlowInvoker(inv FlowInvoker) error
 }
 
 // FlowInvokerProvider is implemented by the engine host. Nil means no

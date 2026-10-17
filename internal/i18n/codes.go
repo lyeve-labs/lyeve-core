@@ -91,6 +91,10 @@ const (
 	CodeValidationStrongPassword Code = "VALIDATION_STRONG_PASSWORD"
 	CodeValidationUnknownField   Code = "VALIDATION_UNKNOWN_FIELD"
 	CodeValidationFieldType      Code = "VALIDATION_FIELD_TYPE"
+	// CodeValidationRelationTarget refuses a relation whose value names no
+	// entry of the caller's tenant. It does not say whether the entry exists
+	// elsewhere.
+	CodeValidationRelationTarget Code = "VALIDATION_RELATION_TARGET"
 
 	// Schema Validation
 	CodeSchemaValidationEmail        Code = "SCHEMA_VALIDATION_EMAIL"
