@@ -80,7 +80,7 @@ var expectedPlugins = []string{
 	"email", "graphql", "grpc", "multitenant", "webhook",
 	"ai", "analytics", "apianalytics", "apikey", "audit", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
 	"flow", "goroutine-engine", "idempotency", "profiler",
-	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "pii-mask", "query-monitor",
+	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "permissions", "pii-mask", "query-monitor",
 	"rate-limit", "realtime", "recommendations", "request-capture", "review", "usage",
 	"saml",
 	"schema", "scim", "search", "storage", "telemetry", "waf",
