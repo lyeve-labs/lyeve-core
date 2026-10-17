@@ -17,13 +17,13 @@
 #
 # Generated 2026-10-12T07:29:55Z from origin default branches.
 
-lyeve-libs = 318397a87c374cec0637c7cca65e281e677965c8
+lyeve-libs = 943fb90f421914a89d3f4ac022e502029e9d0ee2
 lyeve-plugin-ab-testing = 853b914f1ae4474f064ac5d4c7e0120b88f94896
 lyeve-plugin-ai = c8c12755408f9bad5dc2b8097c18851fb732c498
 lyeve-plugin-analytics = c792e87e4597712a2e9c6a0094c370feb3f3259b
 lyeve-plugin-apianalytics = fe6a191730ff6865d2426d097afb092e6f111ea3
 lyeve-plugin-apikey = e8f7f1119f2b815c0f3047e14f0c76af42e54ad5
-lyeve-plugin-audit = 09e73cac15b3af8861e865816175b2eca14ec472
+lyeve-plugin-audit = 441962d1eaca520e132b89856e3b0c0deb7bc6ab
 lyeve-plugin-bulk-import = fc5d8d995834f505cc91f044189c7ce6d9db59f6
 lyeve-plugin-cache = 1833d245100119e458a50e16b4152d9c0b710f38
 lyeve-plugin-captcha = 30a1e6f4a1bccce68789f70e0a57af44c077a2a1
@@ -33,8 +33,8 @@ lyeve-plugin-cron = 9c40da17f6fc1cfb56c977ff40a0d44cd023ed94
 lyeve-plugin-data-export = d150e0204c57958b6ab54c73511e8232faf2221f
 lyeve-plugin-data-residency = 825cc94bef0ee9a455db795be54c345fee4bded3
 lyeve-plugin-device-fingerprint = e437145ecd3484dbe8802262df59c9a4c299f219
-lyeve-plugin-email = e08b563000a583de5cfe4721cc2663b4c77b37ed
-lyeve-plugin-error-tracking = 744310576fe77f356a903ae07f210a81afebb8d6
+lyeve-plugin-email = 9d94fdcc2927e797e3afea05f7b858bb2b1de1e0
+lyeve-plugin-error-tracking = 3ea2e3e7f0d47f9d5b1acca43f416c3040580f72
 lyeve-plugin-events = e52c29c6fb63f11885b9f28566f3694cdd3a64dd
 lyeve-plugin-flow = cce5eced3a772114ccc06e6f609b68e797649540
 lyeve-plugin-goroutine-engine = ca3cbba0b90926257469253c5580692b71a5589a
@@ -55,15 +55,15 @@ lyeve-plugin-pii-mask = 72a3ef3275ec05d31af37f6ce8f4069200936b1f
 lyeve-plugin-profiler = 2e68de51c5fc7c899070988d3a46a950f642628a
 lyeve-plugin-query-monitor = f7ae1c4dc539f27275ae57a1927d559bf8db2838
 lyeve-plugin-rate-limit = 4c886897056c115ae80f7d31c113b68077d2b35b
-lyeve-plugin-realtime = a64bb455dc25e420699fdd6afdabbb8d9a69882f
+lyeve-plugin-realtime = 1d3f21642269d2e30e8c7c2acf15f71f37c95bdf
 lyeve-plugin-recommendations = 1d09ef84f1e6cfaabb6fb3b3048befd878ebf6ab
-lyeve-plugin-request-capture = f34c54b63d95cc882605892d1ed89a2108f2904c
+lyeve-plugin-request-capture = 832c345c1468e739ab56adb2c40e9ea7760af2a8
 lyeve-plugin-review = 53dfbca8e2959d9dc182e8c2ae0d91ac3179b709
 lyeve-plugin-saml = 65de5c869528e3b0fa1f7476ba4be2a8bc980b23
 lyeve-plugin-schema = 1d7f149dcc94bcc15cfb03cf120d0f3f108e0d89
 lyeve-plugin-scim = 7d41d136b68e53af0eb09f1ff6dd29a1041f5879
 lyeve-plugin-search = f4effc4d4723f2495c3d0c22b583084810301289
-lyeve-plugin-storage = 05856d774bb02ae196aee4009533ef58960508e8
+lyeve-plugin-storage = 9149f06412d24b09b093b81d7f11fb40ddda56d7
 lyeve-plugin-synthetic-monitoring = b6f9c54919f3065809f5203b058e8171dd16b35f
 lyeve-plugin-telemetry = 43f87716717137583c36210c564dc71848018e50
 lyeve-plugin-usage = 5f60f8b962ac1647e1609be386c9a01c33dc1b96
