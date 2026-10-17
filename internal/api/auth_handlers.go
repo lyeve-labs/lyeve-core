@@ -291,7 +291,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			// or a cache backend, nothing in the database reflects it, and the
 			// only outward sign is a 401 that reads as a bad credential. One
 			// line names it for the operator and changes no response.
-			slog.WarnContext(r.Context(), "login refused: account is locked out",
+			slog.WarnContext(failedAttemptContext(r.Context(), user), "login refused: account is locked out",
 				"user_id", user.ID,
 				"failures", count,
 				"max_attempts", h.MaxFailedAttempts,
@@ -315,7 +315,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// the id the lockout counts against, whether a credential arrived at all
 		// (an empty one means a truncated or malformed body rather than a wrong
 		// password) and whether the stored hash was present.
-		slog.InfoContext(r.Context(), "login failed: password did not verify",
+		attemptCtx := failedAttemptContext(r.Context(), user)
+		slog.InfoContext(attemptCtx, "login failed: password did not verify",
 			"user_id", user.ID,
 			"credential_supplied", body.Password != "",
 			"hash_present", user.PasswordHash != "",
@@ -329,7 +330,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		// Record failed attempt when risk assessor is available.
 		if h.deviceRiskAssessor != nil {
 			fp := collectFingerprint(r)
-			if recErr := h.deviceRiskAssessor.RecordLogin(r.Context(), user.ID, fp, false); recErr != nil {
+			if recErr := h.deviceRiskAssessor.RecordLogin(attemptCtx, user.ID, fp, false); recErr != nil {
 				slog.Warn("failed to record login attempt", "err", recErr)
 			}
 		}

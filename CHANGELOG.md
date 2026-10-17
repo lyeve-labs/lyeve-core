@@ -46,6 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: a super admin's SAML provider routes and OAuth linked account routes act in the tenant the X-Tenant-ID header names. A SAML provider created with the header used to land in the super admin's own tenant, so it signed people in there and not in the tenant named. The named tenant's linked sign-in accounts read as missing.
 - Through the OAuth, SAML and magic-link plugin releases this engine pins: a sign-in completed on one tenant's domain while the request carries another tenant's session is refused. An OAuth callback or a SAML assertion there answers 403, and a magic link answers as an unknown link does and is not spent. Each used to sign the person in to the session's tenant on that domain.
 - On PostgreSQL, a content read served a field removed from its content type until the removal was applied, and served, as empty values, the fields another tenant's definition of the same content type holds. Reads now build each entry from its content type's own fields, as they already did on MySQL and SQL Server.
+- A wrong password typed on one tenant's domain for an account of another tenant is logged and recorded under the account's own tenant. The domain's admins used to read in their own log stream that the address held an account elsewhere on the install, and its id.
 
 ### Added
 

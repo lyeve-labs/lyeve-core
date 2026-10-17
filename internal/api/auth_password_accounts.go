@@ -44,6 +44,21 @@ func (h *AuthHandler) passwordAccount(ctx context.Context, email, bodyTenant str
 	return h.users.GetByEmail(ctx, email)
 }
 
+// failedAttemptContext is the context a failed password sign-in logs and
+// records under. A tenant reads its own log stream, and the fallback lookup
+// above reaches an account of any tenant, so a line naming that account under
+// the request's tenant tells the domain's tenant the address holds an account
+// somewhere on the install. An address that holds none writes nothing. Where
+// the account's tenant differs from the one the request resolved, the attempt
+// is stamped with the account's tenant, which is also where its own admins
+// look. A request that resolved no tenant keeps its context.
+func failedAttemptContext(ctx context.Context, user *domain.User) context.Context {
+	if tenant := core.TenantIDFromCtx(ctx); tenant != "" && tenant != user.TenantID {
+		return core.WithTenantID(ctx, user.TenantID)
+	}
+	return ctx
+}
+
 // respondIfPasswordSignInRefused answers a password sign-in for an account
 // that may not sign in by password, and reports whether the sign-in may go
 // on. A disabled or expired account, and a provider account outside its
