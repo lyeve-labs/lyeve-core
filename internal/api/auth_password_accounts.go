@@ -65,13 +65,14 @@ func (h *AuthHandler) findPasswordAccount(ctx context.Context, email, bodyTenant
 }
 
 // hostAdmitsAccount reports whether a sign-in on the request's host may go on
-// for user. A host that names no tenant admits every account. A mapped domain
-// admits its own accounts, members of its tenant and super admins. Any other
-// account is answered as an unknown address, so a failed attempt there counts
-// nothing, locks nothing and records nothing, and the domain's tenant cannot
-// tell an address another tenant holds from a free one.
+// for user. A host that names no tenant, or one mapped to the default tenant,
+// admits every account. Any other mapped domain admits its own accounts,
+// members of its tenant and super admins. Any other account is answered as an
+// unknown address, so a failed attempt there counts nothing, locks nothing and
+// records nothing, and the domain's tenant cannot tell an address another
+// tenant holds from a free one.
 func (h *AuthHandler) hostAdmitsAccount(ctx context.Context, user *domain.User) (bool, error) {
-	host := core.HostTenantIDFromCtx(ctx)
+	host := signInHostTenant(ctx)
 	if host == "" || user.TenantID == host || hasRole(user.Roles, "super_admin") {
 		return true, nil
 	}
