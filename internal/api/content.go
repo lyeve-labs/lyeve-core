@@ -44,6 +44,11 @@ type ContentHandler struct {
 	// from the checks every request passes. Nil asks nothing, which is a
 	// handler built outside the router.
 	streamCredential func(*http.Request) error
+	// streamSlots counts the change streams open on this instance, so no
+	// credential or tenant holds more than its cap. A pointer, so a copy of
+	// the handler counts against the same caps. Nil caps nothing, which is a
+	// handler built outside the router.
+	streamSlots *streamSlots
 }
 
 // revisionStore resolves the store that keeps revision history, or answers

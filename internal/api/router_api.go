@@ -108,7 +108,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	userStore := db.NewUserStore(pool)
 	// Auto-mounted via RoutesPlugin.
 
-	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once),
+	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once), streamSlots: new(streamSlots),
 		streamCredential: streamCredential(tokenVersionGetter(userStore), o.apiKeyAuth)}
 
 	secureCook := cfg.SecureCookie
