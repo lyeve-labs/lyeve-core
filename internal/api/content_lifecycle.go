@@ -269,6 +269,11 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // an event it cannot judge is not sent. A change that may be to a draft is
 // skipped while the caller may not read drafts, and the stream stays open.
 //
+// A credential holds at most contentStreamsPerCredential streams open and a
+// tenant at most contentStreamsPerTenant, because each write costs every open
+// stream those checks. The next stream past either cap is refused with a 429
+// before anything is sent, and a stream gives its slot back however it ends.
+//
 // The credential is held to the same terms for as long as the stream lives.
 // A token ends the stream when it expires, and each event first asks whether
 // the credential still admits the caller, so a sign-out, a password a super
@@ -302,6 +307,15 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	callerTenant := core.TenantIDFromCtx(r.Context())
+	credential := streamCredentialKey(r)
+	if !h.streamSlots.take(callerTenant, credential) {
+		w.Header().Set("Retry-After", contentStreamRetryAfter)
+		httpx.ErrorReq(w, r, http.StatusTooManyRequests, "too many open change streams")
+		return
+	}
+	defer h.streamSlots.release(callerTenant, credential)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Accel-Buffering", "no")
@@ -311,7 +325,6 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		event string
 		data  map[string]any
 	}
-	callerTenant := core.TenantIDFromCtx(r.Context())
 	ch := make(chan change, 16)
 
 	// The hook runs on the writer's goroutine, so it only filters and copies.
