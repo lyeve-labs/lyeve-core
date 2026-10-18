@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -62,8 +63,15 @@ func InitJWTSigning(keyPath string) error {
 	if err != nil {
 		// A platform disk usually arrives owned by root while the engine runs
 		// unprivileged, and "permission denied" alone names no owner.
+		// The refused path names the directory to chown. When MkdirAll is
+		// refused, the key directory does not exist yet and its parent is
+		// the one to give away.
 		if errors.Is(err, os.ErrPermission) {
 			dir := filepath.Dir(keyPath)
+			var pathErr *fs.PathError
+			if errors.As(err, &pathErr) {
+				dir = filepath.Dir(pathErr.Path)
+			}
 			return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d, so give it the data directory with chown -R %d:%d %s)",
 				err, os.Getuid(), os.Getuid(), os.Getgid(), dir)
 		}
