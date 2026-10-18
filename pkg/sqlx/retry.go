@@ -72,23 +72,34 @@ func IsRetryableTxError(err error) bool {
 // rolled back by the engine, so the work did not land, but an fn that mutates
 // state outside that transaction would repeat that part.
 //
+// A MySQL lock wait timeout returns at once. It arrives only after the
+// statement waited innodb_lock_wait_timeout, 50 seconds by default, so every
+// retry would hold the caller that long again.
+//
 // label names the operation in the error returned when every attempt failed.
 func RetryOnTxConflict(ctx context.Context, label string, fn func() error) error {
-	var lastErr error
-	for attempt := 1; attempt <= DefaultTxAttempts; attempt++ {
+	for attempt := 1; ; attempt++ {
 		err := fn()
 		if err == nil {
 			return nil
 		}
-		if !IsRetryableTxError(err) {
+		if !IsRetryableTxError(err) || isLockWaitTimeout(err) {
 			return err
 		}
-		lastErr = err
+		if attempt == DefaultTxAttempts {
+			return fmt.Errorf("%s failed after %d attempts: %w", label, DefaultTxAttempts, err)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(retryBackoff(attempt)):
 		}
 	}
-	return fmt.Errorf("%s failed after %d attempts: %w", label, DefaultTxAttempts, lastErr)
+}
+
+// isLockWaitTimeout reports MySQL error 1205. SQL Server uses the same number
+// for a deadlock victim, which returns at once and stays worth a retry.
+func isLockWaitTimeout(err error) bool {
+	var myErr *mysql.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == 1205
 }
