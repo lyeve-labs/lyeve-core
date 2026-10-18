@@ -329,11 +329,12 @@ func (h *engineHost) Secrets(key string) (vals []string, found bool) {
 //
 // The roles argument is ignored whenever the host has a database. The roles
 // come from the account, as the engine's own sign-in gives them in the
-// account's home tenant: the home membership's roles when one exists,
-// otherwise the roles on the user row. A caller passes the row's roles, so
-// honoring the argument would sign an administrator a membership demoted as
-// an administrator again. The parameter stays so no plugin has to change. A
-// host with no database has no account to read and signs the roles as passed.
+// account's home tenant: the home membership's roles when one exists, with
+// super_admin as the row holds it, otherwise the roles on the user row. A
+// caller passes the row's roles, so honoring the argument would sign an
+// administrator a membership demoted as an administrator again. The
+// parameter stays so no plugin has to change. A host with no database has no
+// account to read and signs the roles as passed.
 func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, email string, roles []string) (string, error) {
 	expiry := h.cfg.JWTExpirySecs
 	if expiry <= 0 {
@@ -374,9 +375,10 @@ func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 
 // homeRoles is the roles a session acting in the account's home tenant
 // carries, by the rule the engine's own sign-in applies there. A membership
-// for the home tenant overrides the row, for super_admin too. No membership
-// leaves the row's roles. Any other reader error refuses to sign, because a
-// token signed past it would carry roles the membership may have taken away.
+// for the home tenant overrides the row, except for super_admin, which only
+// the row grants. No membership leaves the row's roles. Any other reader
+// error refuses to sign, because a token signed past it would carry roles the
+// membership may have taken away.
 func (h *engineHost) homeRoles(ctx context.Context, userID uuid.UUID, facts sessionFacts) ([]string, error) {
 	reader := h.membershipReader()
 	if reader == nil {
@@ -385,7 +387,7 @@ func (h *engineHost) homeRoles(ctx context.Context, userID uuid.UUID, facts sess
 	m, err := reader.Get(ctx, userID, facts.tenantID)
 	switch {
 	case err == nil:
-		return m.Roles, nil
+		return core.MembershipRoles(m.Roles, facts.roles), nil
 	case errors.Is(err, core.ErrNotFound):
 		return facts.roles, nil
 	default:

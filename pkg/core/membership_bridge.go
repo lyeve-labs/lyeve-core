@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -40,6 +41,24 @@ type MembershipReader interface {
 	// ListForUser returns every membership the account holds, ordered by
 	// tenant so the answer is stable across calls.
 	ListForUser(ctx context.Context, userID uuid.UUID) ([]*Membership, error)
+}
+
+// MembershipRoles returns the roles a session acting under a membership
+// carries: the membership's roles, with super_admin taken from the account's
+// own roles instead. super_admin is account level, and plugins that protect
+// super admins read the account row. So a membership never grants the role
+// and never takes it away, in the home tenant or any other.
+func MembershipRoles(membership, account []string) []string {
+	out := make([]string, 0, len(membership)+1)
+	for _, r := range membership {
+		if r != RoleSuperAdmin {
+			out = append(out, r)
+		}
+	}
+	if slices.Contains(account, RoleSuperAdmin) {
+		out = append(out, RoleSuperAdmin)
+	}
+	return out
 }
 
 // MembershipProvider is an optional interface a plugin implements to tell the

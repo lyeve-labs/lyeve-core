@@ -47,6 +47,8 @@ func (h *AuthHandler) WithMemberships(m core.MembershipReader) { h.memberships =
 // super_admin is the one exception. It already crosses tenants by header
 // through the tenancy middleware, so requiring a membership row here would
 // close a door that is open one layer down, and only for the login path.
+// It is also the one role a membership never decides: the account row grants
+// it or nothing does, whatever a row in any tenant holds.
 func (h *AuthHandler) resolveActingTenant(ctx context.Context, user *domain.User, requested string) (string, []string, error) {
 	home := user.TenantID
 
@@ -56,7 +58,7 @@ func (h *AuthHandler) resolveActingTenant(ctx context.Context, user *domain.User
 			m, err := h.memberships.Get(ctx, user.ID, home)
 			switch {
 			case err == nil:
-				roles = m.Roles
+				roles = core.MembershipRoles(m.Roles, user.Roles)
 			case errors.Is(err, core.ErrNotFound):
 				// Home access does not depend on a membership existing.
 			default:
@@ -89,7 +91,7 @@ func (h *AuthHandler) resolveActingTenant(ctx context.Context, user *domain.User
 		}
 		return "", nil, err
 	}
-	return m.TenantID, m.Roles, nil
+	return m.TenantID, core.MembershipRoles(m.Roles, user.Roles), nil
 }
 
 // signInHostTenant returns the tenant a sign-in on the request's host is held
@@ -193,10 +195,10 @@ func (h *AuthHandler) Memberships(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, m := range list {
 			if m.TenantID == user.TenantID {
-				out[0].Roles = m.Roles
+				out[0].Roles = core.MembershipRoles(m.Roles, user.Roles)
 				continue
 			}
-			out = append(out, entry{TenantID: m.TenantID, Roles: m.Roles})
+			out = append(out, entry{TenantID: m.TenantID, Roles: core.MembershipRoles(m.Roles, user.Roles)})
 		}
 	}
 
