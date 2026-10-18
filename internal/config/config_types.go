@@ -70,6 +70,11 @@ type Config struct {
 	IPAllowlist      []string // IP_ALLOWLIST: comma-separated CIDRs, bare addresses normalized (empty = allow all)
 	AllowedHosts     []string // ALLOWED_HOSTS: comma-separated hostnames for Host header validation (empty = disabled)
 
+	// OutboundAllowCGNAT lets outbound requests reach the shared address
+	// space, 100.64.0.0/10, which the SSRF guard refuses by default. An
+	// install that reaches its own services over Tailscale sets it.
+	OutboundAllowCGNAT bool // LYEVE_OUTBOUND_ALLOW_CGNAT
+
 	// TrustedIssuers is a list of external OIDC issuer base URLs whose JWTs are
 	// accepted on the API server without sharing JWT_SECRET.
 	// The JWKS endpoint is derived as {issuer}/.well-known/jwks.json.

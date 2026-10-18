@@ -579,6 +579,7 @@ func LoadFrom(path string) (*Config, error) {
 		MaxBodyBytes:              maxBodyBytes,
 		MaxJSONBodyBytes:          maxJSONBodyBytes,
 		IPAllowlist:               ipAllowlist,
+		OutboundAllowCGNAT:        envBool("LYEVE_OUTBOUND_ALLOW_CGNAT", false),
 		AllowedHosts:              allowedHosts,
 		TrustedIssuers:            trustedIssuers,
 		TrustedIssuerPolicies:     trustedIssuerPolicies,
