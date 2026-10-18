@@ -34,7 +34,8 @@ import (
 // blockedCIDRs is the canonical list of IP ranges the SSRF guard blocks, each
 // with the class a refusal names in the log. These cover: RFC 1918 private,
 // the shared address space, loopback, link-local (AWS/cloud IMDS), IPv6
-// loopback/unspecified/ULA/link-local, multicast (v4 and v6), reserved,
+// loopback/unspecified/ULA/link-local, the IPv4-compatible and SIIT forms
+// that carry an IPv4 address, multicast (v4 and v6), reserved,
 // "this network", and the local-use NAT64 range. Every IPv4 range has an IPv6
 // counterpart: an address family that blocks one spelling of the local host
 // but not the other is a bypass, not a hardened list.
@@ -46,17 +47,19 @@ var blockedCIDRs = []struct{ cidr, class string }{
 	// (Alibaba Cloud's 100.100.100.200) live here, and so do Tailscale
 	// addresses, which an install allows with AddAllowlist.
 	{"100.64.0.0/10", "shared address space"},
-	{"127.0.0.0/8", "loopback"},           // Loopback
-	{"169.254.0.0/16", "link-local"},      // Link-local (AWS IMDS, Azure IMDS, GCP metadata)
-	{"0.0.0.0/8", "this network"},         // "This network" (defense in depth)
-	{"224.0.0.0/4", "multicast"},          // Multicast (defense in depth)
-	{"240.0.0.0/4", "reserved"},           // Reserved / Class E (defense in depth)
-	{"::1/128", "loopback"},               // IPv6 loopback
-	{"::/128", "unspecified"},             // IPv6 unspecified: reaches the local host like 0.0.0.0
-	{"fc00::/7", "unique local"},          // IPv6 unique local
-	{"fe80::/10", "link-local"},           // IPv6 link-local
-	{"ff00::/8", "multicast"},             // IPv6 multicast (defense in depth)
-	{"64:ff9b:1::/48", "local-use NAT64"}, // RFC 8215: a translator here reaches private IPv4, and nothing public sits in it
+	{"127.0.0.0/8", "loopback"},            // Loopback
+	{"169.254.0.0/16", "link-local"},       // Link-local (AWS IMDS, Azure IMDS, GCP metadata)
+	{"0.0.0.0/8", "this network"},          // "This network" (defense in depth)
+	{"224.0.0.0/4", "multicast"},           // Multicast (defense in depth)
+	{"240.0.0.0/4", "reserved"},            // Reserved / Class E (defense in depth)
+	{"::1/128", "loopback"},                // IPv6 loopback
+	{"::/128", "unspecified"},              // IPv6 unspecified: reaches the local host like 0.0.0.0
+	{"::/96", "IPv4-compatible"},           // RFC 4291 deprecated IPv4-compatible form, after :: and ::1 so those keep their class
+	{"::ffff:0:0:0/96", "IPv4-translated"}, // SIIT form, which Is4In6 does not unmap
+	{"fc00::/7", "unique local"},           // IPv6 unique local
+	{"fe80::/10", "link-local"},            // IPv6 link-local
+	{"ff00::/8", "multicast"},              // IPv6 multicast (defense in depth)
+	{"64:ff9b:1::/48", "local-use NAT64"},  // RFC 8215: a translator here reaches private IPv4, and nothing public sits in it
 }
 
 // blockedRange is one parsed entry of blockedCIDRs.
@@ -175,7 +178,7 @@ var ResolveFunc = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 // blocked match, or (false, "") if all IPs are publicly routable or
 // allowlisted. A refusal is logged with the class of the range. The reason
 // leaves the class out, because callers may pass it on to a client.
-func isBlocked(scope string, ips []net.IPAddr) (bool, string) {
+func isBlocked(ctx context.Context, scope string, ips []net.IPAddr) (bool, string) {
 	for _, ipa := range ips {
 		addr, ok := netip.AddrFromSlice(ipa.IP)
 		if !ok {
@@ -186,7 +189,7 @@ func isBlocked(scope string, ips []net.IPAddr) (bool, string) {
 			addr = addr.Unmap()
 		}
 		if reason, class, blocked := blockedAddr(scope, addr); blocked {
-			slog.Warn("ssrf: outbound address refused",
+			slog.WarnContext(ctx, "ssrf: outbound address refused",
 				"range_class", class, "address", addr.String(), "scope", scope)
 			return true, reason
 		}
@@ -239,7 +242,7 @@ func ValidateAddressScoped(ctx context.Context, scope, addr string) error {
 	// Fast path: literal IP.
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		ipAddr := net.IPAddr{IP: net.IP(ip.AsSlice())}
-		if blocked, reason := isBlocked(scope, []net.IPAddr{ipAddr}); blocked {
+		if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{ipAddr}); blocked {
 			return fmt.Errorf("ssrf: %s (literal IP %s)", reason, host)
 		}
 		return nil
@@ -253,7 +256,7 @@ func ValidateAddressScoped(ctx context.Context, scope, addr string) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("ssrf: no IP addresses resolved for %q", host)
 	}
-	if blocked, reason := isBlocked(scope, ips); blocked {
+	if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 		return fmt.Errorf("ssrf: %s (resolved from %q)", reason, host)
 	}
 	return nil
@@ -296,7 +299,7 @@ func ValidateURLScoped(ctx context.Context, scope, rawURL string) error {
 	// Fast path: if host is already a literal IP, validate it directly.
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		ipAddr := net.IPAddr{IP: net.IP(ip.AsSlice())}
-		if blocked, reason := isBlocked(scope, []net.IPAddr{ipAddr}); blocked {
+		if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{ipAddr}); blocked {
 			return fmt.Errorf("ssrf: %s (literal IP %s)", reason, host)
 		}
 		return nil
@@ -311,7 +314,7 @@ func ValidateURLScoped(ctx context.Context, scope, rawURL string) error {
 		return fmt.Errorf("ssrf: no IP addresses resolved for %q", host)
 	}
 
-	if blocked, reason := isBlocked(scope, ips); blocked {
+	if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 		return fmt.Errorf("ssrf: %s (resolved from %q)", reason, host)
 	}
 
@@ -346,7 +349,7 @@ func NewSafeTransportScoped(scope string) *http.Transport {
 
 			// Fast path: literal IP.
 			if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
-				if blocked, reason := isBlocked(scope, []net.IPAddr{{IP: net.IP(ip.AsSlice())}}); blocked {
+				if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{{IP: net.IP(ip.AsSlice())}}); blocked {
 					return nil, fmt.Errorf("ssrf dial: %s", reason)
 				}
 				return dialer.DialContext(ctx, network, addr)
@@ -360,7 +363,7 @@ func NewSafeTransportScoped(scope string) *http.Transport {
 			if len(ips) == 0 {
 				return nil, fmt.Errorf("ssrf dial: no IPs for %q", host)
 			}
-			if blocked, reason := isBlocked(scope, ips); blocked {
+			if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 				return nil, fmt.Errorf("ssrf dial: %s", reason)
 			}
 

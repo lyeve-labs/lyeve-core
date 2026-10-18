@@ -34,6 +34,11 @@ func TestReservedAndEmbeddedRanges(t *testing.T) {
 		{"6to4 of private", "2002:0a00:0001::", true},
 		{"6to4 of shared space", "2002:6464:64c8::1", true},
 		{"6to4 of a public address", "2002:5db8:d822::1", false},
+		{"ipv4-compatible of link-local metadata", "::a9fe:a9fe", true},
+		{"ipv4-compatible of a public address", "::5db8:d822", true},
+		{"siit of link-local metadata", "::ffff:0:a9fe:a9fe", true},
+		{"siit of a public address", "::ffff:0:5db8:d822", true},
+		{"teredo stays admitted", "2001:0:4136:e378:8000:63bf:3fff:fdd2", false},
 	}
 
 	names := map[string][]net.IPAddr{}
@@ -81,6 +86,33 @@ func TestAllowlist_SharedAddressSpace(t *testing.T) {
 	assert.NoError(t, ValidateURL(ctx, "http://[64:ff9b::6465:6667]/"))
 	assert.Error(t, ValidateURL(ctx, "http://[64:ff9b::a9fe:a9fe]/"))
 	assert.Error(t, ValidateURL(ctx, "http://169.254.169.254/"))
+}
+
+// ctxHandler keeps the context each record was logged with.
+type ctxHandler struct{ got *[]context.Context }
+
+func (h ctxHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h ctxHandler) Handle(ctx context.Context, _ slog.Record) error {
+	*h.got = append(*h.got, ctx)
+	return nil
+}
+func (h ctxHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h ctxHandler) WithGroup(string) slog.Handler      { return h }
+
+type tenantKey struct{}
+
+// The refusal is logged with the caller's context, so a handler that reads
+// the tenant or the trace from it can put them on the line.
+func TestRefusal_LogsWithCallerContext(t *testing.T) {
+	var got []context.Context
+	orig := slog.Default()
+	slog.SetDefault(slog.New(ctxHandler{got: &got}))
+	t.Cleanup(func() { slog.SetDefault(orig) })
+
+	ctx := context.WithValue(context.Background(), tenantKey{}, "acme")
+	require.Error(t, ValidateURL(ctx, "http://100.100.100.200/"))
+	require.Len(t, got, 1)
+	assert.Equal(t, "acme", got[0].Value(tenantKey{}))
 }
 
 // The log names the class of the refused range. The error, which a caller
