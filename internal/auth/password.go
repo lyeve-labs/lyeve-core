@@ -11,6 +11,9 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
+
 	"crypto/rand"
 )
 
@@ -222,4 +225,33 @@ func ValidatePassword(policy PasswordPolicy, password string) error {
 	}
 
 	return nil
+}
+
+// PasswordViolationCode maps a ValidatePassword error to the error code the
+// engine answers with status 422 and the values its message names.
+func PasswordViolationCode(err error, policy PasswordPolicy) (i18n.Code, map[string]any) {
+	switch {
+	case errors.Is(err, ErrPasswordTooShort):
+		return i18n.CodePasswordTooShort, map[string]any{"min": policy.MinLength}
+	case errors.Is(err, ErrPasswordTooLong):
+		return i18n.CodePasswordTooLong, map[string]any{"max": policy.MaxBytes}
+	case errors.Is(err, ErrPasswordNoComplexity):
+		return i18n.CodePasswordNeedsComplexity, nil
+	case errors.Is(err, ErrPasswordTooCommon):
+		return i18n.CodePasswordTooCommon, nil
+	default:
+		return i18n.CodePasswordTooShort, nil
+	}
+}
+
+// CheckPassword validates password against policy and answers a refusal as
+// the *core.PasswordViolation a plugin reads through
+// core.PasswordPolicyValidator.
+func CheckPassword(policy PasswordPolicy, password string) error {
+	err := ValidatePassword(policy, password)
+	if err == nil {
+		return nil
+	}
+	code, params := PasswordViolationCode(err, policy)
+	return &core.PasswordViolation{Code: string(code), Params: params}
 }

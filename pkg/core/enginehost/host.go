@@ -231,6 +231,7 @@ var (
 	_ core.APIRoutesProvider                = (*engineHost)(nil)
 	_ core.APIRoutesRegistrar               = (*engineHost)(nil)
 	_ core.TenantRegionResolverProvider     = (*engineHost)(nil)
+	_ core.PasswordPolicyValidator          = (*engineHost)(nil)
 )
 
 // core.Host interface methods

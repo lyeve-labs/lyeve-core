@@ -889,6 +889,18 @@ func (c *Config) ConsoleKeys() [][]byte {
 	return keys
 }
 
+// PasswordPolicy returns the policy the admin routes and the host's
+// PasswordPolicyValidator apply to a new password.
+func (c *Config) PasswordPolicy() auth.PasswordPolicy {
+	return auth.PasswordPolicy{
+		MinLength:         c.PasswordMinLength,
+		RequireUpperLower: c.PasswordRequireComplexity,
+		RequireDigit:      c.PasswordRequireComplexity,
+		CheckCommon:       c.PasswordCheckCommon,
+		MaxBytes:          auth.MaxPasswordBytes(c.PasswordHashAlgo),
+	}
+}
+
 // parseIssuerPolicies reads TRUSTED_ISSUER_POLICIES. Every policy must name an
 // issuer listed in TRUSTED_ISSUERS, once, and pass IssuerPolicy.Validate.
 func parseIssuerPolicies(raw string, trustedIssuers []string) ([]auth.IssuerPolicy, error) {

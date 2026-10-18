@@ -98,7 +98,7 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.ValidatePassword(h.passwordPolicy, body.Password); err != nil {
-		code, params := passwordViolationResponse(err, h.passwordPolicy)
+		code, params := auth.PasswordViolationCode(err, h.passwordPolicy)
 		respondErrCode(w, r, http.StatusUnprocessableEntity, code, params)
 		return
 	}
@@ -311,7 +311,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.ValidatePassword(h.passwordPolicy, body.Password); err != nil {
-		code, params := passwordViolationResponse(err, h.passwordPolicy)
+		code, params := auth.PasswordViolationCode(err, h.passwordPolicy)
 		respondErrCode(w, r, http.StatusUnprocessableEntity, code, params)
 		return
 	}

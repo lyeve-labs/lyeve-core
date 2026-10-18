@@ -454,3 +454,14 @@ func (h *engineHost) RegisterRecordRevisionStore(s core.RecordRevisionStore) err
 func (h *engineHost) RecordRevisionStore() core.RecordRevisionStore {
 	return h.recordRevisionStore
 }
+
+// ValidatePassword implements core.PasswordPolicyValidator with the policy
+// the admin routes apply. A host built without a configuration applies the
+// engine's default policy.
+func (h *engineHost) ValidatePassword(password string) error {
+	policy := auth.DefaultPasswordPolicy()
+	if h.cfg != nil {
+		policy = h.cfg.PasswordPolicy()
+	}
+	return auth.CheckPassword(policy, password)
+}

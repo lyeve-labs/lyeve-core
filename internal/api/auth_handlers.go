@@ -79,7 +79,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := auth.ValidatePassword(h.passwordPolicy, body.Password); err != nil {
-		code, params := passwordViolationResponse(err, h.passwordPolicy)
+		code, params := auth.PasswordViolationCode(err, h.passwordPolicy)
 		respondErrCode(w, r, http.StatusUnprocessableEntity, code, params)
 		return
 	}

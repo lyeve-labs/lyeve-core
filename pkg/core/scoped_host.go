@@ -812,6 +812,7 @@ var (
 	_ LogRingProvider                  = (*ScopedHost)(nil)
 	_ EngineRateLimitsProvider         = (*ScopedHost)(nil)
 	_ APIRoutesProvider                = (*ScopedHost)(nil)
+	_ PasswordPolicyValidator          = (*ScopedHost)(nil)
 )
 
 // APIRoutes forwards to inner if it implements APIRoutesProvider. Nil
@@ -825,6 +826,16 @@ func (h *ScopedHost) APIRoutes() APIRoutes {
 	}
 	h.warnUnavailable("APIRoutes")
 	return nil
+}
+
+// ValidatePassword forwards to inner if it implements
+// PasswordPolicyValidator. It reads no data, so it needs no capability. A
+// host without the role answers ErrHostRoleUnsupported.
+func (h *ScopedHost) ValidatePassword(password string) error {
+	if p, ok := h.inner.(PasswordPolicyValidator); ok {
+		return p.ValidatePassword(password)
+	}
+	return ErrHostRoleUnsupported
 }
 
 // GoroutineTunables forwards to inner if it implements
