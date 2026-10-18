@@ -17,3 +17,11 @@ func Version(arg, version, commit, buildDate string) {
 		os.Exit(0)
 	}
 }
+
+// Usage refuses an argument that neither Healthcheck nor Version answered.
+// It prints the usage line to stderr and exits 2, so a mistyped flag never
+// boots a second engine beside the running one.
+func Usage(arg string) {
+	fmt.Fprintf(os.Stderr, "lyeve: unknown argument %q\nusage: lyeve [healthcheck | --version]\n", arg)
+	os.Exit(2)
+}

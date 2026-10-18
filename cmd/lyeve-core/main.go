@@ -27,6 +27,7 @@ func main() {
 	}
 	if len(os.Args) > 1 {
 		runtime.Version(os.Args[1], version, commit, buildDate)
+		runtime.Usage(os.Args[1])
 	}
 
 	// JSON from the first line on. The runtime logs its own start line, with
