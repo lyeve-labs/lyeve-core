@@ -18,10 +18,10 @@ func Version(arg, version, commit, buildDate string) {
 	}
 }
 
-// Usage refuses an argument that neither Healthcheck nor Version answered.
-// It prints the usage line to stderr and exits 2, so a mistyped flag never
-// boots a second engine beside the running one.
+// Usage refuses an argument that Healthcheck, Migrate and Version all left
+// unanswered. It prints the usage line to stderr and exits 2, so a mistyped
+// flag never boots a second engine beside the running one.
 func Usage(arg string) {
-	fmt.Fprintf(os.Stderr, "lyeve: unknown argument %q\nusage: lyeve [healthcheck | --version]\n", arg)
+	fmt.Fprintf(os.Stderr, "lyeve: unknown argument %q\nusage: lyeve [healthcheck | --version | migrate mark-applied --plugin <name> --version <version>]\n", arg)
 	os.Exit(2)
 }

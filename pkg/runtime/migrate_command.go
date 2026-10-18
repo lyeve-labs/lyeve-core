@@ -5,11 +5,21 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 )
+
+// Migrate runs "lyeve migrate" and exits with its status when args[0] is
+// migrate. Any other argument returns, and the caller goes on. A main calls it
+// before Usage, which refuses every argument nothing before it answered.
+func Migrate(args []string) {
+	if len(args) > 0 && args[0] == "migrate" {
+		os.Exit(MigrateCommand(args[1:], os.Stdout, os.Stderr))
+	}
+}
 
 const migrateUsage = "usage: lyeve migrate mark-applied --plugin <name> --version <version>"
 
