@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,4 +41,36 @@ func TestInitJWTSigning_GeneratesAndPersistsEd25519Keypair(t *testing.T) {
 	pub2 := auth.PublicKey()
 	require.NotNil(t, pub2, "PublicKey must be non-nil after second InitJWTSigning")
 	assert.Equal(t, pub1, pub2, "PublicKey must be identical (same key loaded from disk)")
+}
+
+// A platform disk usually arrives owned by root while the image runs as an
+// unprivileged user. The boot error has to name the directory and the chown
+// that fixes it, because "permission denied" alone names neither.
+func TestInitJWTSigning_RefusedDataDirNamesTheChown(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes past file modes")
+	}
+	t.Setenv("JWT_ALG", "EdDSA")
+
+	cases := map[string]func(t *testing.T, dir, keyPath string){
+		"directory not writable": func(t *testing.T, dir, _ string) {
+			require.NoError(t, os.Chmod(dir, 0o500))
+		},
+		"key file not readable": func(t *testing.T, _, keyPath string) {
+			require.NoError(t, os.WriteFile(keyPath, []byte("{}"), 0o000))
+		},
+	}
+	for name, refuse := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			keyPath := filepath.Join(dir, "jwt_key.json")
+			refuse(t, dir, keyPath)
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+			err := auth.InitJWTSigning(keyPath)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, os.ErrPermission)
+			assert.Contains(t, err.Error(), fmt.Sprintf("chown -R %d:%d %s", os.Getuid(), os.Getgid(), dir))
+		})
+	}
 }

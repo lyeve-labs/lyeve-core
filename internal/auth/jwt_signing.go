@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -59,6 +60,13 @@ func InitJWTSigning(keyPath string) error {
 
 	key, kid, err := loadOrGenerateKey(keyPath)
 	if err != nil {
+		// A platform disk usually arrives owned by root while the engine runs
+		// unprivileged, and "permission denied" alone names no owner.
+		if errors.Is(err, os.ErrPermission) {
+			dir := filepath.Dir(keyPath)
+			return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d, so give it the data directory with chown -R %d:%d %s)",
+				err, os.Getuid(), os.Getuid(), os.Getgid(), dir)
+		}
 		return fmt.Errorf("init jwt signing: %w", err)
 	}
 
