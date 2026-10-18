@@ -62,9 +62,6 @@ func TestInitJWTSigning_RefusedDataDirNamesTheChown(t *testing.T) {
 		"key file not readable": {"jwt_key.json", func(t *testing.T, _, keyPath string) {
 			require.NoError(t, os.WriteFile(keyPath, []byte("{}"), 0o000))
 		}},
-		"key directory cannot be created": {filepath.Join("keys", "jwt_key.json"), func(t *testing.T, dir, _ string) {
-			require.NoError(t, os.Chmod(dir, 0o500))
-		}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -77,6 +74,35 @@ func TestInitJWTSigning_RefusedDataDirNamesTheChown(t *testing.T) {
 			require.Error(t, err)
 			assert.ErrorIs(t, err, os.ErrPermission)
 			assert.Contains(t, err.Error(), fmt.Sprintf("chown -R %d:%d %s)", os.Getuid(), os.Getgid(), dir))
+		})
+	}
+}
+
+// When the key directory is missing and its parent refuses the mkdir, the
+// parent belongs to someone else. The hint has to create the key directory
+// alone and never hand the parent, which may be / or /var/lib, to the engine.
+func TestInitJWTSigning_RefusedMkdirCreatesOnlyTheKeyDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads and writes past file modes")
+	}
+	t.Setenv("JWT_ALG", "EdDSA")
+
+	cases := map[string]string{
+		"key directory cannot be created":       filepath.Join("keys", "jwt_key.json"),
+		"missing mount above the key directory": filepath.Join("data", "keys", "jwt_key.json"),
+	}
+	for name, keyName := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			keyPath := filepath.Join(dir, keyName)
+			require.NoError(t, os.Chmod(dir, 0o500))
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+			err := auth.InitJWTSigning(keyPath)
+			require.Error(t, err)
+			assert.ErrorIs(t, err, os.ErrPermission)
+			assert.Contains(t, err.Error(), fmt.Sprintf("install -d -o %d -g %d %s)", os.Getuid(), os.Getgid(), filepath.Dir(keyPath)))
+			assert.NotContains(t, err.Error(), "chown -R")
 		})
 	}
 }

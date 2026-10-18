@@ -63,17 +63,22 @@ func InitJWTSigning(keyPath string) error {
 	if err != nil {
 		// A platform disk usually arrives owned by root while the engine runs
 		// unprivileged, and "permission denied" alone names no owner.
-		// The refused path names the directory to chown. When MkdirAll is
-		// refused, the key directory does not exist yet and its parent is
-		// the one to give away.
+		// A refused mkdir means the key directory is missing and its parent
+		// belongs to someone else, so the hint creates only the key directory
+		// rather than handing over a parent that may be / or /var/lib.
 		if errors.Is(err, os.ErrPermission) {
+			uid, gid := os.Getuid(), os.Getgid()
 			dir := filepath.Dir(keyPath)
 			var pathErr *fs.PathError
 			if errors.As(err, &pathErr) {
+				if pathErr.Op == "mkdir" {
+					return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d and cannot create the key directory, so create it with install -d -o %d -g %d %s)",
+						err, uid, uid, gid, dir)
+				}
 				dir = filepath.Dir(pathErr.Path)
 			}
 			return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d, so give it the data directory with chown -R %d:%d %s)",
-				err, os.Getuid(), os.Getuid(), os.Getgid(), dir)
+				err, uid, uid, gid, dir)
 		}
 		return fmt.Errorf("init jwt signing: %w", err)
 	}
