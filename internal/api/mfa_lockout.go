@@ -195,12 +195,18 @@ func (l *InMemoryMFALockout) pruneExpiredChallengesLocked() {
 // challengeTokenTTL matches the 5-minute expiry set in auth.SignChallenge.
 const challengeTokenTTL = 5 * time.Minute
 
-// MarkJTIUsed records a challenge token JTI as consumed. After this call,
-// IsJTIUsed returns true for the same JTI until the entry expires.
-func (l *InMemoryMFALockout) MarkJTIUsed(jti string) {
+// MarkJTIUsed records a challenge token JTI as consumed and reports whether
+// this call recorded it. Of two calls for one JTI only the first gets true.
+// After this call, IsJTIUsed returns true for the same JTI until the entry
+// expires.
+func (l *InMemoryMFALockout) MarkJTIUsed(jti string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if seen, ok := l.usedJTIs[jti]; ok && time.Since(seen) <= challengeTokenTTL {
+		return false
+	}
 	l.usedJTIs[jti] = time.Now()
+	return true
 }
 
 // IsJTIUsed returns true when the given JTI has already been consumed
