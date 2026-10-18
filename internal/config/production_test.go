@@ -424,6 +424,41 @@ func TestValidateProduction_DefaultDBCredentials_Postgres(t *testing.T) {
 	}
 }
 
+// A refused start is printed and shipped with the logs, so the refusal names
+// the connection without its password.
+func TestValidateProduction_DefaultDBCredentialsRefusalHidesPassword(t *testing.T) {
+	const secret = "Tr0ub4dor-secret"
+	tests := []struct {
+		name       string
+		dbURL      string
+		replicaURL string
+	}{
+		{"postgres", "postgres://postgres:" + secret + "@db.internal/app?sslmode=require", ""},
+		{"mysql", "mysql://root:" + secret + "@tcp(db.internal:3306)/app?parseTime=true", ""},
+		{"mysql without a scheme", "root:" + secret + "@tcp(db.internal:3306)/app", ""},
+		{"sqlserver", "sqlserver://sa:" + secret + "@db.internal:1433?database=app", ""},
+		{"sqlserver password parameter", "sqlserver://sa@db.internal:1433?database=app&password=" + secret, ""},
+		{"password holding an at sign and a slash", "postgres://postgres:a@b/" + secret + "@db.internal/app", ""},
+		{"replica", "postgres://app:strong@db.internal/app?sslmode=require", "postgres://postgres:" + secret + "@replica.internal/app"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Environment:        "production",
+				DatabaseURL:        tt.dbURL,
+				DatabaseReplicaURL: tt.replicaURL,
+			}
+			err := cfg.ValidateProduction()
+			if err == nil || !strings.Contains(err.Error(), "default/dev credentials") {
+				t.Fatalf("want a default credentials refusal, got: %v", err)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("refusal prints the password: %s", err)
+			}
+		})
+	}
+}
+
 // Production fail-closed: JWT key file permissions
 
 func TestValidateProduction_JWTKeyFileWorldReadable(t *testing.T) {

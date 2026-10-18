@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 )
 
 // weakSecretMarks are the substrings that make a secret not one.
@@ -238,7 +240,7 @@ func (c *Config) ValidateProduction() error {
 	for _, dsn := range []string{c.DatabaseURL, c.DatabaseReplicaURL} {
 		if hasDefaultDBCredentials(dsn) {
 			prodErrs = append(prodErrs, fmt.Sprintf("%s uses default/dev credentials (postgres/root/sa) - production deployments must use non-default credentials",
-				dsn))
+				db.RedactDSN(dsn)))
 		}
 	}
 

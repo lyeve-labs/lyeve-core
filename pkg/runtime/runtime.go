@@ -275,11 +275,11 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		if err := db.ConnectReplica(context.Background(), pool, cfg.DatabaseReplicaURL, cfg.DatabaseReplicaMaxConns); err != nil {
 			logger.Warn("read replica unavailable - falling back to primary for all reads",
 				"err", err,
-				"replica_url", cfg.DatabaseReplicaURL,
+				"replica_url", db.RedactDSN(cfg.DatabaseReplicaURL),
 			)
 		} else {
 			logger.Info("read replica connected",
-				"replica_url", cfg.DatabaseReplicaURL,
+				"replica_url", db.RedactDSN(cfg.DatabaseReplicaURL),
 				"max_conns", cfg.DatabaseReplicaMaxConns,
 			)
 		}
