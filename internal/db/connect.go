@@ -514,24 +514,36 @@ func withParseTime(dsn string) string {
 }
 
 // withUTCLocation holds the MySQL driver's time location at UTC, which is its
-// default, by rewriting any loc parameter a DATABASE_URL carries.
+// default, by rewriting any loc parameter a DATABASE_URL carries, and pins the
+// session time zone to UTC in place of any time_zone the URL names.
 //
 // A DATETIME column keeps no offset. The driver writes a time.Time as the
 // wall clock in its location, and the content read path takes every stored
 // datetime to be UTC, because that is the only way three databases can return
 // one value. Under loc=Local on a host that is not on UTC, a datetime written
 // at 09:30Z would be stored as the host's wall clock and read back hours off.
+//
+// MySQL evaluates NOW(), CURRENT_TIMESTAMP and column defaults in the session
+// zone, which is the server's own unless the session sets one. On a server
+// that is not on UTC those times would read back off by its offset, and a
+// comparison between a Go time and NOW() would be off by the same amount. The
+// driver sends time_zone='+00:00' on every new connection, and the offset form
+// needs no time zone tables on the server.
 func withUTCLocation(dsn string) string {
-	base, query, ok := strings.Cut(dsn, "?")
-	if !ok {
-		return dsn
-	}
-	params := strings.Split(query, "&")
-	for i, p := range params {
-		if strings.HasPrefix(p, "loc=") {
-			params[i] = "loc=UTC"
+	base, query, _ := strings.Cut(dsn, "?")
+	var params []string
+	if query != "" {
+		for _, p := range strings.Split(query, "&") {
+			if strings.HasPrefix(p, "time_zone=") {
+				continue
+			}
+			if strings.HasPrefix(p, "loc=") {
+				p = "loc=UTC"
+			}
+			params = append(params, p)
 		}
 	}
+	params = append(params, "time_zone=%27%2B00%3A00%27")
 	return base + "?" + strings.Join(params, "&")
 }
 
