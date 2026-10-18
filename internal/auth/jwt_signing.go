@@ -63,10 +63,14 @@ func InitJWTSigning(keyPath string) error {
 	if err != nil {
 		// A platform disk usually arrives owned by root while the engine runs
 		// unprivileged, and "permission denied" alone names no owner. The key
-		// may sit in a directory the engine shares, such as / or /var/lib, so
-		// the hint grants only what was refused and never recurses. A refused
-		// mkdir creates the key directory, a refused read grants the key file,
-		// and a refused write grants the key directory for its one new file.
+		// may sit in a directory the engine shares, such as / or /var/lib, and
+		// owning a shared directory lets the engine rename or unlink any entry
+		// in it, so the hint never names an existing directory as a chown
+		// target. A refused mkdir creates the missing key directory, and a
+		// refused read grants the key file alone. saveKey writes a .tmp file
+		// and renames it, so a refused write needs a directory of its own:
+		// the hint creates a new subdirectory owned by the engine and names
+		// the JWT_KEY_PATH that points into it.
 		if errors.Is(err, os.ErrPermission) {
 			uid, gid := os.Getuid(), os.Getgid()
 			dir := filepath.Dir(keyPath)
@@ -80,8 +84,9 @@ func InitJWTSigning(keyPath string) error {
 				return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d, so give it the key file with chown %d:%d %s)",
 					err, uid, uid, gid, keyPath)
 			}
-			return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d, so give it the key directory with chown %d:%d %s)",
-				err, uid, uid, gid, dir)
+			ownDir := filepath.Join(dir, "lyeve")
+			return fmt.Errorf("init jwt signing: %w (the engine runs as uid %d and gid %d and cannot write in %s, so create a directory of its own with install -d -o %d -g %d -m 700 %s and set JWT_KEY_PATH to %s)",
+				err, uid, gid, dir, uid, gid, ownDir, filepath.Join(ownDir, filepath.Base(keyPath)))
 		}
 		return fmt.Errorf("init jwt signing: %w", err)
 	}
