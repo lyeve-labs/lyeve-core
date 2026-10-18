@@ -25,6 +25,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		runtime.Healthcheck()
 	}
+	if len(os.Args) > 1 {
+		runtime.Version(os.Args[1], version, commit, buildDate)
+	}
 
 	// JSON from the first line on. The runtime logs its own start line, with
 	// the version, once its logging is configured.
