@@ -214,6 +214,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return err
 	}
 	logger := blog.logger
+	// Before any plugin starts, so no outbound client is built without it.
+	if err := applyOutboundAllowance(cfg, logger); err != nil {
+		return err
+	}
 	defer func() {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

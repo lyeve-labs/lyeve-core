@@ -973,6 +973,7 @@ var OperatorOnlyKeys = map[string]bool{
 	// the SSRF guard to internal addresses.
 	"webhook_allowed_private_networks": true,
 	"smtp_allowed_private_networks":    true,
+	"lyeve_outbound_allow_cgnat":       true,
 }
 
 // IsOperatorOnlyKey reports whether key may be set only by the operator. It

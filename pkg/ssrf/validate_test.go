@@ -85,7 +85,7 @@ func TestValidateURL_NoIPsResolved(t *testing.T) {
 func TestIsBlocked_MalformedIPSkipped(t *testing.T) {
 	// A 3-byte slice is neither a valid IPv4 (4) nor IPv6 (16) address, so
 	// netip.AddrFromSlice returns ok=false and the entry must be skipped.
-	blocked, reason := isBlocked("", []net.IPAddr{{IP: net.IP{1, 2, 3}}})
+	blocked, reason := isBlocked(context.Background(), "", []net.IPAddr{{IP: net.IP{1, 2, 3}}})
 	assert.False(t, blocked)
 	assert.Empty(t, reason)
 }
