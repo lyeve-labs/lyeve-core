@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 )
 
 // ParallelConfig configures the bounded parallel execution engine.
@@ -128,6 +131,7 @@ func (e *ParallelEngine) FanOut(ctx context.Context, items []any, fn func(contex
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("ParallelEngine task panicked", "panic", fmt.Sprintf("%v", r))
+					panicreport.Report(panicreport.Panic{Goroutine: "parallel-map-task", Value: r, Stack: debug.Stack()})
 				}
 			}()
 
@@ -185,6 +189,7 @@ func (e *ParallelEngine) FanOutVoid(ctx context.Context, items []any, fn func(co
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("ParallelEngine task panicked", "panic", fmt.Sprintf("%v", r))
+					panicreport.Report(panicreport.Panic{Goroutine: "parallel-each-task", Value: r, Stack: debug.Stack()})
 				}
 			}()
 

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
@@ -93,8 +94,10 @@ func (a *Activator) RecollectRoutes() []PluginRoutes {
 func (a *Activator) safeRoutes(name string, rp RoutesPlugin) (routes []RouteDecl) {
 	defer func() {
 		if r := recover(); r != nil {
+			stack := debug.Stack()
 			a.logger.Error("plugin Routes() panicked while re-collecting after a license change",
-				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(debug.Stack()))
+				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(stack))
+			panicreport.Report(panicreport.Panic{Goroutine: "plugin/" + name + "/Routes", Value: r, Stack: stack})
 			routes = nil
 		}
 	}()
@@ -268,7 +271,9 @@ func (a *Activator) Stop(ctx context.Context) error {
 func safeStart(ctx context.Context, p core.Plugin, host core.Host) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic in Start: %v\n%s", r, debug.Stack())
+			stack := debug.Stack()
+			err = fmt.Errorf("panic in Start: %v\n%s", r, stack)
+			panicreport.Report(panicreport.Panic{Goroutine: "plugin/" + p.Name() + "/Start", Value: r, Stack: stack})
 		}
 	}()
 	return p.Start(ctx, host)
@@ -278,7 +283,9 @@ func safeStart(ctx context.Context, p core.Plugin, host core.Host) (err error) {
 func safeStop(ctx context.Context, p core.Plugin) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("panic in Stop: %v\n%s", r, debug.Stack())
+			stack := debug.Stack()
+			err = fmt.Errorf("panic in Stop: %v\n%s", r, stack)
+			panicreport.Report(panicreport.Panic{Goroutine: "plugin/" + p.Name() + "/Stop", Value: r, Stack: stack})
 		}
 	}()
 	return p.Stop(ctx)

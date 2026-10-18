@@ -1,12 +1,14 @@
 // Package panicreport hands every panic the engine recovers to one reporter.
 //
-// The request recoverers and the goroutine spawners in pkg/engine each catch
-// a panic and log it. Logging alone leaves the panic on stderr, so the
-// runtime installs a reporter here that hands it to the plugins holding the
-// panic reporter role, and every recovery point calls Report. The package is
-// internal so that only the runtime installs the reporter: a plugin cannot
-// redirect or silence the engine's panics. It sits below pkg/core, which
-// imports pkg/engine, so Panic mirrors core.RecoveredPanic field for field.
+// The request recoverers, the goroutines, worker pool and parallel tasks in
+// pkg/engine, the cluster relay's subscribers and the activator's calls into
+// a plugin each catch a panic and log it. Logging alone leaves the panic on
+// stderr, so the runtime installs a reporter here that hands it to the
+// plugins holding the panic reporter role, and every recovery point calls
+// Report. The package is internal so that only the runtime installs the
+// reporter: a plugin cannot redirect or silence the engine's panics. It sits
+// below pkg/core, which imports pkg/engine, so Panic mirrors
+// core.RecoveredPanic field for field.
 package panicreport
 
 import (

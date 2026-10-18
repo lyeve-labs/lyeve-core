@@ -1,8 +1,9 @@
 package core
 
 // RecoveredPanic is one panic the engine recovered while keeping the process
-// up: in a request handler, a plugin's included, or in a goroutine the engine
-// spawned.
+// up: in a request handler, a plugin's included, in a goroutine, worker pool
+// task or cluster subscriber the engine runs, or in a plugin's Start, Stop,
+// Routes, FlowNodes or FlowTriggers.
 //
 // It carries no request body, header, query string, path value or
 // credential. Route is the pattern the router matched, so a token that sits
@@ -17,7 +18,8 @@ type RecoveredPanic struct {
 	// /api/v1/content/{schema}/{id}, or "" for a goroutine and for a request
 	// that matched no pattern.
 	Route string
-	// Goroutine names the goroutine that panicked, or "" for a request.
+	// Goroutine names the goroutine that panicked, such as "workerpool", or
+	// the plugin call, such as "plugin/<name>/Start". It is "" for a request.
 	Goroutine string
 	// Value is the value passed to panic.
 	Value any
