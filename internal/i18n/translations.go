@@ -95,6 +95,10 @@ var translations = map[Code]map[string]string{
 		"en": "Refresh token reuse detected. This session has been revoked for security.",
 		"fr": "Réutilisation du jeton détectée. Cette session a été révoquée par sécurité.",
 	},
+	CodeTokenRotated: {
+		"en": "This refresh token was renewed by another request a moment ago. Continue with the newest one.",
+		"fr": "Ce jeton a été renouvelé par une autre requête il y a un instant. Continuez avec le plus récent.",
+	},
 	CodeTokenExpired: {
 		"en": "Your session has expired. Please log in again.",
 		"fr": "Votre session a expiré. Veuillez vous reconnecter.",

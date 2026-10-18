@@ -41,6 +41,7 @@ const (
 	CodeMFANotConfigured        Code = "AUTH_MFA_NOT_CONFIGURED"
 	CodeMFAInvalidCode          Code = "AUTH_MFA_INVALID_CODE"
 	CodeTokenReuse              Code = "AUTH_TOKEN_REUSE"
+	CodeTokenRotated            Code = "AUTH_TOKEN_ROTATED"
 	CodeTokenExpired            Code = "AUTH_TOKEN_EXPIRED"
 	CodeSessionRevoked          Code = "AUTH_SESSION_REVOKED"
 	CodeRefreshNotEnabled       Code = "AUTH_REFRESH_NOT_ENABLED"

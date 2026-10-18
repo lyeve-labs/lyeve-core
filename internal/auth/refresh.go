@@ -29,6 +29,14 @@ import (
 // the whole family is revoked at once, killing every outstanding token for
 // that login.
 //
+// The token rotated away in the last rotationRetryWindow is not read as
+// replay. A lost answer or a second console replica trading the same token
+// sends exactly that, and revoking would sign the person out for a theft that
+// never happened. It answers ErrTokenRotated and hands out no token, so a
+// stolen copy gains nothing. Any older token, or this one after the window, is
+// replay as before. The window runs from IssuedAt, so the stored record keeps
+// the shape every release reads.
+//
 // Keys, all under the configured keyspace (e.g. "cms") and TTL'd to the
 // token lifetime so the backend self-cleans:
 //
@@ -74,6 +82,12 @@ var (
 	// ErrFamilyRevoked means the token family was explicitly revoked.
 	ErrFamilyRevoked = errors.New("refresh token family revoked")
 
+	// ErrTokenRotated means the token was rotated away within
+	// rotationRetryWindow. Nothing is issued. The caller answers a retryable
+	// status, and the client carries on with the successor it holds or will
+	// receive.
+	ErrTokenRotated = errors.New("refresh token rotated moments ago")
+
 	// ErrBackendUnavailable means the token store could not be reached, so
 	// nothing is known about the token either way. It must never be reported
 	// as an invalid token: a client told its token is invalid discards the
@@ -81,6 +95,11 @@ var (
 	// permanently instead of asking them to retry. Callers map it to 503.
 	ErrBackendUnavailable = errors.New("refresh token backend unavailable")
 )
+
+// rotationRetryWindow bounds how long after a rotation the token it replaced
+// is answered ErrTokenRotated instead of being read as replay. It covers a
+// retry and the requests a browser sent before it stored the new token.
+const rotationRetryWindow = 10 * time.Second
 
 // maxUsedHashes caps the per-family used-hash set to bound record growth.
 const maxUsedHashes = 50
@@ -250,11 +269,14 @@ type RotateResult struct {
 	// TokenVersion is the token_version the family was issued under.
 	TokenVersion int
 	ExpiresAt    time.Time
+
+	oldHash, newHash string
+	oldIssuedAt      time.Time
 }
 
 // Rotate validates oldToken and returns a new refresh token. If oldToken was
 // already rotated (reuse detection), the family is revoked and ErrTokenReuse is
-// returned.
+// returned, except within the window ErrTokenRotated answers.
 func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl time.Duration) (*RotateResult, error) {
 	familyID, oldHash, err := parseRefreshToken(oldToken)
 	if err != nil {
@@ -294,6 +316,7 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 		if len(rec.UsedHashes) > maxUsedHashes {
 			rec.UsedHashes = rec.UsedHashes[len(rec.UsedHashes)-maxUsedHashes:]
 		}
+		oldIssuedAt := rec.IssuedAt
 		rec.CurrentHash = newHash
 		rec.Gen++
 		rec.IssuedAt = time.Now()
@@ -304,6 +327,11 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 		}
 
 		if err := s.casSave(ctx, familyID, oldBytes, newBytes, storageTTL(ttl)); err != nil {
+			if errors.Is(err, ErrCASFailed) {
+				// Another replica rotated this token between the read and
+				// the write.
+				return nil, ErrTokenRotated
+			}
 			return nil, fmt.Errorf("refresh token rotate: %w", err)
 		}
 		return &RotateResult{
@@ -313,7 +341,14 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 			TenantID:     rec.TenantID,
 			TokenVersion: rec.TokenVersion,
 			ExpiresAt:    rec.ExpiresAt,
+			oldHash:      oldHash,
+			newHash:      newHash,
+			oldIssuedAt:  oldIssuedAt,
 		}, nil
+	}
+
+	if n := len(rec.UsedHashes); n > 0 && rec.UsedHashes[n-1] == oldHash && time.Since(rec.IssuedAt) < rotationRetryWindow {
+		return nil, ErrTokenRotated
 	}
 
 	// Old token is in the used set: reuse detected. Revoke the whole family.
@@ -330,6 +365,40 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 
 	// No match anywhere -> invalid token.
 	return nil, ErrTokenInvalid
+}
+
+// Unrotate makes the token res replaced current again, when the new token
+// never reached the client. A refresh that fails after rotating answers no
+// token, and the client retries with the one it sent, which would otherwise
+// read as replay. It does nothing once the family has moved on or been revoked.
+func (s *RefreshTokenStore) Unrotate(ctx context.Context, res *RotateResult, ttl time.Duration) error {
+	unlock := s.locks.lock(res.FamilyID)
+	defer unlock()
+
+	rec, err := s.loadFamily(ctx, res.FamilyID)
+	if err != nil {
+		return fmt.Errorf("refresh token unrotate: %w", err)
+	}
+	n := len(rec.UsedHashes)
+	if rec.Revoked || rec.CurrentHash != res.newHash || n == 0 || rec.UsedHashes[n-1] != res.oldHash {
+		return nil
+	}
+	oldBytes, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("refresh token unrotate: %w", err)
+	}
+	rec.CurrentHash = res.oldHash
+	rec.UsedHashes = rec.UsedHashes[:n-1]
+	rec.Gen--
+	rec.IssuedAt = res.oldIssuedAt
+	newBytes, err := json.Marshal(rec)
+	if err != nil {
+		return fmt.Errorf("refresh token unrotate: %w", err)
+	}
+	if err := s.casSave(ctx, res.FamilyID, oldBytes, newBytes, storageTTL(ttl)); err != nil {
+		return fmt.Errorf("refresh token unrotate: %w", err)
+	}
+	return nil
 }
 
 // Revoke: explicit logout / revoke-all.
