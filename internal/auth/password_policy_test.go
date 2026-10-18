@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -163,6 +164,56 @@ func TestDefaultPasswordPolicy(t *testing.T) {
 	}
 	if !p.CheckCommon {
 		t.Error("CheckCommon should be true")
+	}
+	if p.MaxBytes != auth.MaxBcryptPasswordBytes {
+		t.Errorf("MaxBytes = %d, want %d", p.MaxBytes, auth.MaxBcryptPasswordBytes)
+	}
+}
+
+// The limit counts bytes, because bcrypt does: a password of 40 characters
+// that are each two bytes in UTF-8 is over it. Every password the default
+// policy accepts has to hash under bcrypt, the default hasher.
+func TestValidatePassword_MaxBytes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		maxBytes int
+		password string
+		wantErr  error
+	}{
+		{"72 bytes", auth.MaxBcryptPasswordBytes, "Aa1" + strings.Repeat("x", 69), nil},
+		{"73 bytes", auth.MaxBcryptPasswordBytes, "Aa1" + strings.Repeat("x", 70), auth.ErrPasswordTooLong},
+		{"40 two-byte characters", auth.MaxBcryptPasswordBytes, "Aa1" + strings.Repeat("\u00e9", 37), auth.ErrPasswordTooLong},
+		{"no limit", 0, "Aa1" + strings.Repeat("x", 200), nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			p := auth.DefaultPasswordPolicy()
+			p.MaxBytes = tc.maxBytes
+			err := auth.ValidatePassword(p, tc.password)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ValidatePassword() = %v, want %v", err, tc.wantErr)
+			}
+			if err == nil && tc.maxBytes == auth.MaxBcryptPasswordBytes {
+				if _, err := auth.HashPassword("bcrypt", tc.password); err != nil {
+					t.Fatalf("accepted password does not hash under bcrypt: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestMaxPasswordBytes_FollowsTheHasher(t *testing.T) {
+	t.Parallel()
+	for algo, want := range map[string]int{
+		"bcrypt":   auth.MaxBcryptPasswordBytes,
+		"":         auth.MaxBcryptPasswordBytes,
+		"argon2id": 0,
+	} {
+		if got := auth.MaxPasswordBytes(algo); got != want {
+			t.Errorf("MaxPasswordBytes(%q) = %d, want %d", algo, got, want)
+		}
 	}
 }
 

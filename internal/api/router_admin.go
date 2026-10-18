@@ -195,12 +195,17 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		OwnerRoutes:         o.documentedOwnerRoutes(),
 		Ungated:             func(name string) bool { return o.entitlements.Plugin(name).Ungated },
 	}
-	authHandler.WithPasswordPolicy(auth.PasswordPolicy{
+	// Setup and the users routes share one policy, so a router test through
+	// setup also holds the rules for user create and for a super admin
+	// setting a password.
+	passwordPolicy := auth.PasswordPolicy{
 		MinLength:         cfg.PasswordMinLength,
 		RequireUpperLower: cfg.PasswordRequireComplexity,
 		RequireDigit:      cfg.PasswordRequireComplexity,
 		CheckCommon:       cfg.PasswordCheckCommon,
-	})
+		MaxBytes:          auth.MaxPasswordBytes(cfg.PasswordHashAlgo),
+	}
+	authHandler.WithPasswordPolicy(passwordPolicy)
 	if o.refreshTokenStore != nil {
 		authHandler.WithRefreshTokenStore(o.refreshTokenStore, time.Duration(cfg.RefreshTokenTTL)*time.Second)
 	}
@@ -219,12 +224,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	if o.refreshTokenStore != nil {
 		usersHandler.revokeRefresh = o.refreshTokenStore.RevokeAllForUser
 	}
-	usersHandler.passwordPolicy = auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-	}
+	usersHandler.passwordPolicy = passwordPolicy
 
 	// Kubernetes health probes
 	// Mounted on the outer router before JWT auth middleware: Kubernetes

@@ -31,6 +31,7 @@ const (
 	CodeSetupTokenInvalid       Code = "AUTH_SETUP_TOKEN_INVALID"
 	CodeSetupModeRequired       Code = "SETUP_REQUIRED"
 	CodePasswordTooShort        Code = "AUTH_PASSWORD_TOO_SHORT"
+	CodePasswordTooLong         Code = "AUTH_PASSWORD_TOO_LONG"
 	CodePasswordHashFailed      Code = "AUTH_PASSWORD_HASH_FAILED"
 	CodePasswordNeedsComplexity Code = "AUTH_PASSWORD_NEEDS_COMPLEXITY"
 	CodePasswordTooCommon       Code = "AUTH_PASSWORD_TOO_COMMON"
