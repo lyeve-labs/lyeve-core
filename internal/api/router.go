@@ -748,6 +748,8 @@ func passwordViolationResponse(err error, policy auth.PasswordPolicy) (i18n.Code
 	switch {
 	case errors.Is(err, auth.ErrPasswordTooShort):
 		return i18n.CodePasswordTooShort, map[string]any{"min": policy.MinLength}
+	case errors.Is(err, auth.ErrPasswordTooLong):
+		return i18n.CodePasswordTooLong, map[string]any{"max": policy.MaxBytes}
 	case errors.Is(err, auth.ErrPasswordNoComplexity):
 		return i18n.CodePasswordNeedsComplexity, nil
 	case errors.Is(err, auth.ErrPasswordTooCommon):

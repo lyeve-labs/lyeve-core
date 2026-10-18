@@ -55,6 +55,10 @@ var translations = map[Code]map[string]string{
 		"en": "Password must be at least {min} characters.",
 		"fr": "Le mot de passe doit comporter au moins {min} caractères.",
 	},
+	CodePasswordTooLong: {
+		"en": "Password must be at most {max} bytes. A character outside ASCII takes two bytes or more.",
+		"fr": "Le mot de passe ne doit pas dépasser {max} octets. Un caractère hors ASCII occupe deux octets ou plus.",
+	},
 	CodePasswordHashFailed: {
 		"en": "Failed to process the password. Please try again.",
 		"fr": "Échec du traitement du mot de passe. Veuillez réessayer.",

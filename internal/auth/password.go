@@ -147,16 +147,32 @@ type PasswordPolicy struct {
 	RequireUpperLower bool // require at least one uppercase and one lowercase letter
 	RequireDigit      bool // require at least one digit
 	CheckCommon       bool // check against embedded common password list
+	MaxBytes          int  // longest password the hasher reads whole, 0 for no limit
+}
+
+// MaxBcryptPasswordBytes is the longest password bcrypt accepts. x/crypto
+// refuses a longer one outright instead of truncating it.
+const MaxBcryptPasswordBytes = 72
+
+// MaxPasswordBytes returns the PasswordPolicy.MaxBytes for a hash algorithm,
+// with the same default HashPassword applies: anything but argon2id is bcrypt.
+func MaxPasswordBytes(algo string) int {
+	if algo == "argon2id" {
+		return 0
+	}
+	return MaxBcryptPasswordBytes
 }
 
 // DefaultPasswordPolicy returns a secure default policy:
-// min 12 chars, mixed case + digit required, common password check enabled.
+// min 12 chars, mixed case + digit required, common password check enabled,
+// and no longer than bcrypt, the default hasher, reads.
 func DefaultPasswordPolicy() PasswordPolicy {
 	return PasswordPolicy{
 		MinLength:         12,
 		RequireUpperLower: true,
 		RequireDigit:      true,
 		CheckCommon:       true,
+		MaxBytes:          MaxBcryptPasswordBytes,
 	}
 }
 
@@ -166,14 +182,19 @@ var (
 	ErrPasswordTooShort     = errors.New("password too short")
 	ErrPasswordNoComplexity = errors.New("password must include uppercase, lowercase, and digit")
 	ErrPasswordTooCommon    = errors.New("password is too common")
+	ErrPasswordTooLong      = errors.New("password too long")
 )
 
 // ValidatePassword checks password against the given policy.
 // Returns nil if the password satisfies all rules. Otherwise returns one of
-// ErrPasswordTooShort, ErrPasswordNoComplexity, or ErrPasswordTooCommon.
+// ErrPasswordTooShort, ErrPasswordTooLong, ErrPasswordNoComplexity, or
+// ErrPasswordTooCommon.
 func ValidatePassword(policy PasswordPolicy, password string) error {
 	if len(password) < policy.MinLength {
 		return fmt.Errorf("%w: need %d got %d", ErrPasswordTooShort, policy.MinLength, len(password))
+	}
+	if policy.MaxBytes > 0 && len(password) > policy.MaxBytes {
+		return fmt.Errorf("%w: at most %d bytes got %d", ErrPasswordTooLong, policy.MaxBytes, len(password))
 	}
 
 	if policy.RequireUpperLower || policy.RequireDigit {

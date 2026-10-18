@@ -200,6 +200,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		RequireUpperLower: cfg.PasswordRequireComplexity,
 		RequireDigit:      cfg.PasswordRequireComplexity,
 		CheckCommon:       cfg.PasswordCheckCommon,
+		MaxBytes:          auth.MaxPasswordBytes(cfg.PasswordHashAlgo),
 	})
 	if o.refreshTokenStore != nil {
 		authHandler.WithRefreshTokenStore(o.refreshTokenStore, time.Duration(cfg.RefreshTokenTTL)*time.Second)
@@ -224,6 +225,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		RequireUpperLower: cfg.PasswordRequireComplexity,
 		RequireDigit:      cfg.PasswordRequireComplexity,
 		CheckCommon:       cfg.PasswordCheckCommon,
+		MaxBytes:          auth.MaxPasswordBytes(cfg.PasswordHashAlgo),
 	}
 
 	// Kubernetes health probes
