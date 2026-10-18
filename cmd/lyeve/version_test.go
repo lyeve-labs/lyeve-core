@@ -63,13 +63,33 @@ func TestUnknownArgument_PrintsUsageAndExits2(t *testing.T) {
 			if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
 				t.Fatalf("%s exited with %v, want exit status 2:\n%s", arg, err, got)
 			}
-			if want := "usage: lyeve [healthcheck | --version]"; !strings.Contains(got, want) {
+			if want := "usage: lyeve [healthcheck | --version | migrate mark-applied --plugin <name> --version <version>]"; !strings.Contains(got, want) {
 				t.Errorf("%s printed no %q line:\n%s", arg, want, got)
 			}
 			if strings.Contains(got, "starting lyeve cms") {
 				t.Errorf("%s started the engine:\n%s", arg, got)
 			}
 		})
+	}
+}
+
+// TestMigrateArgument_ReachesTheMigrateCommand checks that the migrate
+// command is answered by its own usage line, before the refusal of an unknown
+// argument can claim it, and that the engine does not start.
+func TestMigrateArgument_ReachesTheMigrateCommand(t *testing.T) {
+	got, err := runChild(t, "migrate")
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		t.Fatalf("migrate exited with %v, want exit status 2:\n%s", err, got)
+	}
+	if want := "usage: lyeve migrate mark-applied --plugin <name> --version <version>"; !strings.Contains(got, want) {
+		t.Errorf("migrate printed no %q line:\n%s", want, got)
+	}
+	if strings.Contains(got, "unknown argument") {
+		t.Errorf("migrate was refused as an unknown argument:\n%s", got)
+	}
+	if strings.Contains(got, "starting lyeve cms") {
+		t.Errorf("migrate started the engine:\n%s", got)
 	}
 }
 

@@ -93,6 +93,7 @@ func main() {
 		runtime.Healthcheck()
 	}
 	if len(os.Args) > 1 {
+		runtime.Migrate(os.Args[1:])
 		runtime.Version(os.Args[1], version, commit, buildDate)
 		runtime.Usage(os.Args[1])
 	}

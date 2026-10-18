@@ -42,43 +42,13 @@ func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func
 
 	deadline := time.Now().Add(migrationLockWait)
 	for attempt := 0; ; attempt++ {
-		// A connection is taken per attempt and dropped again unless the lock is
-		// granted. Holding one across the wait would pin a connection per
-		// waiting plugin, and plugins migrate in parallel: with many of them
-		// waiting on one exclusive lock, a connection per waiter exhausts the
-		// server's connection limit and leaves the losers unable to connect.
-		conn, err := db.Conn(ctx)
+		release, held, err := tryMigrationLock(ctx, db, dialect)
 		if err != nil {
-			return nil, fmt.Errorf("plugin migrate: lock connection: %w", err)
+			return nil, err
 		}
-
-		key, err := lockKey(ctx, conn, dialect)
-		if err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("plugin migrate: lock key: %w", err)
+		if held {
+			return release, nil
 		}
-		locked, err := tryLock(ctx, conn, dialect, key)
-		if err != nil {
-			_ = conn.Close()
-			return nil, fmt.Errorf("plugin migrate: acquire lock: %w", err)
-		}
-		if locked {
-			// The lock must be released explicitly. It is session-scoped and
-			// sql.Conn.Close only returns the connection to the pool: the
-			// session lives on still holding it, and the next caller handed
-			// that same pooled connection waits out the full timeout against
-			// itself.
-			return func() {
-				if q := unlockSQLFor(dialect, key); q != "" {
-					if _, err := conn.ExecContext(context.WithoutCancel(ctx), q); err != nil {
-						slog.Warn("plugin migrate: releasing the migration lock failed",
-							"dialect", dialect, "err", err)
-					}
-				}
-				_ = conn.Close()
-			}, nil
-		}
-		_ = conn.Close()
 
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("plugin migrate: lock held by another instance for longer than %s", migrationLockWait)
@@ -93,6 +63,52 @@ func acquireMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func
 		case <-time.After(migrationLockPoll):
 		}
 	}
+}
+
+// tryMigrationLock makes one attempt at the plugin-migration advisory lock. It
+// reports whether the lock was granted and, when it was, returns its release.
+//
+// A connection is taken per attempt and dropped again unless the lock is
+// granted. Holding one across a wait would pin a connection per waiting
+// plugin, and plugins migrate in parallel: with many of them waiting on one
+// exclusive lock, a connection per waiter exhausts the server's connection
+// limit and leaves the losers unable to connect.
+func tryMigrationLock(ctx context.Context, db *sql.DB, dialect string) (func(), bool, error) {
+	if db == nil || lockSQLFor(dialect, migrationLockName) == "" {
+		return func() {}, true, nil
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("plugin migrate: lock connection: %w", err)
+	}
+
+	key, err := lockKey(ctx, conn, dialect)
+	if err != nil {
+		_ = conn.Close()
+		return nil, false, fmt.Errorf("plugin migrate: lock key: %w", err)
+	}
+	locked, err := tryLock(ctx, conn, dialect, key)
+	if err != nil {
+		_ = conn.Close()
+		return nil, false, fmt.Errorf("plugin migrate: acquire lock: %w", err)
+	}
+	if !locked {
+		_ = conn.Close()
+		return nil, false, nil
+	}
+	// The lock must be released explicitly. It is session-scoped and
+	// sql.Conn.Close only returns the connection to the pool: the session
+	// lives on still holding it, and the next caller handed that same pooled
+	// connection waits out the full timeout against itself.
+	return func() {
+		if q := unlockSQLFor(dialect, key); q != "" {
+			if _, err := conn.ExecContext(context.WithoutCancel(ctx), q); err != nil {
+				slog.Warn("plugin migrate: releasing the migration lock failed",
+					"dialect", dialect, "err", err)
+			}
+		}
+		_ = conn.Close()
+	}, true, nil
 }
 
 // lockKey returns the resource the lock names on this connection. On MySQL,

@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"io/fs"
+)
 
 // Plugin is the contract every plugin implements. A plugin is registered
 // via RegisterPlugin from its package's init() function. The runtime decides
@@ -50,6 +53,21 @@ type PluginDependency struct {
 // its required peer plugins.
 type Depender interface {
 	Dependencies() []PluginDependency
+}
+
+// MigrationDeclarer is an optional interface a Plugin implements to name the
+// migration trees it applies with PluginMigrate. The engine reads it from an
+// instance that has never started, so the operator's mark-applied repair finds
+// a plugin's scripts and bookkeeping table without booting the plugin.
+type MigrationDeclarer interface {
+	MigrationTrees() []MigrationTree
+}
+
+// MigrationTree is one set of migration scripts, laid out as PluginMigrate
+// reads them, and the bookkeeping table it records them in.
+type MigrationTree struct {
+	Table string
+	Files fs.FS
 }
 
 // Capability is a bitmask describing what a plugin is allowed to do.
