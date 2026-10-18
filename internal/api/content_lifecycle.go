@@ -275,9 +275,11 @@ func (h *ContentHandler) warnNoStreamDeadline(err error) {
 // before anything is sent, and a stream gives its slot back however it ends.
 //
 // The credential is held to the same terms for as long as the stream lives.
-// A token ends the stream when it expires, and each event first asks whether
-// the credential still admits the caller, so a sign-out, a password a super
-// admin sets, an erasure or a revoked key ends it at the next event.
+// A token ends the stream when it expires, and each event and each heartbeat
+// first asks whether the credential still admits the caller, so a sign-out, a
+// password a super admin sets, an erasure or a revoked key ends it within a
+// heartbeat. An idle stream left open by a sign-out then frees its slot for
+// the account's next session.
 //
 // The server's write deadline is set once, when it reads the request, and the
 // first write after it fails and ends the stream. So every write moves the
@@ -382,6 +384,12 @@ func (h *ContentHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			if h.streamCredential != nil {
+				if err := h.streamCredential(r); err != nil {
+					end(err)
+					return
+				}
+			}
 			if !deadline.Hold() {
 				return
 			}

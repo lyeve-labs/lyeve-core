@@ -2,15 +2,14 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"sync"
 )
 
 // contentStreamsPerCredential is how many change streams one credential may
 // hold open on one instance. Every write to a schema costs each open stream a
-// credential and rule check before its event, so the cap bounds what one
-// token or key can make a single write cost, with room for a person who
-// keeps the same schema open in several tabs.
+// credential and rule check before its event, and every heartbeat a credential
+// check, so the cap bounds what one account or key can make the engine read,
+// with room for a person who keeps the same schema open in several tabs.
 const contentStreamsPerCredential = 8
 
 // contentStreamsPerTenant is how many change streams one tenant's callers
@@ -66,12 +65,14 @@ func (s *streamSlots) release(tenant, credential string) {
 	}
 }
 
-// streamCredentialKey names the credential a stream counts against: a
-// session's subject and token version, an API key's id, or the caller's
-// subject for any other token.
+// streamCredentialKey names the credential a stream counts against: an API
+// key's id, or the account for a session or any other token. A session counts
+// against its account and not its token version, because an account raises
+// its own version by signing out and in again, and a key per version would
+// give it eight more streams each time.
 func streamCredentialKey(r *http.Request) string {
 	if c := claimsFromCtx(r); c != nil {
-		return "session:" + c.UserID + ":" + strconv.Itoa(c.TokenVersion)
+		return "user:" + c.UserID
 	}
 	c := requestClaims(r)
 	switch {

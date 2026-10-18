@@ -95,6 +95,58 @@ func TestContentHandler_Stream_CapsStreamsPerCredential(t *testing.T) {
 	requireStreamCapped(t, refusedStream(t, h, session))
 }
 
+// The cap counted a session per token version, and an account raises its own
+// version by signing out and in again. One account then held eight streams
+// per sign-in, and sixteen sign-ins held all of its tenant's slots. The cap
+// counts the account, so its next session finds the eight already held.
+func TestContentHandler_Stream_CapsOneAccountAcrossSignIns(t *testing.T) {
+	t.Parallel()
+	h := cappedStreamHandler()
+	tenantID := uuid.NewString()
+	session := asSession(tenantID)
+	claims, ok := session.Value(auth.ClaimsKey).(*auth.Claims)
+	require.True(t, ok)
+	require.Equal(t, 3, claims.TokenVersion)
+
+	openStreams(t, h, session, 8)
+	next := *claims
+	next.TokenVersion = 4
+	requireStreamCapped(t, refusedStream(t, h, context.WithValue(session, auth.ClaimsKey, &next)))
+
+	// Another account in the same tenant keeps its own slots.
+	openStreamAs(t, h, asSession(tenantID), "notes")
+}
+
+// Streams a sign-out left open on a schema nobody writes to kept their slots
+// until their tokens expired, so the account's next session was refused for
+// up to an hour. Each heartbeat asks the credential again, so those streams
+// end within a heartbeat with no change needed, and the next session opens.
+func TestContentHandler_Stream_HeartbeatFreesSlotsASignOutEnded(t *testing.T) {
+	t.Parallel()
+	h := cappedStreamHandler()
+	h.streamHeartbeat = 20 * time.Millisecond
+	var version atomic.Int64
+	version.Store(3)
+	h.streamCredential = streamCredential(func(context.Context, string) (int, error) { return int(version.Load()), nil }, nil)
+	session := asSession("t1")
+	claims, ok := session.Value(auth.ClaimsKey).(*auth.Claims)
+	require.True(t, ok)
+
+	streams := make([]*tenantStreamWriter, 8)
+	dones := make([]<-chan struct{}, 8)
+	for i := range 8 {
+		streams[i], dones[i] = openStreamDone(t, h, session, "notes")
+	}
+
+	version.Store(4)
+	for i := range 8 {
+		requireEndedByCredential(t, streams[i], dones[i])
+	}
+	next := *claims
+	next.TokenVersion = 4
+	openStreams(t, h, context.WithValue(session, auth.ClaimsKey, &next), 8)
+}
+
 // An API key is one credential however many streams it opens, and every
 // credential of a tenant together holds at most 128.
 func TestContentHandler_Stream_CapsStreamsPerTenant(t *testing.T) {
