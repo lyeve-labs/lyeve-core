@@ -17,7 +17,7 @@
 #
 # Generated 2026-10-12T07:29:55Z from origin default branches.
 
-lyeve-libs = 943fb90f421914a89d3f4ac022e502029e9d0ee2
+lyeve-libs = f25f2827cb77593a16806a7c99273f871904ae1f
 lyeve-plugin-ab-testing = 853b914f1ae4474f064ac5d4c7e0120b88f94896
 lyeve-plugin-ai = c8c12755408f9bad5dc2b8097c18851fb732c498
 lyeve-plugin-analytics = 77f89b005de2a0eba5048cde46db72c7c64a2ee0
@@ -42,13 +42,13 @@ lyeve-plugin-graphql = fc5a9b613a7274a6a5dbb7fc7ff286146c77b67d
 lyeve-plugin-grpc = be8e879dabcab7b8452b01493592f8d45937efd5
 lyeve-plugin-idempotency = 223d244eee17e2754bed742d639a1cd11d7a32b8
 lyeve-plugin-localization = cc070c0364810959206236da4a23023b03bb702b
-lyeve-plugin-logging = 00628c8e907ef80a9a6cde79f2e7b81e1152184f
+lyeve-plugin-logging = 816757e6154f29a7b7a85d82465352b11c26e1fd
 lyeve-plugin-magic-link = 219d243409195dbb804a6a25404d5afc60e7fed5
 lyeve-plugin-media = 25c496a15f119c9e7c1bd07dc34f4c17c1ed7c36
 lyeve-plugin-messagebroker = 19cadb7e15c87bbd6d69fe45d8dcdfa4f4619976
 lyeve-plugin-mfa = b21fd8da870cb48627882605c95ee9c6f44c4781
-lyeve-plugin-multitenant = 852cf1013c30d5f6c532711908fcbf2cb238ce6c
-lyeve-plugin-oauth = 41ffc036f4537211657fb62c96bfd9a1d699146e
+lyeve-plugin-multitenant = 295fa9e897d8400e39632b4844a4353d2852228c
+lyeve-plugin-oauth = 8ab329c9669c2a3ff57eada01217b203e9f69d14
 lyeve-plugin-password-reset = 777561350412bf6a3247660bcd47df08f69bd90d
 lyeve-plugin-permissions = 13ab00fd410614b2bad9024d6539289df320525f
 lyeve-plugin-pii-mask = 6c66aa505fbe237b656cde90d23e99fc2b6e5416
@@ -61,11 +61,11 @@ lyeve-plugin-request-capture = 07d30785ed2014f7d49cd7edc877135f4498faa4
 lyeve-plugin-review = 53dfbca8e2959d9dc182e8c2ae0d91ac3179b709
 lyeve-plugin-saml = dbecd0e70b0d6c654693f6fdaaaf58a1d5984619
 lyeve-plugin-schema = 164620630c71467af5b1c08b6c2e6cabd9149288
-lyeve-plugin-scim = 9bae4a8ea3b2965a9adb71e54753a626251cb699
+lyeve-plugin-scim = 4d2ef7d5c4dd627c4b56ccccb47c57f70f1997f3
 lyeve-plugin-search = f4effc4d4723f2495c3d0c22b583084810301289
 lyeve-plugin-storage = c7d67b4aa56fbbcee334b0080599adfa0c4ca5f5
 lyeve-plugin-synthetic-monitoring = aa65d69bf75b0b4c0e8ee26bd8a8e55325e88c3b
 lyeve-plugin-telemetry = 43f87716717137583c36210c564dc71848018e50
-lyeve-plugin-usage = abb45bd811494b3771fe48d4498560e664507610
+lyeve-plugin-usage = 942448eaf32a928912c5197fb3f56211cd08ef31
 lyeve-plugin-waf = 16fc9df6263d158b4cfcafb03255dca6900a3d6d
 lyeve-plugin-webhook = d6593a901f0add46c36a3b5d77abcba0fcd5279b
