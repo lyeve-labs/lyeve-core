@@ -1,4 +1,4 @@
-# PUBLISH - build & push the batteries-included engine image to GHCR.
+# PUBLISH: build and push the batteries-included engine image to GHCR.
 #
 # Triggered on a `vX.Y.Z` tag. Builds a multi-arch image (linux/amd64 +
 # linux/arm64) and pushes ghcr.io/lyeve-labs/lyeve-core with three tags:
@@ -32,8 +32,8 @@
 # Required secrets. Both stored ones belong to the `release` environment,
 # which admits only a `v*` tag ref. Keep them out of the repository's own
 # secrets, which a run dispatched from any branch could read.
-#   GITHUB_TOKEN - built-in, pushes to GHCR.
-#   WORKSPACE_READ_TOKEN - PAT / GitHub App token with read on the
+#   GITHUB_TOKEN: built-in, pushes to GHCR.
+#   WORKSPACE_READ_TOKEN: PAT / GitHub App token with read on the
 #                             lyeve-labs/lyeve-plugin-* and lyeve-libs repos
 #                             (cross-repo clone).
 #   LICENSE_PUBLIC_KEY_HEX: required. The license verifier's public key, as
