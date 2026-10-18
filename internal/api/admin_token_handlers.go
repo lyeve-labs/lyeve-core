@@ -539,8 +539,13 @@ func pageParams(w http.ResponseWriter, r *http.Request) (int, int, bool) {
 }
 
 // stepUp confirms, before a token is issued or rotated, that the person at
-// the session is its owner. An account with MFA enrolled answers with a
-// current code. One without answers with its password. A zero status passes.
+// the session is its owner. An account with an authenticator app answers with
+// a current code. One with no second factor answers with its password. A zero
+// status passes.
+//
+// An account whose only second factor is a passkey holds no code, and step-up
+// takes no passkey assertion. It is refused rather than asked for its
+// password, which would ask less of it than the factor it enrolled.
 //
 // Both answers are guessable by a caller who already holds the session, so
 // both are counted: a wrong code against the MFA lockout, a wrong password
@@ -557,13 +562,21 @@ func (h *AuthHandler) stepUp(r *http.Request, u *domain.User, mfaCode, password 
 		}
 		enrolled = on
 	}
-	if enrolled {
-		return h.stepUpCode(r, u, strings.TrimSpace(mfaCode))
+	if !enrolled {
+		return h.stepUpPassword(r, u, password)
 	}
-	return h.stepUpPassword(r, u, password)
+	encSecret, _, err := h.mfaStore.GetEnabled(ctx, u.ID)
+	if errors.Is(err, core.ErrNotFound) {
+		return http.StatusForbidden, "This account's only second factor is a passkey, which cannot confirm this change."
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "step-up totp secret read failed", "err", err, "user_id", u.ID)
+		return http.StatusServiceUnavailable, "account check unavailable"
+	}
+	return h.stepUpCode(r, u, encSecret, strings.TrimSpace(mfaCode))
 }
 
-func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, code string) (int, string) {
+func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, code string) (int, string) {
 	ctx := r.Context()
 	if code == "" {
 		return http.StatusForbidden, "mfa_code is required: this account has MFA enrolled."
@@ -574,10 +587,6 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, code string) (
 	}
 	if locked {
 		return http.StatusTooManyRequests, "Too many MFA attempts. Try again later."
-	}
-	encSecret, _, err := h.mfaStore.GetEnabled(ctx, u.ID)
-	if err != nil {
-		return http.StatusServiceUnavailable, "account check unavailable"
 	}
 	secret, err := h.totpSecretAny(stepUpSealTenants(r, u), encSecret)
 	if err != nil {
