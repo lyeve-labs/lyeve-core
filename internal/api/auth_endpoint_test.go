@@ -683,8 +683,8 @@ func (s *failingMFAStore) GracePeriodHours() int { return 0 }
 func (s *failingMFAStore) RegenerateBackupCodes(ctx context.Context, userID uuid.UUID, n int) ([]string, error) {
 	return nil, nil
 }
-func (s *failingMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error {
-	return nil
+func (s *failingMFAStore) ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error) {
+	return false, errors.New("mfa store unavailable")
 }
 
 // dbErrorUserStore returns an error on every method: used to test DB error
@@ -1257,8 +1257,8 @@ func (s *fakeMFAStore) GracePeriodHours() int {
 func (s *fakeMFAStore) RegenerateBackupCodes(ctx context.Context, userID uuid.UUID, n int) ([]string, error) {
 	return nil, nil
 }
-func (s *fakeMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error {
-	return nil
+func (s *fakeMFAStore) ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error) {
+	return false, nil
 }
 
 // INTEGRATION: jwtAuth rejects non-session token types (typ enforcement)

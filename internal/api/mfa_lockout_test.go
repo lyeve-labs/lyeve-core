@@ -657,9 +657,6 @@ func (s *fakeMFAStoreWithEncryptedSecret) GracePeriodHours() int { return 0 }
 func (s *fakeMFAStoreWithEncryptedSecret) RegenerateBackupCodes(_ context.Context, _ uuid.UUID, _ int) ([]string, error) {
 	return nil, nil
 }
-func (s *fakeMFAStoreWithEncryptedSecret) UpdateBackupCodes(_ context.Context, _ uuid.UUID, _ []string) error {
-	return nil
-}
 func (s *fakeMFAStoreWithEncryptedSecret) ConsumeBackupCode(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
 	return false, nil
 }

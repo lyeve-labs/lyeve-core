@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -601,7 +600,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "failed to record mfa challenge attempt", "err", rerr, "user_id", userID)
 	}
 
-	encSecret, backupHashes, err := h.mfaStore.GetEnabled(r.Context(), userID)
+	encSecret, _, err := h.mfaStore.GetEnabled(r.Context(), userID)
 	if errors.Is(err, core.ErrNotFound) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeMFANotConfigured, nil)
 		return
@@ -632,14 +631,14 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 			h2 := sha256.Sum256([]byte(c))
 			return hex.EncodeToString(h2[:])
 		}(body.Code)
-		remaining := make([]string, 0, len(backupHashes))
-		found := false
-		for _, h2 := range backupHashes {
-			if subtle.ConstantTimeCompare([]byte(h2), []byte(codeHash)) == 1 {
-				found = true
-			} else {
-				remaining = append(remaining, h2)
-			}
+		// A recovery code is spent before any session is signed, by the
+		// store's one-step consume, so two requests cannot both spend it. A
+		// spend that cannot be written refuses the sign-in.
+		found, spendErr := h.mfaStore.ConsumeBackupCode(r.Context(), userID, codeHash)
+		if spendErr != nil {
+			slog.WarnContext(r.Context(), "mfa recovery code spend failed, failing closed", "err", spendErr, "user_id", userID)
+			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
+			return
 		}
 		if !found {
 			// Record the user-level failure so repeated bad codes
@@ -650,9 +649,20 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeMFAInvalidCode, nil)
 			return
 		}
-		// Consume the used backup code.
-		if err := h.mfaStore.UpdateBackupCodes(r.Context(), userID, remaining); err != nil {
-			slog.Error("mfa: persist backup code consumption failed", "user_id", userID, "err", err)
+	}
+
+	// The challenge is spent before anything is signed, by a write only one
+	// request wins. A completion that loses it, or cannot write it, is refused.
+	if claims.ID != "" {
+		won, merr := h.mfaLockoutChecker.MarkJTIUsed(r.Context(), claims.ID)
+		if merr != nil {
+			slog.WarnContext(r.Context(), "mfa challenge spend failed, failing closed", "err", merr, "user_id", userID)
+			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
+			return
+		}
+		if !won {
+			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeChallengeExpired, nil)
+			return
 		}
 	}
 
@@ -751,11 +761,6 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	h.setSessionCookie(w, token)
 	h.setCSRFCookie(w, csrfToken)
-
-	// Mark the challenge JTI as consumed so this token cannot be replayed.
-	if merr := h.mfaLockoutChecker.MarkJTIUsed(r.Context(), claims.ID); merr != nil {
-		slog.WarnContext(r.Context(), "failed to mark mfa challenge used", "err", merr, "user_id", userID)
-	}
 
 	respond(w, http.StatusOK, resp)
 }

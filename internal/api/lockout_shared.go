@@ -193,7 +193,10 @@ type MFALockoutChecker interface {
 	// When the state cannot be read it returns true with the error, so a
 	// caller that only looks at the bool still refuses the token.
 	IsJTIUsed(ctx context.Context, jti string) (bool, error)
-	MarkJTIUsed(ctx context.Context, jti string) error
+	// MarkJTIUsed records a challenge token id as consumed and reports
+	// whether this call recorded it. Of two calls for one id only one gets
+	// true, so a caller that spends the challenge on true completes it once.
+	MarkJTIUsed(ctx context.Context, jti string) (bool, error)
 }
 
 // processMFALockout adapts InMemoryMFALockout to MFALockoutChecker.
@@ -223,9 +226,8 @@ func (p processMFALockout) IsJTIUsed(_ context.Context, jti string) (bool, error
 	return p.mem.IsJTIUsed(jti), nil
 }
 
-func (p processMFALockout) MarkJTIUsed(_ context.Context, jti string) error {
-	p.mem.MarkJTIUsed(jti)
-	return nil
+func (p processMFALockout) MarkJTIUsed(_ context.Context, jti string) (bool, error) {
+	return p.mem.MarkJTIUsed(jti), nil
 }
 
 // SharedMFALockout is the MFA limiter backed by a shared cache backend, with
@@ -311,12 +313,32 @@ func (l *SharedMFALockout) IsJTIUsed(ctx context.Context, jti string) (bool, err
 }
 
 // MarkJTIUsed records the challenge token id as consumed for the lifetime of
-// a challenge token, after which the token has expired on its own.
-func (l *SharedMFALockout) MarkJTIUsed(ctx context.Context, jti string) error {
-	if err := l.counter.backend.Set(ctx, l.jtiKey(jti), []byte("1"), challengeTokenTTL); err != nil {
-		return fmt.Errorf("mark used challenge: %w", err)
+// a challenge token, after which the token has expired on its own. A backend
+// with compare-and-set creates the key only when it is absent, so one replica
+// wins. Any refusal from a reachable backend is read as a lost race, since
+// backends report a lost compare-and-set with their own sentinels. A backend
+// without compare-and-set is read and then written, which two replicas can
+// both pass at the same instant.
+func (l *SharedMFALockout) MarkJTIUsed(ctx context.Context, jti string) (bool, error) {
+	key := l.jtiKey(jti)
+	if cas, ok := l.counter.backend.(auth.CASBackend); ok {
+		err := cas.CompareAndSet(ctx, key, nil, []byte("1"), challengeTokenTTL)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, auth.ErrCASFailed) && l.counter.unreachable(ctx) {
+			return false, fmt.Errorf("mark used challenge: %w", err)
+		}
+		return false, nil
 	}
-	return nil
+	used, err := l.IsJTIUsed(ctx, jti)
+	if err != nil || used {
+		return false, err
+	}
+	if err := l.counter.backend.Set(ctx, key, []byte("1"), challengeTokenTTL); err != nil {
+		return false, fmt.Errorf("mark used challenge: %w", err)
+	}
+	return true, nil
 }
 
 var (

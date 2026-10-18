@@ -15,11 +15,17 @@ type MFAStore interface {
 	// recovery code hashes. A user without one, such as an account whose only
 	// second factor is a passkey, gets an error wrapping core.ErrNotFound.
 	GetEnabled(ctx context.Context, userID uuid.UUID) (encSecret string, backupHashes []string, err error)
-	UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error
 
-	// HasWebAuthn reports whether the user has at least one WebAuthn/passkey
-	// credential registered. The Login handler uses this to advertise WebAuthn
-	// as an available MFA method in the challenge response.
+	// ConsumeBackupCode removes codeHash from the user's unspent recovery
+	// codes and reports whether it was one of them. It must read and remove
+	// in one step, so of two requests carrying the same code only one sees
+	// true. False means the code is not one of the user's unspent codes.
+	ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error)
+
+	// HasWebAuthn decides whether the sign-in challenge offers a passkey as a
+	// method. The Login handler lists WebAuthn in the challenge response only
+	// when it answers true. It does not report whether the user holds a
+	// credential: a store may answer false for a user who has one.
 	HasWebAuthn(ctx context.Context, userID uuid.UUID) (bool, error)
 
 	// DisableByAdmin removes MFA for a target user, recording the admin who
