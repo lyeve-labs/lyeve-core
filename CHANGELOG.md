@@ -61,6 +61,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the flow plugin release this engine pins: secret variable values are masked in a failed run's error everywhere it is read, including the answer to an HTTP caller and the `flow.run_failed` event.
 - Through the flow plugin release this engine pins: a flow made from the "Orders with customers and shipments" template answers only the orders of the `customer_id` the request names. It used to return every customer's orders whatever `customer_id` said, and served one status's cached answer for another. A flow already made from the template keeps the query it was made with, so make it again from the template or add the filter by hand.
 - Through the gRPC plugin release this engine pins: a license change that drops the grpc feature refuses every call on the gRPC port at once, and the plugin's health check reports it as not serving. Calls on the port used to be served until the engine restarted.
+- A production start refused for a default database login no longer prints the database password, and neither do the two lines a configured read replica logs at each start. Each prints its connection string with the password replaced by `***`, in every form the engine connects with: a URL, the MySQL driver form and a PostgreSQL keyword string.
 
 ### Added
 
@@ -100,6 +101,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A super admin who signs in on a tenant's own domain acts in that domain's tenant. They used to act in their home tenant there.
 - Through the error tracking plugin release this engine pins: each panic site opens an alert of its own after the upgrade, and an alert recorded before it gains no more occurrences. The old alert keeps its status, acknowledgment and assignee and passes none of them on, so a panic that was ignored, acknowledged or assigned there comes back as a new open alert. Resolve or ignore the old alerts once their panics have reappeared.
 - Through the GraphQL plugin release this engine pins: lists return the newest rows first, the order the Content API lists in, instead of an arbitrary id order.
+- Through the cache plugin release this engine pins: `GET /api/admin/cache/entries` answers with the list envelope the other admin lists use (`data`, `total_count`, `limit`, `offset`), ordered by key and paged, instead of `entries` and `note`.
+- Through the flow plugin release this engine pins: a flow expression may no longer use `$env`, and a draft that does cannot be published. Every value a flow reads has a name of its own.
+- Through the flow plugin release this engine pins: a datasource read lists `secret_headers`, the names of its stored secret headers and never their values.
+- Through the GraphQL plugin release this engine pins: `runFlow` answers an input that is not an object with `INVALID_INPUT`, the code every other input refusal carries, instead of `BAD_USER_INPUT`.
+- Through the GraphQL plugin release this engine pins: a subscription socket runs at most 32 subscriptions, and one more is refused with `TOO_MANY_SUBSCRIPTIONS` while the rest carry on. A query or mutation sent over the socket answers `OPERATION_NOT_SUPPORTED`, so send it as a POST.
+- Through the MFA plugin release this engine pins: a verify whose authenticator setup changed while its code was checked answers 409 and asks for setup to start again. It used to answer 404.
+- Through the audit plugin release this engine pins: `POST /api/admin/audit-log/prune` answers 400 to a cutoff later than now. A retention archive's object key keeps a separator after the policy's `archival_path_prefix` and carries a run id, as `<prefix>/<event type>/<time>/policy-<id>-<run id>.csv`.
+- Through the storage plugin release this engine pins: a write whose key holds a `.` segment, such as `tenant_x/./a`, is refused with 400. An object already stored under such a key stays readable and removable.
+- Through the synthetic monitoring plugin release this engine pins: a probe create or update that names one header twice answers 400, and so does a create that sends the mask `***` as a token, password or sensitive header.
+- Through the localization plugin release this engine pins: `GET` and `POST /api/v1/localization/resolve` run on the engine's general public limit instead of a limit of their own at 30 requests a second per address.
+- Through the rate limit plugin release this engine pins: the overview no longer repeats the general limit for each public route on it. Those routes are listed at `/api/admin/rate-limits/public-routes`.
+- The engine refuses an argument it does not know, such as `--help` or a mistyped flag, with a usage line and exit status 2 before it starts. It answers only `healthcheck` and the version flag.
+
+### Removed
+
+- Through the cache plugin release this engine pins: `GET /api/admin/cache/metrics` and `POST /api/admin/cache/warm`. No warmer was ever registered, so a warm filled nothing a read uses, and the metrics counted nine per-keyspace query caches that nothing read through, so they stayed at zero. A flushed path fills again on its next read.
+- Through the cache plugin release this engine pins: the `cache_invalidation_strategy` and `cache_ttl_<keyspace>` settings of those query caches. The response cache keeps its purge on content writes, and a tenant's flush purges that tenant's cached responses.
 
 ### Fixed
 
@@ -200,6 +218,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the bulk import plugin release this engine pins: a cancel whose read of the job fails in the database answers 503 with "the import job could not be read", where it answered 500. An import that a cancel stops before its first batch ends canceled, and a failed import stores a message of its own, never the database's text.
 - Through the query monitor plugin release this engine pins: a GDPR subject erasure reads only the slow query captures that may name the subject, through an index written with each capture. On SQL Server, with thirty thousand captures, an erasure took about nine seconds and now takes about twenty milliseconds. Captures stored before this release are still read in full.
 - Through the multitenant plugin release this engine pins: on SQL Server, deleting or creating a tenant no longer slows down as content types are added and changed. With 424 tables and concurrent deletes, a delete takes 40ms at the median instead of 442ms.
+- The engine prints its version, commit and build date and exits when run with `--version`, `-version` or `version`. It ignored the argument and started a second engine beside the running one, opening database connections and binding ports.
+- On MySQL with `DATABASE_URL` in the documented `mysql://` form, the pool that keeps plugins' raw queries from changing data and the pool that holds leader locks connect again. Both read the scheme as the user name and were refused, so the engine logged a warning and ran on without either.
+- Boot stops when the permissions plugin fails to register, as it does for every other plugin the binary carries. The list of plugins the boot check expects left it out.
 
 ## [0.54.1] - 2026-10-11
 
