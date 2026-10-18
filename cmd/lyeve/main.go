@@ -92,6 +92,10 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		runtime.Healthcheck()
 	}
+	if len(os.Args) > 1 {
+		runtime.Version(os.Args[1], version, commit, buildDate)
+		runtime.Usage(os.Args[1])
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
