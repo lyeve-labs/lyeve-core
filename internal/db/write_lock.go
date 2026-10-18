@@ -174,7 +174,7 @@ func runWriteTx(ctx context.Context, pool DB, key string, fn func(context.Contex
 	}
 
 	hooks := &afterCommitHooks{}
-	if err := fn(context.WithValue(context.WithValue(ctx, writeTxKey{}, tx), afterCommitKey{}, hooks)); err != nil {
+	if err := fn(core.WithinTransaction(context.WithValue(context.WithValue(ctx, writeTxKey{}, tx), afterCommitKey{}, hooks))); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
