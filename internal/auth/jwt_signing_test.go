@@ -44,8 +44,10 @@ func TestInitJWTSigning_GeneratesAndPersistsEd25519Keypair(t *testing.T) {
 }
 
 // A platform disk usually arrives owned by root while the image runs as an
-// unprivileged user. The boot error has to name the directory and the chown
-// that fixes it, because "permission denied" alone names neither.
+// unprivileged user. The boot error has to name the chown that fixes it,
+// because "permission denied" alone names nothing. The key may sit directly
+// in a shared directory such as /var/lib, so the chown grants only what was
+// refused and never recurses.
 func TestInitJWTSigning_RefusedDataDirNamesTheChown(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads and writes past file modes")
@@ -53,27 +55,32 @@ func TestInitJWTSigning_RefusedDataDirNamesTheChown(t *testing.T) {
 	t.Setenv("JWT_ALG", "EdDSA")
 
 	cases := map[string]struct {
-		keyName string
-		refuse  func(t *testing.T, dir, keyPath string)
+		refuse func(t *testing.T, dir, keyPath string)
+		target func(dir, keyPath string) string
 	}{
-		"directory not writable": {"jwt_key.json", func(t *testing.T, dir, _ string) {
-			require.NoError(t, os.Chmod(dir, 0o500))
-		}},
-		"key file not readable": {"jwt_key.json", func(t *testing.T, _, keyPath string) {
-			require.NoError(t, os.WriteFile(keyPath, []byte("{}"), 0o000))
-		}},
+		"directory not writable": {
+			func(t *testing.T, dir, _ string) { require.NoError(t, os.Chmod(dir, 0o500)) },
+			func(dir, _ string) string { return dir },
+		},
+		"key file not readable": {
+			func(t *testing.T, _, keyPath string) {
+				require.NoError(t, os.WriteFile(keyPath, []byte("{}"), 0o000))
+			},
+			func(_, keyPath string) string { return keyPath },
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			keyPath := filepath.Join(dir, tc.keyName)
+			keyPath := filepath.Join(dir, "jwt_key.json")
 			tc.refuse(t, dir, keyPath)
 			t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 
 			err := auth.InitJWTSigning(keyPath)
 			require.Error(t, err)
 			assert.ErrorIs(t, err, os.ErrPermission)
-			assert.Contains(t, err.Error(), fmt.Sprintf("chown -R %d:%d %s)", os.Getuid(), os.Getgid(), dir))
+			assert.Contains(t, err.Error(), fmt.Sprintf("with chown %d:%d %s)", os.Getuid(), os.Getgid(), tc.target(dir, keyPath)))
+			assert.NotContains(t, err.Error(), "chown -R")
 		})
 	}
 }
