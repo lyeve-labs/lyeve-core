@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // A denied capability hands the plugin a stub whose return value is
@@ -282,5 +284,49 @@ func TestScopedHost_HasCapability_ReportsDenial(t *testing.T) {
 	}
 	if !cc.HasCapability(CapRoutes) {
 		t.Error("HasCapability(CapRoutes) must be true when the grant is held")
+	}
+}
+
+// signingHost is a capturingHost that signs sessions the way the engine does,
+// and counts the sessions it signed.
+type signingHost struct {
+	*capturingHost
+	signed int
+}
+
+func (h *signingHost) SignSessionToken(context.Context, uuid.UUID, string, []string) (string, error) {
+	h.signed++
+	return "session-token", nil
+}
+
+// A signed session is a sign-in as the account it names, so a plugin holding
+// every grant but the signing one still gets no session.
+func TestScopedHost_DeniedSignSessionToken_IsLogged(t *testing.T) {
+	h := &signingHost{capturingHost: newCapturingHost()}
+	sh := NewScopedHost(h, "webhook", CapDBWrite|CapRawDB|CapRoutes|CapConfigSecret|CapHooks)
+
+	tok, err := sh.SignSessionToken(context.Background(), uuid.New(), "admin@example.com", []string{"super_admin"})
+	if !errors.Is(err, ErrCapDenied) {
+		t.Fatalf("err = %v, want ErrCapDenied", err)
+	}
+	if tok != "" || h.signed != 0 {
+		t.Fatalf("the engine signed %d session(s) for a plugin without the grant, token %q", h.signed, tok)
+	}
+
+	rec := requireOneDenial(t, h.capturingHost)
+	assertField(t, rec, "op", "SignSessionToken")
+	assertField(t, rec, "capability", "CapSessionSign")
+}
+
+func TestScopedHost_GrantedSignSessionToken_Signs(t *testing.T) {
+	h := &signingHost{capturingHost: newCapturingHost()}
+	sh := NewScopedHost(h, "oauth", CapDBWrite|CapRoutes|CapSessionSign)
+
+	tok, err := sh.SignSessionToken(context.Background(), uuid.New(), "user@example.com", nil)
+	if err != nil || tok != "session-token" || h.signed != 1 {
+		t.Fatalf("token %q, err %v, signed %d: want the engine's token, signed once", tok, err, h.signed)
+	}
+	if recs := denialRecords(t, h.capturingHost); len(recs) != 0 {
+		t.Fatalf("a granted signing logged %d denial(s)", len(recs))
 	}
 }

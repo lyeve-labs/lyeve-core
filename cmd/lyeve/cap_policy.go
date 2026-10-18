@@ -31,6 +31,8 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     provisioner. Each is held by that one plugin, and the role's registrar
 //     refuses every other. The schema engine and the flow roles need
 //     core.CapSchema and core.CapFlowRegistry, which schema and flow hold.
+//   - core.CapSessionSign, because the plugin signs a user in: magic-link,
+//     mfa, oauth and saml. A session it signs acts as the account it names.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
@@ -57,12 +59,12 @@ var capPolicy = map[string]core.Capability{
 	"idempotency":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"localization":         core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapHooks | core.CapContentLocalizer,
 	"logging":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
-	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"messagebroker":        core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"password-reset":       core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"permissions":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapPermissionChecker,
 	"pii-mask":             core.CapDBWrite | core.CapRawDB | core.CapRoutes,
@@ -73,7 +75,7 @@ var capPolicy = map[string]core.Capability{
 	"recommendations":      core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"request-capture":      core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"review":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
-	"saml":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"saml":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"schema":               core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSectionsRead,
 	"scim":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapUserProvisioner,
 	"search":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
