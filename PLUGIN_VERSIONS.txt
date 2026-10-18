@@ -15,7 +15,7 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-10-12T07:29:55Z from origin default branches.
+# Generated 2026-10-18T12:00:14Z from origin default branches.
 
 lyeve-libs = f25f2827cb77593a16806a7c99273f871904ae1f
 lyeve-plugin-ab-testing = 853b914f1ae4474f064ac5d4c7e0120b88f94896
@@ -24,7 +24,7 @@ lyeve-plugin-analytics = 77f89b005de2a0eba5048cde46db72c7c64a2ee0
 lyeve-plugin-apianalytics = fe6a191730ff6865d2426d097afb092e6f111ea3
 lyeve-plugin-apikey = bccf0a3c5f3bb3867320403701340fbf870dae99
 lyeve-plugin-audit = 100bca6e0ad6e58f8df58f970fe9f80808949b37
-lyeve-plugin-bulk-import = 2ea6a3ed0f59e96320e0de672a4bfcb090c0ef13
+lyeve-plugin-bulk-import = f6d49ee097ebbe65f2cb92d5600879c41f274273
 lyeve-plugin-cache = 1833d245100119e458a50e16b4152d9c0b710f38
 lyeve-plugin-captcha = 30a1e6f4a1bccce68789f70e0a57af44c077a2a1
 lyeve-plugin-cluster = 16ee5fc8985fd193d7ea111b7dc6a698837b3722
@@ -33,7 +33,7 @@ lyeve-plugin-cron = 9c40da17f6fc1cfb56c977ff40a0d44cd023ed94
 lyeve-plugin-data-export = f66e16ebaf853074d4e203bd01988db357921119
 lyeve-plugin-data-residency = 825cc94bef0ee9a455db795be54c345fee4bded3
 lyeve-plugin-device-fingerprint = e437145ecd3484dbe8802262df59c9a4c299f219
-lyeve-plugin-email = d3f3010c9ca97497293eee006029db7d3a391b4f
+lyeve-plugin-email = 178cb61d760ac8f8fffcd99ed02cc29f356ff73b
 lyeve-plugin-error-tracking = 3ea2e3e7f0d47f9d5b1acca43f416c3040580f72
 lyeve-plugin-events = e52c29c6fb63f11885b9f28566f3694cdd3a64dd
 lyeve-plugin-flow = cd433500a0702b70f6c6742a2c85aad77b6d6a10
@@ -53,11 +53,11 @@ lyeve-plugin-password-reset = 777561350412bf6a3247660bcd47df08f69bd90d
 lyeve-plugin-permissions = 13ab00fd410614b2bad9024d6539289df320525f
 lyeve-plugin-pii-mask = 6c66aa505fbe237b656cde90d23e99fc2b6e5416
 lyeve-plugin-profiler = 2e68de51c5fc7c899070988d3a46a950f642628a
-lyeve-plugin-query-monitor = 2d75cccad0811256e246a766da25f62d6ab3f241
+lyeve-plugin-query-monitor = f562a023a49a1e41fc450c538ef088253d3b085e
 lyeve-plugin-rate-limit = 4c886897056c115ae80f7d31c113b68077d2b35b
 lyeve-plugin-realtime = 1d3f21642269d2e30e8c7c2acf15f71f37c95bdf
 lyeve-plugin-recommendations = 1d09ef84f1e6cfaabb6fb3b3048befd878ebf6ab
-lyeve-plugin-request-capture = 07d30785ed2014f7d49cd7edc877135f4498faa4
+lyeve-plugin-request-capture = f9e3285bf8708483c1abc66079bf274d68ca932c
 lyeve-plugin-review = 53dfbca8e2959d9dc182e8c2ae0d91ac3179b709
 lyeve-plugin-saml = dbecd0e70b0d6c654693f6fdaaaf58a1d5984619
 lyeve-plugin-schema = 164620630c71467af5b1c08b6c2e6cabd9149288
