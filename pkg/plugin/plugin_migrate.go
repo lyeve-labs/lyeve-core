@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
 
 	"log/slog"
@@ -268,8 +269,10 @@ func applyScript(ctx context.Context, db *sql.DB, dialect, tableName string, sc 
 // requiring every dialect to write idempotent DDL is not possible, because
 // MySQL and SQL Server have no ADD COLUMN IF NOT EXISTS.
 //
-// So the engine fails and names the repair, and the repair depends on the
-// engine. PostgreSQL never gets here, because a plugin can write ADD COLUMN IF
+// So the engine fails and names the repair. When a plugin compiled into this
+// binary declares the table, the repair is the engine's mark-applied command,
+// which handles every case below. Otherwise it is the SQL, which depends on
+// the engine. PostgreSQL never gets here, because a plugin can write ADD COLUMN IF
 // NOT EXISTS and the re-apply is a no-op. SQL Server rolls the claim back with
 // the script, so the table holds no row for the version and an INSERT records
 // it. Without that row every boot repeats the same failure. MySQL commits DDL
@@ -277,9 +280,12 @@ func applyScript(ctx context.Context, db *sql.DB, dialect, tableName string, sc 
 // incomplete. An INSERT would collide with that row, and the next boot stops
 // on it, so the repair there marks the existing row complete.
 func lostRecordHint(tableName, dialect, version string) string {
-	repair := fmt.Sprintf("INSERT INTO %s (version) VALUES ('%s')", tableName, version)
-	if dialect == "mysql" {
-		repair = fmt.Sprintf("UPDATE %s SET completed = 1 WHERE version = '%s'", tableName, version)
+	repair := markAppliedCommand(tableName, version)
+	if repair == "" {
+		repair = fmt.Sprintf("INSERT INTO %s (version) VALUES ('%s')", tableName, version)
+		if dialect == "mysql" {
+			repair = fmt.Sprintf("UPDATE %s SET completed = 1 WHERE version = '%s'", tableName, version)
+		}
 	}
 	return fmt.Sprintf(
 		" (the schema already holds what this migration creates."+
@@ -476,12 +482,16 @@ func checkRecorded(tableName string, scripts []migrationScript, recorded map[str
 	if len(incomplete) > 0 {
 		sort.Strings(incomplete)
 		v := incomplete[0]
+		mark := markAppliedCommand(tableName, v)
+		if mark == "" {
+			mark = fmt.Sprintf("UPDATE %s SET completed = 1 WHERE version = '%s'", tableName, v)
+		}
 		return fmt.Errorf("plugin migrate: %s records %s as started and never completed."+
 			" The script failed partway on a database that commits DDL as it goes,"+
 			" so the schema holds part of it. Finish or undo the script by hand, then either"+
-			" mark it applied with UPDATE %s SET completed = 1 WHERE version = '%s'"+
+			" mark it applied with %s"+
 			" or remove the claim with DELETE FROM %s WHERE version = '%s' to run it again",
-			tableName, v, tableName, v, tableName, v)
+			tableName, v, mark, tableName, v)
 	}
 	for _, sc := range scripts {
 		r, ok := recorded[sc.version]
@@ -576,4 +586,145 @@ func appliedVersions(ctx context.Context, db *sql.DB, tableName string) (map[str
 // one place and short in the other is worse than no list.
 func IsTableNotExistError(err error) bool {
 	return sqlx.IsUndefinedTable(err)
+}
+
+// MarkMigrationApplied records version as applied in tableName without running
+// its script. It repairs an install whose bookkeeping lost a row while the
+// schema kept the change: running the script again then fails on an object
+// that already exists, and on SQL Server the failed claim rolls back with it,
+// so every boot repeats the failure. Only an operator who has checked the
+// schema can say the change is there, so the engine never calls this itself.
+//
+// It refuses a version the tree does not ship and a version already recorded
+// as applied. It also refuses, rather than waits, while another process holds
+// the plugin migration lock, because an engine migrating at that moment would
+// race the write. A claim recorded as incomplete, which only MySQL leaves, is
+// marked complete. The row carries the script's checksum, as if it had run.
+func MarkMigrationApplied(ctx context.Context, db *sql.DB, dialect string, migrationsFS fs.FS, tableName, version string) error {
+	if !migrationsTableNameRe.MatchString(tableName) {
+		return fmt.Errorf("plugin migrate: invalid table name %q: must match %s",
+			tableName, migrationsTableNameRe.String())
+	}
+	sc, ok, err := findScript(migrationsFS, dialect, version)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("plugin migrate: %s ships no migration %s for this database", tableName, version)
+	}
+
+	release, held, err := tryMigrationLock(ctx, db, dialect)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return fmt.Errorf("plugin migrate: an engine is migrating plugins on this database right now. Run this again once it has finished")
+	}
+	defer release()
+
+	if _, err := db.ExecContext(ctx, migrationsTableSQL(tableName, dialect)); err != nil {
+		return fmt.Errorf("plugin migrate: create tracking table %s: %w", tableName, err)
+	}
+	if err := ensureTrackingColumns(ctx, db, dialect, tableName); err != nil {
+		return err
+	}
+	recorded, err := recordedVersions(ctx, db, tableName)
+	if err != nil {
+		return fmt.Errorf("plugin migrate: read applied versions: %w", err)
+	}
+	if r, ok := recorded[version]; ok && r.completed {
+		return fmt.Errorf("plugin migrate: %s already records %s as applied", tableName, version)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("plugin migrate: begin tx for %s: %w", version, err)
+	}
+	insertSQL, insertArgs := insertVersionStmt(tableName, dialect, version)
+	if _, err := tx.ExecContext(ctx, insertSQL, insertArgs...); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("plugin migrate: record %s: %w", version, err)
+	}
+	if _, err := tx.ExecContext(ctx, completeVersionStmt(tableName, dialect), scriptChecksum(sc.sql), version); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("plugin migrate: mark %s complete: %w", version, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("plugin migrate: commit %s: %w", version, err)
+	}
+	return nil
+}
+
+// MarkPluginMigrationApplied marks version applied in the migration tree of
+// the named plugin that ships it, and returns that tree's bookkeeping table.
+// The plugin has to be compiled into this binary and declare its trees through
+// core.MigrationDeclarer. It is read from an instance that never starts.
+func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, pluginName, version string) (string, error) {
+	factory := LookupPlugin(pluginName)
+	if factory == nil {
+		return "", fmt.Errorf("plugin migrate: %q is not compiled into this binary", pluginName)
+	}
+	declarer, ok := factory().(core.MigrationDeclarer)
+	if !ok {
+		return "", fmt.Errorf("plugin migrate: %s does not declare its migrations, so none can be marked", pluginName)
+	}
+	var matches []core.MigrationTree
+	for _, tree := range declarer.MigrationTrees() {
+		_, ok, err := findScript(tree.Files, dialect, version)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			matches = append(matches, tree)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("plugin migrate: %s ships no migration %s for this database", pluginName, version)
+	case 1:
+		return matches[0].Table, MarkMigrationApplied(ctx, db, dialect, matches[0].Files, matches[0].Table, version)
+	default:
+		tables := make([]string, len(matches))
+		for i, m := range matches {
+			tables[i] = m.Table
+		}
+		return "", fmt.Errorf("plugin migrate: %s ships %s in more than one tree (%s), so it cannot say which to mark",
+			pluginName, version, strings.Join(tables, ", "))
+	}
+}
+
+// findScript returns the script for version in the dialect's tree of fsys.
+func findScript(fsys fs.FS, dialect, version string) (migrationScript, bool, error) {
+	dir := dialectDir(dialect)
+	scripts, err := loadUpScripts(fsys, dir)
+	if err != nil {
+		return migrationScript{}, false, fmt.Errorf("plugin migrate: load scripts from %s: %w", dir, err)
+	}
+	for _, sc := range scripts {
+		if sc.version == version {
+			return sc, true, nil
+		}
+	}
+	return migrationScript{}, false, nil
+}
+
+// markAppliedCommand is the engine command that marks version applied in
+// tableName, or "" when no plugin compiled into this binary declares the table.
+func markAppliedCommand(tableName, version string) string {
+	for _, name := range RegisteredPlugins() {
+		factory := LookupPlugin(name)
+		if factory == nil {
+			continue
+		}
+		declarer, ok := factory().(core.MigrationDeclarer)
+		if !ok {
+			continue
+		}
+		for _, tree := range declarer.MigrationTrees() {
+			if tree.Table == tableName {
+				return fmt.Sprintf("lyeve migrate mark-applied --plugin %s --version %s", name, version)
+			}
+		}
+	}
+	return ""
 }

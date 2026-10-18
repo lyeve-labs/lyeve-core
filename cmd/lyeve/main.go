@@ -92,6 +92,7 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		runtime.Healthcheck()
 	}
+	runOperatorCommand(os.Args[1:])
 	if len(os.Args) > 1 {
 		runtime.Version(os.Args[1], version, commit, buildDate)
 		runtime.Usage(os.Args[1])
@@ -125,6 +126,15 @@ func main() {
 	if err := runtime.RunWithOptions(ctx, buildOptions()); err != nil {
 		logger.Error("cms boot failed", "err", err)
 		os.Exit(1)
+	}
+}
+
+// runOperatorCommand runs a command an operator types on the engine's host,
+// before anything of the engine starts, and exits with its status. It returns
+// when args name no such command.
+func runOperatorCommand(args []string) {
+	if len(args) > 0 && args[0] == "migrate" {
+		os.Exit(runtime.MigrateCommand(args[1:], os.Stdout, os.Stderr))
 	}
 }
 
