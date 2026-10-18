@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -279,6 +280,10 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			// Nothing is known about the token, so 401 would be a lie that
 			// costs the caller its session. 503 asks it to come back.
 			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
+		case errors.Is(err, auth.ErrTokenRotated):
+			// Another request traded this token a moment ago. The client
+			// carries on with the successor, so the session stays.
+			respondErrCode(w, r, http.StatusConflict, i18n.CodeTokenRotated, nil)
 		case errors.Is(err, auth.ErrTokenReuse):
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeTokenReuse, nil)
 		case errors.Is(err, auth.ErrFamilyRevoked):
@@ -289,6 +294,17 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeUnauthorized, nil)
 		}
 		return
+	}
+
+	// The new refresh token leaves only in the answer at the end. A failure
+	// on the way there answers 5xx, and the client keeps the token it sent, so
+	// that token becomes current again and its retry is not read as replay.
+	// A refusal leaves the rotation in place: the session it refused stays
+	// ended.
+	restore := func() {
+		if err := h.refreshTokenStore.Unrotate(context.WithoutCancel(r.Context()), rotated, h.refreshTokenTTL); err != nil {
+			slog.Warn("restore refresh token after a failed refresh", "err", err)
+		}
 	}
 
 	// A sign-in on a tenant's mapped domain acts in that tenant, so a family of
@@ -306,6 +322,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// Load user data for the new access token claims.
 	userID, err := uuid.Parse(rotated.UserID)
 	if err != nil {
+		restore()
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeInternalError, nil)
 		return
 	}
@@ -317,6 +334,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeUnauthorized, nil)
 			return
 		}
+		restore()
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
@@ -355,18 +373,23 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	// there at the next refresh instead of at token expiry.
 	actingTenant, actingRoles, err := h.resolveActingTenant(r.Context(), user, rotated.TenantID)
 	if err != nil {
+		if !errors.Is(err, errNotAMember) {
+			restore()
+		}
 		respondTenantResolution(w, r, err)
 		return
 	}
 
 	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
+		restore()
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
 	}
 
 	csrfToken, err := generateCSRFToken()
 	if err != nil {
+		restore()
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeInternalError, nil)
 		return
 	}

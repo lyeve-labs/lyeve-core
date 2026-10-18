@@ -2,7 +2,6 @@ package auth_test
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -93,7 +92,8 @@ func TestRefreshTokenStore_Rotate_MultipleRotations(t *testing.T) {
 }
 
 func TestRefreshTokenStore_Rotate_ReplayDetection(t *testing.T) {
-	store := newTestStore(t)
+	backend := auth.NewMemoryBackend()
+	store := auth.NewRefreshTokenStore(backend, "cms-test")
 	ctx := context.Background()
 
 	issued, err := store.Issue(ctx, "user-1", 5*time.Minute)
@@ -101,9 +101,10 @@ func TestRefreshTokenStore_Rotate_ReplayDetection(t *testing.T) {
 
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
 	require.NoError(t, err, "first rotation should succeed")
+	closeRetryWindow(t, backend, "cms-test", issued.FamilyID)
 
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
-	require.ErrorIs(t, err, auth.ErrTokenReuse, "replaying a rotated token should return ErrTokenReuse")
+	require.ErrorIs(t, err, auth.ErrTokenReuse, "replaying a rotated token after the retry window should return ErrTokenReuse")
 
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
 	require.ErrorIs(t, err, auth.ErrFamilyRevoked, "family should be revoked after replay detection")
@@ -293,41 +294,21 @@ func TestRefreshTokenStore_Rotate_CASCrossReplicaRace(t *testing.T) {
 	assert.Equal(t, 1, successes, "exactly one replica must succeed")
 	assert.Equal(t, 1, failures, "exactly one replica must fail")
 
-	// The failure must be either ErrCASFailed (lost the CAS race) or
-	// ErrTokenReuse (saw the updated record and detected the old token
-	// in UsedHashes). Both are correct cross-replica outcomes.
+	// The loser either lost the CAS write or read the winner's record. Both
+	// are a second trade of one token a moment apart, answered retryably.
 	if e1 != nil {
-		assert.True(t,
-			errors.Is(e1, auth.ErrCASFailed) || errors.Is(e1, auth.ErrTokenReuse),
-			"losing replica must get ErrCASFailed or ErrTokenReuse, got: %v", e1,
-		)
+		assert.ErrorIs(t, e1, auth.ErrTokenRotated, "losing replica")
 	}
 	if e2 != nil {
-		assert.True(t,
-			errors.Is(e2, auth.ErrCASFailed) || errors.Is(e2, auth.ErrTokenReuse),
-			"losing replica must get ErrCASFailed or ErrTokenReuse, got: %v", e2,
-		)
+		assert.ErrorIs(t, e2, auth.ErrTokenRotated, "losing replica")
 	}
 
-	// After the race, a further rotation with the winner's token works
-	// only when the CAS race was pure (both replicas read pre-mutation
-	// state). If the loser read after the winner wrote, it detected reuse
-	// and revoked the family: a correct but more aggressive outcome.
-	// Both are valid cross-replica behaviors. We just verify the family
-	// isn't corrupted.
+	// Neither outcome revokes the family, so the winner's token rotates.
 	winner := r1
 	if winner == nil {
 		winner = r2
 	}
 	require.NotNil(t, winner, "must have a winning token")
 	_, postErr := store1.Rotate(ctx, winner.RefreshToken, 5*time.Minute)
-	if postErr != nil {
-		require.True(t,
-			errors.Is(postErr, auth.ErrFamilyRevoked),
-			"post-race rotation with winner's token must succeed or return ErrFamilyRevoked, got: %v", postErr,
-		)
-	} else {
-		// Family is still alive: winner's token is usable.
-		t.Log("winner's token usable for another rotation (CAS-only race)")
-	}
+	require.NoError(t, postErr, "post-race rotation with the winner's token")
 }
