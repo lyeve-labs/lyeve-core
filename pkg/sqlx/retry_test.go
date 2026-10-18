@@ -123,3 +123,46 @@ func TestRetryOnTxConflict(t *testing.T) {
 		}
 	})
 }
+
+// The last failed attempt ends the loop. A wait after it retries nothing, so
+// the error must come back at once, even when the context ends during that
+// attempt.
+func TestRetryOnTxConflict_ReturnsWithoutWaitingAfterLastAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	calls := 0
+	err := RetryOnTxConflict(ctx, "op", func() error {
+		calls++
+		if calls == DefaultTxAttempts {
+			cancel()
+		}
+		return mssql.Error{Number: 1205}
+	})
+	if errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the last attempt's failure without a wait after it", err)
+	}
+	var msErr mssql.Error
+	if !errors.As(err, &msErr) {
+		t.Errorf("err = %v, want the driver error preserved", err)
+	}
+	if calls != DefaultTxAttempts {
+		t.Errorf("calls = %d, want %d", calls, DefaultTxAttempts)
+	}
+}
+
+// A MySQL lock wait timeout arrives only after the statement waited
+// innodb_lock_wait_timeout, so each retry would hold the caller that long again.
+func TestRetryOnTxConflict_DoesNotRetryMySQLLockWaitTimeout(t *testing.T) {
+	calls := 0
+	err := RetryOnTxConflict(context.Background(), "op", func() error {
+		calls++
+		return &mysql.MySQLError{Number: 1205}
+	})
+	var myErr *mysql.MySQLError
+	if !errors.As(err, &myErr) || myErr.Number != 1205 {
+		t.Errorf("err = %v, want the lock wait timeout", err)
+	}
+	if calls != 1 {
+		t.Errorf("calls = %d, want 1", calls)
+	}
+}
