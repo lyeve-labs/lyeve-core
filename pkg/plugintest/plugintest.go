@@ -398,7 +398,12 @@ func (h *testHost) Capabilities() core.CapabilitySet {
 	return defaultCapabilities()
 }
 
-func (h *testHost) HasFeature(ctx context.Context, feature string) bool { return true }
+// HasFeature answers from Capabilities, as the engine answers both halves of
+// core.LicenseHost from one license. A test that needs a gate open grants its
+// name through WithCapabilities.
+func (h *testHost) HasFeature(ctx context.Context, feature string) bool {
+	return h.Capabilities().Features[feature]
+}
 
 // RegisterConfigSection implements core.ConfigSectionRegistrar, so a plugin
 // that offers its configuration to a bundle registers it here the way it does
