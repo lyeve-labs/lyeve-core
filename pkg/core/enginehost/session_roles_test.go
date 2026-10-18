@@ -84,9 +84,34 @@ func sessionRolesFollowHome(t *testing.T, pool db.DB) {
 		assert.Equal(t, []string{"viewer"}, signedRoles(t))
 	})
 
+	t.Run("a home membership never adds super_admin", func(t *testing.T) {
+		host.SetAdminSeatMembers(homeMembers{t: t, byTenant: map[string][]string{"acme": {"super_admin", "viewer"}}})
+		assert.Equal(t, []string{"viewer"}, signedRoles(t))
+	})
+
 	t.Run("a membership elsewhere leaves the row's roles", func(t *testing.T) {
 		host.SetAdminSeatMembers(homeMembers{t: t, byTenant: map[string][]string{"globex": {"viewer"}}})
 		assert.Equal(t, []string{"admin"}, signedRoles(t))
+	})
+
+	t.Run("a home membership never drops super_admin", func(t *testing.T) {
+		superRoles := `["super_admin"]`
+		if pool.Engine() == "postgres" {
+			superRoles = "{super_admin}"
+		}
+		superID := uuid.New()
+		_, err := pool.Exec(ctx,
+			`INSERT INTO sys_users (id, email, password_hash, roles, tenant_id, token_version)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			superID, "session-roles-"+superID.String()[:8]+"@example.com", "x", superRoles, "acme", 1)
+		require.NoError(t, err)
+
+		host.SetAdminSeatMembers(homeMembers{t: t, byTenant: map[string][]string{"acme": {"admin"}}})
+		token, err := host.SignSessionToken(ctx, superID, "session-roles@example.com", nil)
+		require.NoError(t, err)
+		claims, err := security.ParseJWT(jwtTestSecret, token)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"admin", "super_admin"}, claims.Roles)
 	})
 
 	t.Run("a reader failure refuses to sign", func(t *testing.T) {

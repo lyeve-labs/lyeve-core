@@ -327,6 +327,75 @@ func TestLoginMembership_GrantOverridesHomeRoles(t *testing.T) {
 	}
 }
 
+// super_admin belongs to the account, not to a tenant. A home membership row
+// that leaves it out still changes the other roles, and the account keeps
+// super_admin at home, so granting a super admin a home row cannot demote them
+// at their next sign-in.
+func TestLoginMembership_HomeRowNeverDropsSuperAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		f := newMembershipLoginFixtureOn(t, pool, "brand_a", []string{"super_admin"})
+		_, err := f.members.Grant(context.Background(), f.userID, "brand_a", []string{"admin"})
+		require.NoError(t, err)
+
+		rr := f.login(t, "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.ElementsMatch(t, []string{"admin", "super_admin"}, f.claimsFrom(t, rr).Roles)
+
+		body := f.memberships(t, rr)
+		require.Len(t, body, 1)
+		assert.ElementsMatch(t, []string{"admin", "super_admin"}, body[0].Roles)
+	})
+}
+
+// A home membership row that names super_admin grants nothing the account row
+// does not, so removing super_admin from the account ends it at home too.
+func TestLoginMembership_HomeRowNeverAddsSuperAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		f := newMembershipLoginFixtureOn(t, pool, "brand_a", []string{"editor"})
+		_, err := f.members.Grant(context.Background(), f.userID, "brand_a", []string{"super_admin", "admin"})
+		require.NoError(t, err)
+
+		rr := f.login(t, "")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Equal(t, []string{"admin"}, f.claimsFrom(t, rr).Roles)
+
+		body := f.memberships(t, rr)
+		require.Len(t, body, 1)
+		assert.Equal(t, []string{"admin"}, body[0].Roles)
+	})
+}
+
+// A membership row in another tenant cannot make the account a super admin
+// either. Plugins that protect super admins read the account row, so a session
+// holding super_admin the account row lacks is one they cannot see.
+func TestLoginMembership_OtherTenantRowNeverAddsSuperAdmin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		f := newMembershipLoginFixtureOn(t, pool, "brand_a", []string{"editor"})
+		_, err := f.members.Grant(context.Background(), f.userID, "brand_b", []string{"super_admin", "editor"})
+		require.NoError(t, err)
+
+		rr := f.login(t, "brand_b")
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		claims := f.claimsFrom(t, rr)
+		assert.Equal(t, "brand_b", claims.TenantID)
+		assert.Equal(t, []string{"editor"}, claims.Roles)
+
+		body := f.memberships(t, rr)
+		require.Len(t, body, 2)
+		assert.Equal(t, "brand_b", body[1].TenantID)
+		assert.Equal(t, []string{"editor"}, body[1].Roles)
+	})
+}
+
 // TestLoginMembership_SuperAdminCrossesWithoutAGrant records a deliberate
 // exception. super_admin already crosses tenants by X-Tenant-ID through the
 // tenancy middleware, so requiring a grant at login would close a door that is
