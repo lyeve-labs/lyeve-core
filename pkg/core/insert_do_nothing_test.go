@@ -14,6 +14,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugintest"
+	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
 )
 
 // probeDDL builds a table shaped like the plugin catalog tables that read
@@ -265,5 +266,105 @@ func TestInsertIfAbsent_ConcurrentCallersAgreeOnOneCreator(t *testing.T) {
 		require.Empty(t, failures, "no racer may fail on %s", host.Dialect())
 		assert.Equal(t, 1, created, "exactly one racer may report creating the row on %s", host.Dialect())
 		assert.Equal(t, 1, probeCount(t, ctx, host, table))
+	})
+}
+
+// A deadlock inside the caller's transaction has to reach the caller as a
+// deadlock. The engine has already ended that transaction. On MySQL a retry of
+// the one statement runs outside it, and so does every statement after it: the
+// victim's later writes commit one by one while its earlier ones are gone. On
+// Postgres and SQL Server the retry fails for another reason, which hides the
+// deadlock from the caller's own retry of the whole unit. Each transaction here
+// writes a row of its own, takes the other's key through InsertIfAbsent, then
+// writes a second row of its own. A transaction keeps both of its rows or
+// neither, and the one that lost reports a retryable conflict. The transaction
+// is either a Tx the caller passes or a serialized write the context carries.
+func TestInsertIfAbsent_DeadlockInsideTransactionLeavesNoPartialWrite(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		units := []struct {
+			name string
+			run  func(ctx context.Context, owner string, body func(context.Context, core.Querier) error) error
+		}{
+			{"caller tx", func(ctx context.Context, _ string, body func(context.Context, core.Querier) error) error {
+				tx, err := host.Querier(ctx).Begin(ctx)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = tx.Rollback(ctx) }()
+				if err := body(ctx, tx); err != nil {
+					return err
+				}
+				return tx.Commit(ctx)
+			}},
+			{"serialized write", func(ctx context.Context, owner string, body func(context.Context, core.Querier) error) error {
+				return core.SerializeWrite(ctx, host, "idn_tx_deadlock_probe:"+owner, func(ctx context.Context) error {
+					return body(ctx, host.Querier(ctx))
+				})
+			}},
+		}
+		for n, unit := range units {
+			t.Run(unit.name, func(t *testing.T) {
+				ctx := context.Background()
+				table := fmt.Sprintf("idn_tx_deadlock_probe_%d", n)
+				ddl := "CREATE TABLE " + table + " (k VARCHAR(64) NOT NULL PRIMARY KEY, owner VARCHAR(8) NOT NULL)"
+				if host.Dialect() == "mssql" {
+					ddl = "CREATE TABLE " + table + " (k NVARCHAR(64) NOT NULL PRIMARY KEY, owner NVARCHAR(8) NOT NULL)"
+				}
+				_, err := host.Querier(ctx).Exec(ctx, ddl)
+				require.NoError(t, err)
+
+				insert := "INSERT INTO " + table + " (k, owner) VALUES ($1, $2)"
+				var firstRows sync.WaitGroup
+				firstRows.Add(2)
+				run := func(owner, theirs string) error {
+					var once sync.Once
+					done := func() { once.Do(firstRows.Done) }
+					defer done()
+					return unit.run(ctx, owner, func(ctx context.Context, q core.Querier) error {
+						_, err := q.Exec(ctx, insert, owner+"-1", owner)
+						done()
+						if err != nil {
+							return err
+						}
+						firstRows.Wait()
+						if _, err := core.InsertIfAbsent(ctx, q, host.Dialect(), table,
+							[]string{"k", "owner"}, []string{"k"}, theirs+"-1", owner); err != nil {
+							return err
+						}
+						_, err = q.Exec(ctx, insert, owner+"-2", owner)
+						return err
+					})
+				}
+
+				owners := []string{"a", "b"}
+				errs := make([]error, len(owners))
+				var wg sync.WaitGroup
+				for i, owner := range owners {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						errs[i] = run(owner, owners[1-i])
+					}()
+				}
+				wg.Wait()
+
+				failed := 0
+				for i, owner := range owners {
+					row, err := host.Querier(ctx).QueryRow(ctx,
+						"SELECT COUNT(*) FROM "+table+" WHERE owner = $1 AND k IN ($2, $3)", owner, owner+"-1", owner+"-2")
+					require.NoError(t, err)
+					var kept int
+					require.NoError(t, row.Scan(&kept))
+					if errs[i] != nil {
+						failed++
+						assert.Zero(t, kept, "transaction %s failed (%v) yet kept %d of its rows on %s", owner, errs[i], kept, host.Dialect())
+						assert.True(t, sqlx.IsRetryableTxError(errs[i]), "transaction %s lost with %v on %s, which its caller cannot retry", owner, errs[i], host.Dialect())
+					} else {
+						assert.Equal(t, 2, kept, "transaction %s committed yet kept %d of its 2 rows on %s", owner, kept, host.Dialect())
+					}
+				}
+				assert.Equal(t, 1, failed, "exactly one transaction must lose the deadlock on %s: %v", host.Dialect(), errs)
+			})
+		}
 	})
 }

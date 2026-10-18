@@ -53,3 +53,19 @@ func SerializeWrite(ctx context.Context, host any, key string, fn func(ctx conte
 func (h *ScopedHost) SerializeWrite(ctx context.Context, key string, fn func(ctx context.Context) error) error {
 	return SerializeWrite(ctx, h.inner, key, fn)
 }
+
+type inTransactionKey struct{}
+
+// WithinTransaction marks ctx as carrying a transaction that every query made
+// through Querier with it joins. The host sets it for the fn a serialized
+// write runs, so a helper that would retry a statement on its own knows the
+// statement is part of a larger unit it cannot restart.
+func WithinTransaction(ctx context.Context) context.Context {
+	return context.WithValue(ctx, inTransactionKey{}, true)
+}
+
+// InTransaction reports whether ctx was marked by WithinTransaction.
+func InTransaction(ctx context.Context) bool {
+	in, _ := ctx.Value(inTransactionKey{}).(bool)
+	return in
+}
