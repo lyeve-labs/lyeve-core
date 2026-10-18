@@ -153,7 +153,8 @@ type TenantAccountStore interface {
 	StampProviderSeen(ctx context.Context, tenantID string, id uuid.UUID) error
 }
 
-// TenantAccountProvider is implemented by the engine host.
+// TenantAccountProvider is implemented by the engine host. Through ScopedHost
+// it needs CapDBWrite.
 type TenantAccountProvider interface {
 	TenantAccounts() TenantAccountStore
 }

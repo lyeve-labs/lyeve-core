@@ -68,3 +68,22 @@ func TestScopedHost_ProviderRolesFallBack(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, ok)
 }
+
+// accountsHost is a host that keeps accounts, so a scoped host has a store to
+// hand on or withhold.
+type accountsHost struct {
+	stubHost
+	store TenantAccountStore
+}
+
+func (h *accountsHost) TenantAccounts() TenantAccountStore { return h.store }
+
+// The account store creates an account with any roles in any tenant, so a
+// plugin reaches it only with the grant that writes the database.
+func TestScopedHost_TenantAccounts_NeedsCapDBWrite(t *testing.T) {
+	store := struct{ TenantAccountStore }{}
+	inner := &accountsHost{store: store}
+	assert.Nil(t, NewScopedHost(inner, "narrow", CapRoutes|CapHooks).TenantAccounts(), "no database grant")
+	assert.Nil(t, NewScopedHost(inner, "reader", CapDBRead).TenantAccounts(), "read grant only")
+	assert.Equal(t, store, NewScopedHost(inner, "writer", CapDBWrite).TenantAccounts())
+}
