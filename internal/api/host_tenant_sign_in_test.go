@@ -338,8 +338,8 @@ func TestMFAVerify_ChallengeForAnotherTenantOnADomainIsRefused(t *testing.T) {
 			tenant = "globex"
 		}
 		code, body := verify(at, tenant)
-		assert.Equal(t, http.StatusUnauthorized, code, name)
-		assert.Contains(t, body, string(i18n.CodeMFANotConfigured), "%s: the factor check never ran", name)
+		assert.Equal(t, http.StatusServiceUnavailable, code, name)
+		assert.Contains(t, body, string(i18n.CodeMFAStoreError), "%s: the factor check never ran", name)
 	}
 }
 

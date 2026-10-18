@@ -11,6 +11,9 @@ import (
 // MFAStore is the minimal interface the engine needs from an MFA plugin.
 type MFAStore interface {
 	IsEnabled(ctx context.Context, userID uuid.UUID) (bool, error)
+	// GetEnabled returns the user's enabled authenticator-app secret and
+	// recovery code hashes. A user without one, such as an account whose only
+	// second factor is a passkey, gets an error wrapping core.ErrNotFound.
 	GetEnabled(ctx context.Context, userID uuid.UUID) (encSecret string, backupHashes []string, err error)
 	UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error
 

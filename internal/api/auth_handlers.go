@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
@@ -601,8 +602,13 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	encSecret, backupHashes, err := h.mfaStore.GetEnabled(r.Context(), userID)
-	if err != nil {
+	if errors.Is(err, core.ErrNotFound) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeMFANotConfigured, nil)
+		return
+	}
+	if err != nil {
+		slog.WarnContext(r.Context(), "mfa secret read failed", "err", err, "user_id", userID)
+		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeMFAStoreError, nil)
 		return
 	}
 
