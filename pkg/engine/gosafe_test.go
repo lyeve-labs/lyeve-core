@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 )
 
 func TestGoSafe_NormalFn(t *testing.T) {
@@ -61,5 +64,38 @@ func TestGoSafe_MultipleGoroutines(t *testing.T) {
 
 	if got := ran.Load(); got != numGoroutines {
 		t.Fatalf("GoSafe: expected %d goroutines to run, got %d", numGoroutines, got)
+	}
+}
+
+// catchPanicReports installs a reporter for the test and returns the reports
+// from the goroutine named name. Other tests in the package panic in
+// parallel, so their reports are dropped.
+func catchPanicReports(t *testing.T, name string) <-chan panicreport.Panic {
+	t.Helper()
+	ch := make(chan panicreport.Panic, 1)
+	panicreport.Set(func(p panicreport.Panic) {
+		if p.Goroutine == name {
+			ch <- p
+		}
+	})
+	t.Cleanup(func() { panicreport.Set(nil) })
+	return ch
+}
+
+func TestGoSafe_ReportsTheRecoveredPanic(t *testing.T) {
+	reports := catchPanicReports(t, "gosafe-report")
+
+	GoSafe("gosafe-report", func() { panic("gosafe boom") })
+
+	select {
+	case got := <-reports:
+		if got.TenantID != "" || got.Route != "" || got.Value != "gosafe boom" {
+			t.Fatalf("report = %+v, want no tenant and the panic value", got)
+		}
+		if !strings.Contains(string(got.Stack), "TestGoSafe_ReportsTheRecoveredPanic") {
+			t.Fatalf("stack does not reach the panicking function:\n%s", got.Stack)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("GoSafe recovered the panic but never reported it")
 	}
 }

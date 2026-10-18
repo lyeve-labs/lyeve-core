@@ -33,6 +33,7 @@ import (
 	poolpkg "github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/internal/provider"
 	"github.com/lyeve-labs/lyeve-core/internal/storage"
 	"github.com/lyeve-labs/lyeve-core/internal/tracing"
@@ -643,6 +644,9 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}); ok {
 		setter.WithFlowRegistry(activator.FlowRegistry())
 	}
+	// Every panic the engine recovers goes to the running plugins that hold
+	// the panic reporter role, from the first request on.
+	panicreport.Set(reportPanicsTo(activator))
 	// The host answers a tenant's region from whichever running plugin holds
 	// the role, asking the activator on each call.
 	if setter, ok := hostBase.(interface {

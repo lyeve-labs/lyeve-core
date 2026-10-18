@@ -42,6 +42,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		apimw.StripUntrustedProxyHeaders(o.trustedProxies),
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
 	r.Use(middleware.Recoverer)
+	r.Use(reportPanics)
 	r.Use(apimw.AllowedHosts(cfg.AllowedHosts))
 	r.Use(apimw.HTTPSRedirect(cfg.SecureCookie))
 	// Content-Type enforcement: rejects mutation requests (POST/PUT/PATCH)
