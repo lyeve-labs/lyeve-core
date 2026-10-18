@@ -35,6 +35,12 @@ type goroutineEntry struct {
 	owner   string
 	name    string
 	started time.Time
+	// longLived marks a worker meant to run until shutdown, which the
+	// leak check skips.
+	longLived bool
+	// warned records that the leak check has reported this goroutine, so
+	// a stuck one is logged once with its age instead of on every tick.
+	warned bool
 }
 
 // OwnerEngine is the owner recorded for a goroutine the engine itself
@@ -106,6 +112,17 @@ func (t *GoroutineTracker) Owner() string { return t.owner }
 // does not spawn the goroutine: this prevents races between concurrent
 // Go calls and Shutdown that would leak goroutines past Wait.
 func (t *GoroutineTracker) Go(name string, fn TrackedFunc) int64 {
+	return t.spawn(name, fn, false)
+}
+
+// GoLongLived spawns a tracked goroutine meant to run until shutdown, such
+// as a periodic sweeper. Shutdown waits for it and the snapshot counts it
+// like any other, but the leak check never reports it.
+func (t *GoroutineTracker) GoLongLived(name string, fn TrackedFunc) int64 {
+	return t.spawn(name, fn, true)
+}
+
+func (t *GoroutineTracker) spawn(name string, fn TrackedFunc, longLived bool) int64 {
 	// Fast check: if already shut down, reject immediately.
 	select {
 	case <-t.ctx.Done():
@@ -116,7 +133,7 @@ func (t *GoroutineTracker) Go(name string, fn TrackedFunc) int64 {
 	id := t.nextID.Add(1)
 	owner := t.owner
 	t.mu.Lock()
-	t.entries[id] = goroutineEntry{id: id, owner: owner, name: name, started: time.Now()}
+	t.entries[id] = goroutineEntry{id: id, owner: owner, name: name, started: time.Now(), longLived: longLived}
 	t.mu.Unlock()
 
 	t.wg.Add(1)
@@ -237,11 +254,16 @@ func (t *GoroutineTracker) checkLeaks() {
 	defer t.mu.Unlock()
 
 	now := time.Now()
-	for _, e := range t.entries {
+	for id, e := range t.entries {
+		if e.longLived || e.warned {
+			continue
+		}
 		age := now.Sub(e.started)
 		if t.config.LeakThreshold > 0 && age > t.config.LeakThreshold {
 			slog.Warn("goroutine may be leaking",
 				"id", e.id, "owner", e.owner, "name", e.name, "age", age.String())
+			e.warned = true
+			t.entries[id] = e
 		}
 	}
 

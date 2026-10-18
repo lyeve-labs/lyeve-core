@@ -1,7 +1,11 @@
 package engine
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -109,5 +113,78 @@ func TestGoroutineTracker_DefaultConfig(t *testing.T) {
 	snap := tracker.Snapshot()
 	if snap.LeakThreshold == "" {
 		t.Error("expected non-empty leak threshold")
+	}
+}
+
+// lockedBuffer serializes writes from any tracker's monitor loop against
+// the test's read of what was logged.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) count(substr string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.Count(b.buf.String(), substr)
+}
+
+func captureWarnings(t *testing.T) *lockedBuffer {
+	t.Helper()
+	buf := &lockedBuffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func TestGoroutineTracker_LongLivedWorkerIsNotALeak(t *testing.T) {
+	logs := captureWarnings(t)
+	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: time.Millisecond, MaxGoroutines: 50000})
+
+	var stopped atomic.Bool
+	tracker.GoLongLived("long-lived-sweeper", func(ctx context.Context) {
+		<-ctx.Done()
+		stopped.Store(true)
+	})
+
+	time.Sleep(10 * time.Millisecond)
+	tracker.checkLeaks()
+	tracker.checkLeaks()
+
+	if n := logs.count("name=long-lived-sweeper"); n != 0 {
+		t.Errorf("long-lived worker reported as a leak %d times, want 0", n)
+	}
+	if c := tracker.Count(); c != 1 {
+		t.Errorf("tracked = %d, want 1: a long-lived worker stays visible", c)
+	}
+	if err := tracker.Shutdown(time.Second); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	if !stopped.Load() {
+		t.Error("Shutdown returned before the long-lived worker stopped")
+	}
+}
+
+func TestGoroutineTracker_LeakWarnsOncePerGoroutine(t *testing.T) {
+	logs := captureWarnings(t)
+	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: time.Millisecond, MaxGoroutines: 50000})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
+
+	tracker.Go("stuck-task", func(ctx context.Context) { <-ctx.Done() })
+
+	time.Sleep(10 * time.Millisecond)
+	for range 3 {
+		tracker.checkLeaks()
+	}
+
+	if n := logs.count("name=stuck-task"); n != 1 {
+		t.Errorf("stuck goroutine reported %d times over three checks, want 1", n)
 	}
 }
