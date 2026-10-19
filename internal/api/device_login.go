@@ -134,16 +134,18 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The sign-in table and its limits are the install's, so the lines about
+	// them carry no tenant, even when the request came on a tenant's domain.
 	ctx := r.Context()
 	uri, err := h.verificationURI()
 	if err != nil {
-		slog.WarnContext(ctx, "device login refused: the console URL is unset", "err", err)
+		slog.WarnContext(logging.WithoutTenant(ctx), "device login refused: the console URL is unset", "err", err)
 		httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "Device sign-in is not configured on this install.")
 		return
 	}
 	now := h.now().UTC().Truncate(time.Microsecond)
 	if _, err := h.store.Prune(ctx, now.Add(-deviceLoginRetention), deviceLoginPruneBatch); err != nil {
-		slog.WarnContext(ctx, "device login prune failed", "err", err)
+		slog.WarnContext(logging.WithoutTenant(ctx), "device login prune failed", "err", err)
 	}
 
 	ip := clientIP(r)
@@ -163,7 +165,7 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if all >= deviceLoginPendingMax {
-		slog.WarnContext(ctx, "device login refused: the install holds its limit of open requests", "open", all, "limit", deviceLoginPendingMax)
+		slog.WarnContext(logging.WithoutTenant(ctx), "device login refused: the install holds its limit of open requests", "open", all, "limit", deviceLoginPendingMax)
 		w.Header().Set("Retry-After", "60")
 		httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "Too many sign-ins are waiting for approval. Try again in a few minutes.")
 		return
@@ -203,7 +205,7 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if httpx.StoreStatusFor(err) != http.StatusConflict || attempt == 2 {
-			slog.WarnContext(ctx, "device login create failed", "err", err, "attempt", attempt+1)
+			slog.WarnContext(logging.WithoutTenant(ctx), "device login create failed", "err", err, "attempt", attempt+1)
 			httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "Could not start the sign-in.")
 			return
 		}
@@ -577,10 +579,12 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 	h.audit(actor, "auth.device_login.exchange", d, clientIP(r), r.UserAgent())
 	// The session starts on a device and an address the account may never
 	// have used, so the device risk history hears of it as it hears of a
-	// password login.
+	// password login. The device may poll on another tenant's domain, so the
+	// record and its failure go under the session's tenant.
 	if ra := h.auth.deviceRiskAssessor; ra != nil {
-		if err := ra.RecordLogin(ctx, user.ID, collectFingerprint(r), true); err != nil {
-			slog.WarnContext(ctx, "failed to record device login", "err", err)
+		sessionCtx := accountContext(ctx, tenant)
+		if err := ra.RecordLogin(sessionCtx, user.ID, collectFingerprint(r), true); err != nil {
+			slog.WarnContext(sessionCtx, "failed to record device login", "err", err)
 		}
 	}
 
@@ -598,10 +602,15 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 // is left approved, so it expires on its own. The device is told it was
 // denied. The refusal is audited with its reason under the approver: an
 // exchange refused because the account's sessions ended since the approval
-// can be the account's owner cutting off someone else's device.
+// can be the account's owner cutting off someone else's device. The line goes
+// under the tenant the approval bound, never the one the device polled on.
 func (h *deviceLoginHandler) refuseExchange(w http.ResponseWriter, r *http.Request, d *domain.DeviceLogin, reason string) {
 	ctx := r.Context()
-	slog.InfoContext(ctx, "device login exchange refused", "device_login_id", d.ID, "reason", reason)
+	logCtx := ctx
+	if d.TenantID != nil {
+		logCtx = accountContext(ctx, *d.TenantID)
+	}
+	slog.InfoContext(logCtx, "device login exchange refused", "device_login_id", d.ID, "reason", reason)
 	actor := ctx
 	if d.UserID != nil {
 		tenant := ""

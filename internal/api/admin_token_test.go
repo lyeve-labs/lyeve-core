@@ -383,6 +383,10 @@ func (rg *tokenRig) do(c tokenCall) *httptest.ResponseRecorder {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 	for k, v := range c.header {
+		if k == "Host" {
+			req.Host = v
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	if c.remote != "" {
