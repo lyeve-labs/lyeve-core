@@ -5,9 +5,12 @@ package db
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/testcontainers/testcontainers-go"
 	tcmssql "github.com/testcontainers/testcontainers-go/modules/mssql"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
@@ -22,6 +25,8 @@ import (
 // image) because it's smaller, starts faster, and covers the same T-SQL
 // surface area the CMS targets.
 func TestMSSQL_ConnectAndMigrate(t *testing.T) {
+	const mssqlStartupTimeout = 5 * time.Minute
+
 	if testing.Short() {
 		t.Skip("skipping MSSQL integration test in short mode")
 	}
@@ -34,9 +39,13 @@ func TestMSSQL_ConnectAndMigrate(t *testing.T) {
 		"mcr.microsoft.com/azure-sql-edge:latest",
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Strong@Passw0rd"),
-		// Override the default wait strategy: Azure SQL Edge emits
-		// "Started" instead of "Recovery is complete".
-		// The listening-port check + timeout is sufficient.
+		// The module waits 60 seconds for the port and the recovery log
+		// line, and a loaded runner can take longer than that to start
+		// the server. Wait for the same two signals for five minutes.
+		testcontainers.WithWaitStrategyAndDeadline(mssqlStartupTimeout,
+			wait.ForListeningPort("1433/tcp").WithStartupTimeout(mssqlStartupTimeout),
+			wait.ForLog("Recovery is complete.").WithStartupTimeout(mssqlStartupTimeout),
+		),
 	)
 	require.NoError(t, err, "start Azure SQL Edge container")
 
