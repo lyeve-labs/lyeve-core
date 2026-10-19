@@ -108,6 +108,36 @@ func TestRecordAuditWithState_ActingTenantWinsOverClaim(t *testing.T) {
 	assert.Equal(t, "acme", w.last.TenantID)
 }
 
+func TestRecordAudit_WithoutTenantFilesUnderNoTenant(t *testing.T) {
+	w := &captureAuditWriter{}
+	RegisterAuditWriter(w)
+	t.Cleanup(ClearAuditWriter)
+
+	// A super admin whose home tenant is "default" deletes tenant "acme". The
+	// entry names acme, so neither default's nor acme's admins may read it.
+	claims := &core.AuthClaims{UserID: uuid.New().String(), TenantID: "default"}
+	scoped := core.WithTenantID(context.WithValue(context.Background(), core.ClaimsKey, claims), "default")
+	unscoped := core.WithTenantID(context.WithValue(context.Background(), core.ClaimsKey, claims), "")
+
+	for name, ctx := range map[string]context.Context{"scoped": scoped, "claims only": unscoped} {
+		w.last = AuditEntry{}
+		RecordAudit(ctx, nil, "tenant.delete", "tenant", "acme", "ip", "ua", WithoutTenant())
+		assert.Empty(t, w.last.TenantID, name)
+		assert.Equal(t, "tenant.delete", w.last.Action, name)
+		assert.NotNil(t, w.last.UserID, name)
+
+		w.last = AuditEntry{}
+		r := httptest.NewRequest(http.MethodDelete, "/api/admin/tenants/acme", nil).WithContext(ctx)
+		RecordAuditFromRequestWithState(r, nil, "tenant.delete", "tenant", "acme", nil, nil, WithoutTenant(), WithSync())
+		assert.Empty(t, w.last.TenantID, name)
+		assert.NotNil(t, w.last.UserID, name)
+	}
+
+	// Without the option the claim still fills a context that names no tenant.
+	RecordAudit(unscoped, nil, "tenant.update", "tenant", "default", "ip", "ua")
+	assert.Equal(t, "default", w.last.TenantID)
+}
+
 func TestRecordAuditWithState_SyncErrorIsLoggedNotPanicked(t *testing.T) {
 	w := &captureAuditWriter{syncErr: errors.New("write failed")}
 	RegisterAuditWriter(w)
