@@ -103,7 +103,8 @@ func ClearAuditWriter() {
 type AuditOption func(*auditOptions)
 
 type auditOptions struct {
-	sync bool
+	sync     bool
+	noTenant bool
 }
 
 // WithSync requests synchronous audit write confirmation. The call blocks
@@ -112,6 +113,15 @@ type auditOptions struct {
 // acknowledging success. Most audit calls should remain async for throughput.
 func WithSync() AuditOption {
 	return func(o *auditOptions) { o.sync = true }
+}
+
+// WithoutTenant files the entry under no tenant, so only a super admin who is
+// not scoped to a tenant reads it. Use it for an action a request takes on a
+// tenant other than its own, such as a super admin creating, moving or
+// deleting one: filed under the request's tenant, the entry would show the
+// other tenant to the requesting tenant's admins.
+func WithoutTenant() AuditOption {
+	return func(o *auditOptions) { o.noTenant = true }
 }
 
 // RecordAudit hands an audit entry to the registered AuditLogWriter. With none
@@ -145,9 +155,16 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 	// affected tenant's log and out of reach of that tenant's retention policy.
 	// The claim only serves contexts the middleware never touched, such as
 	// background workers that carry claims alone.
+	var ao auditOptions
+	for _, opt := range opts {
+		opt(&ao)
+	}
 	tenantID := core.TenantIDFromCtx(ctx)
 	if tenantID == "" && claims != nil {
 		tenantID = claims.TenantID
+	}
+	if ao.noTenant {
+		tenantID = ""
 	}
 
 	// An admin token acts for its owner, so the owner stays the user and the
@@ -178,11 +195,6 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 	auditWriterMu.Unlock()
 
 	if w != nil {
-		// Resolve options.
-		var ao auditOptions
-		for _, opt := range opts {
-			opt(&ao)
-		}
 		entry := AuditEntry{
 			TenantID: tenantID, UserID: userID, Action: action,
 			ResourceType: resourceType, ResourceID: resourceID,
@@ -217,14 +229,14 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 
 // RecordAuditFromRequest is a convenience wrapper that reads IP and User-Agent
 // from the HTTP request.
-func RecordAuditFromRequest(r *http.Request, host core.Host, action, resourceType, resourceID string) {
+func RecordAuditFromRequest(r *http.Request, host core.Host, action, resourceType, resourceID string, opts ...AuditOption) {
 	RecordAudit(r.Context(), host, action, resourceType, resourceID,
-		r.RemoteAddr, r.UserAgent())
+		r.RemoteAddr, r.UserAgent(), opts...)
 }
 
 // RecordAuditFromRequestWithState is a convenience wrapper that reads IP and
 // User-Agent from the HTTP request and captures before/after state snapshots.
-func RecordAuditFromRequestWithState(r *http.Request, host core.Host, action, resourceType, resourceID string, before, after any) {
+func RecordAuditFromRequestWithState(r *http.Request, host core.Host, action, resourceType, resourceID string, before, after any, opts ...AuditOption) {
 	RecordAuditWithState(r.Context(), host, action, resourceType, resourceID,
-		r.RemoteAddr, r.UserAgent(), before, after)
+		r.RemoteAddr, r.UserAgent(), before, after, opts...)
 }
