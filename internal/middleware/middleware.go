@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -481,6 +482,9 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			// context is new, so an outer frame keeps the one it was given and
 			// would otherwise record the request as belonging to no tenant.
 			core.TenantSlotFrom(r.Context()).Set(tenantID)
+			if isSuperAdmin(r.Context()) {
+				superAdminSlotFrom(r.Context()).Store(true)
+			}
 
 			ctx := context.WithValue(r.Context(), tenantKey{}, tenantID)
 			// Inject via core key so tracing (which cannot import
@@ -512,6 +516,31 @@ func isSuperAdmin(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+type superAdminSlotKey struct{}
+
+// WithSuperAdminSlot returns a context carrying a fresh flag, and the flag.
+// TenantHeader sets it when the caller holds the super_admin role, so a
+// middleware that wrapped the whole chain can read it afterwards, as it reads
+// the tenant slot.
+//
+// The access log reads it. A super admin's request can name any tenant in its
+// path, query or body, and the tenant slot holds the one the super admin acts
+// in, whose admins read every line stamped with it. So the line of such a
+// request carries no tenant, whichever tenant the request names.
+func WithSuperAdminSlot(ctx context.Context) (context.Context, *atomic.Bool) {
+	b := new(atomic.Bool)
+	return context.WithValue(ctx, superAdminSlotKey{}, b), b
+}
+
+// superAdminSlotFrom returns the flag on ctx. With none installed it returns
+// a flag nobody reads, so the caller need not check.
+func superAdminSlotFrom(ctx context.Context) *atomic.Bool {
+	if b, ok := ctx.Value(superAdminSlotKey{}).(*atomic.Bool); ok {
+		return b
+	}
+	return new(atomic.Bool)
 }
 
 // hasCredential reports whether the request carried any credential at all: a
