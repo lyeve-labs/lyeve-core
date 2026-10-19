@@ -1,0 +1,130 @@
+# SCAN: look for known vulnerabilities in the published engine image.
+#
+# This is a workflow of its own and never a step of release.yml, so a finding
+# can neither stop a release nor turn its run red. It runs:
+#
+#   workflow_run       after every release run that succeeded, against the
+#                      image a tag push published. A release run started by
+#                      hand ran from a branch, so it scans the newest image
+#   schedule           weekly, against the newest published image, because
+#                      advisories keep arriving after an image ships
+#   workflow_dispatch  against the tag given, or the newest published image
+#
+# "Newest" is the highest vX.Y.Z or vX.Y.Z-rc.N tag by version, with a
+# candidate below its stable release. Dispatch from main, the default branch:
+# a run reports its result on the commit it ran from.
+#
+# Each architecture is its own image with its own packages, so both are
+# scanned. A CRITICAL or HIGH finding that has a fix fails the run. A finding
+# with no fix is in the report and does not fail it. The report, every
+# severity, is uploaded as an artifact.
+#
+# Trivy reads Go module versions from a binary's build info, and the released
+# binary carries none, so this scan covers the image's OS packages. The
+# govulncheck step in ci.yml covers the engine's Go modules from source.
+#
+# Trivy runs from its own image, pinned by digest. The scanned image is
+# public, so the scan job holds no token at all.
+
+name: image-scan
+
+on:
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'vX.Y.Z or vX.Y.Z-rc.N to scan. Empty scans the newest published one.'
+        required: false
+        type: string
+
+permissions: {}
+
+env:
+  IMAGE: ghcr.io/lyeve-labs/lyeve-core
+  TRIVY_IMAGE: docker.io/aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+
+jobs:
+  resolve:
+    name: resolve image tag
+    # A failed release published nothing, so there is nothing to scan.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # lists the repository's tags
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          # A release run that a tag push started has that tag as its head
+          # branch. One started by hand has the branch it ran from.
+          RELEASE_TAG: ${{ github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch || '' }}
+        run: |
+          set -euo pipefail
+          shape='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$'
+          ref="${INPUT_TAG:-${RELEASE_TAG:-}}"
+          if [ -z "$ref" ]; then
+            # Sort by version, with a stable release above its candidates.
+            ref=$(gh api "repos/${GITHUB_REPOSITORY}/git/matching-refs/tags/v" --paginate --jq '.[].ref' \
+              | sed 's#^refs/tags/##' | grep -E "$shape" \
+              | awk '{ v = substr($0, 2); split(v, p, /[.-]/); print p[1], p[2], p[3], (v ~ /-rc\./ ? p[5] : 999999), $0 }' \
+              | sort -k1,1n -k2,2n -k3,3n -k4,4n | tail -n 1 | cut -d' ' -f5)
+          fi
+          if ! [[ "$ref" =~ $shape ]]; then
+            echo "::error::'${ref}' is not a vX.Y.Z or vX.Y.Z-rc.N tag"
+            exit 1
+          fi
+          echo "scanning ${IMAGE}:${ref#v}"
+          echo "tag=${ref#v}" >> "$GITHUB_OUTPUT"
+
+  scan:
+    name: "trivy · ${{ matrix.arch }}"
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      TAG: ${{ needs.resolve.outputs.tag }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      # The first pass writes the full report and fills the cache. The gate
+      # reads the cache, so the image is fetched once.
+      - name: Scan
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/scan"
+          report="image-scan-${TAG}-${ARCH}"
+          mkdir -p "${out}/cache"
+          trivy() {
+            docker run --rm -u "$(id -u):$(id -g)" -v "${out}:/out" "${TRIVY_IMAGE}" "$@"
+          }
+          scan() {
+            trivy image --cache-dir /out/cache --image-src remote --platform "linux/${ARCH}" \
+              --scanners vuln --skip-version-check "$@" "${IMAGE}:${TAG}"
+          }
+          scan --format json --output "/out/${report}.json"
+          trivy convert --format table --table-mode detailed --output "/out/${report}.txt" "/out/${report}.json"
+          cat "${out}/${report}.txt"
+          scan --skip-db-update --quiet --format table --table-mode detailed --ignore-unfixed --severity CRITICAL,HIGH --exit-code 1
+
+      - name: Upload report
+        if: success() || failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-scan-${{ env.TAG }}-${{ matrix.arch }}
+          path: |
+            ${{ runner.temp }}/scan/image-scan-*.json
+            ${{ runner.temp }}/scan/image-scan-*.txt
+          if-no-files-found: error
+          retention-days: 90
