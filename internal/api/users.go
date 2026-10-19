@@ -15,6 +15,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
@@ -340,7 +341,8 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 	// Revoking here only frees the families early.
 	if h.revokeRefresh != nil {
 		if err := h.revokeRefresh(r.Context(), id.String()); err != nil {
-			slog.WarnContext(r.Context(), "set password: refresh tokens not revoked", "user_id", id.String(), "error", err)
+			// The account may be another tenant's, and the line is about it.
+			slog.WarnContext(logging.ContextAbout(r.Context(), user.TenantID), "set password: refresh tokens not revoked", "user_id", id.String(), "error", err)
 		}
 	}
 	respond(w, http.StatusOK, safeUser(user))

@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -183,19 +184,25 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 		n += tag.RowsAffected
 	}
 
+	// The accounts erased can be any tenant's, so the lines below are about
+	// the install and go under no tenant. Stamped with the request's tenant,
+	// they would tell its admins how many accounts the address holds
+	// elsewhere.
+	logCtx := logging.WithoutTenant(ctx)
+
 	// Best-effort: a revoked refresh token cannot mint a fresh access token.
 	// Failures here do not undo the erasure, so they are logged, not returned.
 	if canRevoke {
 		for _, id := range ids {
 			if err := revoker.RevokeAllRefreshTokens(ctx, id.String()); err != nil {
-				slog.WarnContext(ctx, "sys_users erasure: refresh token revocation failed",
+				slog.WarnContext(logCtx, "sys_users erasure: refresh token revocation failed",
 					"subject_ref", compliance.SubjectRef(identifier), "err", err)
 			}
 		}
 	}
 
 	if n > 0 {
-		slog.InfoContext(ctx, "sys_users erased", "subject_ref", compliance.SubjectRef(identifier), "rows", n)
+		slog.InfoContext(logCtx, "sys_users erased", "subject_ref", compliance.SubjectRef(identifier), "rows", n)
 	}
 	return n, nil
 }

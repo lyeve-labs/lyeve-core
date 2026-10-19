@@ -99,8 +99,15 @@ func (h *AuthHandler) hostAdmitsAccount(ctx context.Context, user *domain.User) 
 // is stamped with the account's tenant, which is also where its own admins
 // look. A request that resolved no tenant keeps its context.
 func failedAttemptContext(ctx context.Context, user *domain.User) context.Context {
-	if tenant := core.TenantIDFromCtx(ctx); tenant != "" && tenant != user.TenantID {
-		return core.WithTenantID(ctx, user.TenantID)
+	return accountContext(ctx, user.TenantID)
+}
+
+// accountContext is failedAttemptContext for a line about an account known
+// only by the tenant it signs in to, such as the account behind an MFA
+// challenge.
+func accountContext(ctx context.Context, tenant string) context.Context {
+	if current := core.TenantIDFromCtx(ctx); current != "" && current != tenant {
+		return core.WithTenantID(ctx, tenant)
 	}
 	return ctx
 }
@@ -117,12 +124,12 @@ func (h *AuthHandler) respondIfPasswordSignInRefused(w http.ResponseWriter, r *h
 	}
 	admitted, err := h.providerWindowAdmits(r.Context(), user)
 	if err != nil {
-		slog.WarnContext(r.Context(), "provider window read failed", "err", err, "user_id", user.ID)
+		slog.WarnContext(failedAttemptContext(r.Context(), user), "provider window read failed", "err", err, "user_id", user.ID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return false
 	}
 	if !admitted {
-		slog.InfoContext(r.Context(), "password sign-in refused: the provider has not signed the account in within its tenant's window",
+		slog.InfoContext(failedAttemptContext(r.Context(), user), "password sign-in refused: the provider has not signed the account in within its tenant's window",
 			"user_id", user.ID, "tenant", user.TenantID)
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return false

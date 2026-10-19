@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
+	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
@@ -80,6 +81,9 @@ func structuredLogger(next http.Handler) http.Handler {
 		// label on the request series below reads a slot too. Without it
 		// every request would be recorded as the engine's own.
 		ctx, _ = core.WithPluginSlot(ctx)
+		// A super admin's request may name another tenant in its path, so
+		// its line goes under no tenant rather than the one it acts in.
+		ctx, superAdmin := apimw.WithSuperAdminSlot(ctx)
 		r = r.WithContext(ctx)
 
 		// Track in-flight requests for metrics.
@@ -95,7 +99,7 @@ func structuredLogger(next http.Handler) http.Handler {
 		spanID := span.SpanContext().SpanID().String()
 
 		logCtx := r.Context()
-		if tid := tenantSlot.Get(); tid != "" {
+		if tid := tenantSlot.Get(); tid != "" && !superAdmin.Load() {
 			logCtx = core.WithTenantID(logCtx, tid)
 		}
 

@@ -115,11 +115,13 @@ func WithSync() AuditOption {
 	return func(o *auditOptions) { o.sync = true }
 }
 
-// WithoutTenant files the entry under no tenant, so only a super admin who is
-// not scoped to a tenant reads it. Use it for an action a request takes on a
-// tenant other than its own, such as a super admin creating, moving or
-// deleting one: filed under the request's tenant, the entry would show the
-// other tenant to the requesting tenant's admins.
+// WithoutTenant files the entry under no tenant. Use it for an entry whose
+// subject is a tenant other than the request's own, or the whole install,
+// such as a super admin creating, moving or deleting a tenant: filed under
+// the request's tenant, the entry would show the other tenant to the
+// requesting tenant's admins. This package only leaves the tenant empty. Who
+// reads an entry with no tenant is decided by the audit listing, which keeps
+// it from every tenant's admins.
 func WithoutTenant() AuditOption {
 	return func(o *auditOptions) { o.noTenant = true }
 }
@@ -148,17 +150,19 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 		}
 	}
 
+	var ao auditOptions
+	for _, opt := range opts {
+		opt(&ao)
+	}
+
 	// The row belongs to the tenant that was acted on, which the tenancy
 	// middleware resolved onto the context. It differs from the caller's home
 	// tenant whenever a super_admin acts on another tenant via X-Tenant-ID.
 	// Filing under the JWT claim instead would drop the action out of the
 	// affected tenant's log and out of reach of that tenant's retention policy.
 	// The claim only serves contexts the middleware never touched, such as
-	// background workers that carry claims alone.
-	var ao auditOptions
-	for _, opt := range opts {
-		opt(&ao)
-	}
+	// background workers that carry claims alone. WithoutTenant overrides
+	// both, for an entry whose subject is another tenant or the install.
 	tenantID := core.TenantIDFromCtx(ctx)
 	if tenantID == "" && claims != nil {
 		tenantID = claims.TenantID
