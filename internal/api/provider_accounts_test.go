@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,52 +49,93 @@ func eachProviderDialect(t *testing.T, fn func(t *testing.T, pool db.DB)) {
 	}
 }
 
-// A trusted issuer's first sign-in answers the same status, body and timing
-// class whether another tenant holds the verified address or nobody does. The
-// account it creates belongs to the issuer's tenant alone, so the other
-// tenant's account decides nothing.
+// A trusted issuer's first sign-in answers the same status and body, and runs
+// the same statements in the same order, whether another tenant holds the
+// verified address or nobody does. The account it creates belongs to the
+// issuer's tenant alone, so the other tenant's account decides nothing. The
+// statements stand in for wall-clock timing: a request that does the same work
+// cannot take a different time, and a few milliseconds of runner noise cannot
+// move a statement count the way it moves a ratio of timings.
 func TestTrustedIssuer_AddressHeldInAnotherTenantAnswersAsAFreeOne(t *testing.T) {
 	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
 		ctx := context.Background()
 		users := db.NewUserStore(pool)
+		log := &statementLog{DB: pool}
 		iss := newTestIssuer(t)
 		policy := auth.IssuerPolicy{Issuer: iss.srv.URL, Tenant: "agency", DefaultRoles: []string{"viewer"}}
-		h := trustedIssuerAuth([]auth.IssuerPolicy{policy}, users, nil)(requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := trustedIssuerAuth([]auth.IssuerPolicy{policy}, db.NewUserStore(log), nil)(requireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(claimsFromCtx(r).Email))
 		})))
 
-		serve := func(sub, email string) (int, string, time.Duration) {
+		serve := func(sub, email string) (int, string, []string) {
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/content/posts", nil)
 			req.Header.Set("Authorization", "Bearer "+iss.sign(t, map[string]any{"sub": sub, "email": email, "email_verified": true}))
 			rec := httptest.NewRecorder()
-			start := time.Now()
+			log.reset()
 			h.ServeHTTP(rec, req)
-			return rec.Code, rec.Body.String(), time.Since(start)
+			return rec.Code, rec.Body.String(), log.statements()
 		}
 
-		const iterations = 10
-		var takenTimes, freeTimes []time.Duration
-		for i := 0; i < iterations; i++ {
+		for i := 0; i < 3; i++ {
 			taken := "taken-" + uuid.NewString()[:8] + "@agency.example"
 			free := "free-" + uuid.NewString()[:8] + "@agency.example"
 			_, err := users.Create(ctx, taken, "$2a$10$placeholderhashXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", []string{"editor"}, "elsewhere")
 			require.NoError(t, err)
 
-			freeCode, freeBody, freeTook := serve("free-"+uuid.NewString(), free)
-			takenCode, takenBody, takenTook := serve("taken-"+uuid.NewString(), taken)
+			freeCode, freeBody, freeRan := serve("free-"+uuid.NewString(), free)
+			takenCode, takenBody, takenRan := serve("taken-"+uuid.NewString(), taken)
 			require.Equal(t, http.StatusOK, freeCode, "a free address is admitted")
 			require.Equal(t, freeCode, takenCode, "an address another tenant holds is answered as a free one")
 			assert.Equal(t, free, freeBody, "the session carries the address the issuer verified")
 			assert.Equal(t, taken, takenBody)
-			freeTimes, takenTimes = append(freeTimes, freeTook), append(takenTimes, takenTook)
+			require.NotEmpty(t, freeRan, "the first sign-in reads and writes the account store")
+			assert.Equal(t, freeRan, takenRan, "an address another tenant holds runs the statements a free one does")
 
 			other, err := users.GetByEmail(ctx, taken)
 			require.NoError(t, err)
 			assert.Equal(t, "elsewhere", other.TenantID, "the other tenant's account is untouched")
 		}
-		ratio := float64(median(takenTimes)) / float64(median(freeTimes))
-		assert.True(t, ratio >= 0.5 && ratio <= 2.0, "timing ratio taken/free %.2f, free %v", ratio, median(freeTimes))
 	})
+}
+
+// statementLog records the text of every statement sent through it, in order.
+type statementLog struct {
+	db.DB
+	mu  sync.Mutex
+	ran []string
+}
+
+func (l *statementLog) record(query string) {
+	l.mu.Lock()
+	l.ran = append(l.ran, query)
+	l.mu.Unlock()
+}
+
+func (l *statementLog) reset() {
+	l.mu.Lock()
+	l.ran = nil
+	l.mu.Unlock()
+}
+
+func (l *statementLog) statements() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.ran...)
+}
+
+func (l *statementLog) QueryRow(ctx context.Context, query string, args ...any) (*sql.Row, error) {
+	l.record(query)
+	return l.DB.QueryRow(ctx, query, args...)
+}
+
+func (l *statementLog) Query(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	l.record(query)
+	return l.DB.Query(ctx, query, args...)
+}
+
+func (l *statementLog) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	l.record(query)
+	return l.DB.Exec(ctx, query, args...)
 }
 
 const providerTestPassword = "correct-horse-battery-staple"
