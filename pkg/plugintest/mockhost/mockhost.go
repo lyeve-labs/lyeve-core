@@ -53,6 +53,7 @@ type MockHost struct {
 	conf           *MockConfig
 	hooks          *hookSpy
 	hasFeatureFunc func(ctx context.Context, feature string) bool
+	validatePass   func(password string) error
 }
 
 // Spy returns the QuerierSpy for setting up expectations and inspecting calls.
@@ -69,6 +70,13 @@ func (m *MockHost) Hooks() *hookSpy { return m.hooks }
 // returns false.
 func (m *MockHost) SetHasFeature(fn func(ctx context.Context, feature string) bool) {
 	m.hasFeatureFunc = fn
+}
+
+// SetValidatePassword configures the host's core.PasswordPolicyValidator.
+// When nil (default) the host answers core.ErrHostRoleUnsupported, as a host
+// without the role does.
+func (m *MockHost) SetValidatePassword(fn func(password string) error) {
+	m.validatePass = fn
 }
 
 // Host returns a core.Host implementation backed by this MockHost.
@@ -765,6 +773,17 @@ func (a *mockHostAdapter) HasFeature(ctx context.Context, feature string) bool {
 	// Stay consistent with Capabilities, which grants every compiled name.
 	// Otherwise a gate passes while HasFeature denies the same one.
 	return a.Capabilities().Features[feature]
+}
+
+var _ core.PasswordPolicyValidator = (*mockHostAdapter)(nil)
+
+// ValidatePassword implements core.PasswordPolicyValidator through the
+// function SetValidatePassword installed.
+func (a *mockHostAdapter) ValidatePassword(password string) error {
+	if a.m.validatePass != nil {
+		return a.m.validatePass(password)
+	}
+	return core.ErrHostRoleUnsupported
 }
 
 // mockQuerier

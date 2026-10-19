@@ -15,7 +15,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/debug"
@@ -198,13 +197,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// Setup and the users routes share one policy, so a router test through
 	// setup also holds the rules for user create and for a super admin
 	// setting a password.
-	passwordPolicy := auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-		MaxBytes:          auth.MaxPasswordBytes(cfg.PasswordHashAlgo),
-	}
+	passwordPolicy := cfg.PasswordPolicy()
 	authHandler.WithPasswordPolicy(passwordPolicy)
 	if o.refreshTokenStore != nil {
 		authHandler.WithRefreshTokenStore(o.refreshTokenStore, time.Duration(cfg.RefreshTokenTTL)*time.Second)

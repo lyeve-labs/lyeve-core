@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -740,23 +739,6 @@ func respondErrCode(w http.ResponseWriter, r *http.Request, status int, code i18
 		Code:      string(code),
 		RequestID: logging.RequestIDFromCtx(r.Context()),
 	})
-}
-
-// passwordViolationResponse maps a ValidatePassword error to the appropriate
-// i18n code and interpolation parameters.
-func passwordViolationResponse(err error, policy auth.PasswordPolicy) (i18n.Code, map[string]any) {
-	switch {
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return i18n.CodePasswordTooShort, map[string]any{"min": policy.MinLength}
-	case errors.Is(err, auth.ErrPasswordTooLong):
-		return i18n.CodePasswordTooLong, map[string]any{"max": policy.MaxBytes}
-	case errors.Is(err, auth.ErrPasswordNoComplexity):
-		return i18n.CodePasswordNeedsComplexity, nil
-	case errors.Is(err, auth.ErrPasswordTooCommon):
-		return i18n.CodePasswordTooCommon, nil
-	default:
-		return i18n.CodePasswordTooShort, nil
-	}
 }
 
 // buildPublicRateLimiter creates a PublicEndpointRateLimiter over the table

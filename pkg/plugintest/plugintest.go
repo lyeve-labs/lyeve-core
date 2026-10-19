@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
@@ -941,9 +942,16 @@ func (h *testHost) AdminSeatGuard() core.AdminSeatGuard {
 }
 
 var (
-	_ core.TenantAccountProvider  = (*testHost)(nil)
-	_ core.ProviderWindowProvider = (*testHost)(nil)
+	_ core.TenantAccountProvider   = (*testHost)(nil)
+	_ core.ProviderWindowProvider  = (*testHost)(nil)
+	_ core.PasswordPolicyValidator = (*testHost)(nil)
 )
+
+// ValidatePassword implements core.PasswordPolicyValidator with the engine's
+// default policy, the one an install runs with no PASSWORD_* setting.
+func (h *testHost) ValidatePassword(password string) error {
+	return auth.CheckPassword(auth.DefaultPasswordPolicy(), password)
+}
 
 // TenantAccounts implements core.TenantAccountProvider with the store the
 // engine host serves, over the test database, so a plugin suite finds, creates
