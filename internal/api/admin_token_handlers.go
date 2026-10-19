@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -209,7 +210,7 @@ func (h *adminTokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Create(r.Context(), tok); err != nil {
-		slog.WarnContext(r.Context(), "create admin token failed", "err", err)
+		slog.WarnContext(logging.ContextAbout(r.Context(), tenant), "create admin token failed", "err", err)
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to create admin token")
 		return
 	}
@@ -427,8 +428,15 @@ func (h *adminTokenHandler) audit(r *http.Request, action string, tok *core.Admi
 	if h.host == nil {
 		return
 	}
+	// A super admin may issue a token for another tenant. The entry is about
+	// that tenant, so it goes under none rather than the one the request
+	// acts in.
+	var opts []compliance.AuditOption
+	if tok.TenantID != core.TenantIDFromCtx(r.Context()) {
+		opts = append(opts, compliance.WithoutTenant())
+	}
 	compliance.RecordAudit(r.Context(), h.host, action, "admin_token", tok.ID.String(),
-		clientIP(r), r.UserAgent())
+		clientIP(r), r.UserAgent(), opts...)
 }
 
 // clientIP is the caller's address as the ClientAddress middleware resolved
