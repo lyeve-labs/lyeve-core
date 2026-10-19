@@ -254,3 +254,28 @@ func TestDeviceLogin_ExchangeLinesCarryTheSessionsTenant(t *testing.T) {
 	assert.Equal(t, "globex", entries["auth.device_login.refused"].TenantID)
 	assert.Equal(t, "globex", entries["auth.device_login.exchange"].TenantID)
 }
+
+// On a single-tenant install the bootstrap admin is homed in no tenant, and
+// its sessions act in the implicit one. A device it approves signs in there,
+// so the device history row and its failed record go where the account reads
+// its history, never under an empty tenant.
+func TestDeviceLogin_SingleTenantExchangeRecordsUnderTheImplicitTenant(t *testing.T) {
+	lines := captureLines(t)
+	devices := &failingRiskAssessor{}
+	rg := newTokenRig(t, WithDeviceRiskAssessor(devices))
+	_, session := rg.userIn("", "admin")
+	const device = "203.0.113.62:5000"
+	started := rg.startDevice(device)
+	rec := rg.do(tokenCall{method: http.MethodPost, path: "/api/admin/auth/device/" + started.UserCode + "/approve", bearer: session,
+		body: map[string]any{"password": tokenTestPassword}})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	lines()
+	code, body := rg.pollDevice(started.DeviceCode, device)
+	require.Equal(t, http.StatusOK, code, body)
+	line := requireLine(t, lines(), "failed to record device login")
+	assert.Equal(t, "default", line.attrs["tenant_id"])
+	devices.mu.Lock()
+	defer devices.mu.Unlock()
+	assert.Equal(t, []string{"default"}, devices.tenants, "the device history row is the implicit tenant's")
+}

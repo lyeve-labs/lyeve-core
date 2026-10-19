@@ -580,9 +580,15 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 	// The session starts on a device and an address the account may never
 	// have used, so the device risk history hears of it as it hears of a
 	// password login. The device may poll on another tenant's domain, so the
-	// record and its failure go under the session's tenant.
+	// record and its failure go under the tenant the session acts in. On a
+	// single-tenant install a session with no tenant acts in the implicit one,
+	// which is where the account reads its history.
 	if ra := h.auth.deviceRiskAssessor; ra != nil {
-		sessionCtx := accountContext(ctx, tenant)
+		sessionTenant := tenant
+		if sessionTenant == "" && !h.multiTenant {
+			sessionTenant = apimw.ImplicitTenant
+		}
+		sessionCtx := accountContext(ctx, sessionTenant)
 		if err := ra.RecordLogin(sessionCtx, user.ID, collectFingerprint(r), true); err != nil {
 			slog.WarnContext(sessionCtx, "failed to record device login", "err", err)
 		}
