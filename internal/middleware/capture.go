@@ -3,6 +3,7 @@ package middleware
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -10,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
+
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 )
 
@@ -58,6 +62,25 @@ func RequestCaptureWithholding(sink observability.CaptureSink, withholds func(*h
 	return RequestCaptureWithPolicy(sink, withholds, nil)
 }
 
+// captureReadFailed answers a request whose body could not be read whole.
+// The handler is never served part of a body: it would parse what arrived and
+// blame the client for a malformed request, and nothing would say why.
+func captureReadFailed(w http.ResponseWriter, r *http.Request, read int, err error) {
+	slog.WarnContext(r.Context(), "request capture: body read failed",
+		"request_id", chimw.GetReqID(r.Context()),
+		"path", r.URL.Path,
+		"method", r.Method,
+		"bytes_read", read,
+		"err", err,
+	)
+	var limit *http.MaxBytesError
+	if errors.As(err, &limit) {
+		tooLarge(w, r, limit.Limit)
+		return
+	}
+	httpx.ErrorReq(w, r, http.StatusBadRequest, "request body could not be read")
+}
+
 // RequestCaptureWithPolicy is RequestCaptureWithholding with a policy that
 // decides, once the handler has run and the tenant is known, whether the
 // request is stored and for how long. A nil policy stores every request for
@@ -83,7 +106,8 @@ func RequestCaptureWithPolicy(sink observability.CaptureSink, withholds func(*ht
 				limited := io.LimitReader(r.Body, captureMaxBody+1)
 				fullBody, readErr := io.ReadAll(limited)
 				if readErr != nil {
-					slog.Debug("request capture: body read failed", "err", readErr)
+					captureReadFailed(w, r, len(fullBody), readErr)
+					return
 				}
 				if len(fullBody) > captureMaxBody {
 					reqBody = fullBody[:captureMaxBody]
