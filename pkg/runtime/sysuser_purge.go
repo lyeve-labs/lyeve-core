@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -40,7 +41,7 @@ func deleteSysUsersRows(ctx context.Context, q core.Querier, slug string) error 
 	if err != nil {
 		return fmt.Errorf("sys_users purge: %w", err)
 	}
-	slog.DebugContext(ctx, "sys_users purge rows affected",
+	slog.DebugContext(logging.ContextAbout(ctx, slug), "sys_users purge rows affected",
 		"slug", slug, "rows", tag.RowsAffected)
 	return nil
 }
