@@ -76,7 +76,7 @@ type MigrationTree struct {
 // granted caps before delegating to the real engine host. The grant is the
 // host capability policy's entry for the plugin narrowed by its declaration,
 // or the declaration alone when the policy has no entry. A declaration does
-// not narrow the role capabilities in CapRoles.
+// not narrow the role capabilities in CapRoles, nor CapSessionSign.
 //
 // CapDBWrite implies CapDBRead.
 // A plugin that registers via RegisterPlugin declares nothing, so it gets the
@@ -123,11 +123,11 @@ const (
 	// configuration.
 	CapConfigSectionsRead // read every registered configuration section (ConfigSections)
 
-	// Each capability from here to CapAll appoints a plugin to supply a host
-	// role, a service the engine and every other plugin use, through the
-	// role's registrar on ScopedHost. Without it the registrar refuses a
-	// registration and a clear alike, so no other plugin can replace the
-	// service or take it away.
+	// Each capability from here to CapUserProvisioner appoints a plugin to
+	// supply a host role, a service the engine and every other plugin use,
+	// through the role's registrar on ScopedHost. Without it the registrar
+	// refuses a registration and a clear alike, so no other plugin can
+	// replace the service or take it away.
 
 	// CapPermissionChecker grants RegisterPermissionChecker. The checker
 	// decides every access rule on the install.
@@ -151,12 +151,19 @@ const (
 	// accounts at single sign-on.
 	CapUserProvisioner // set the single sign-on user provisioner
 
+	// CapSessionSign grants SignSessionToken: a session for any active
+	// account, which is a sign-in as that account. Only the plugins whose job
+	// is sign-in hold it. Like a role it comes from the policy entry alone,
+	// because a declaration written before signing had a capability would
+	// otherwise take sign-in from the plugin that serves it.
+	CapSessionSign // sign a session for an account (SignSessionToken)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead | CapRoles
+		CapConfigSectionsRead | CapRoles | CapSessionSign
 
 	// CapRoles is every capability that does nothing but appoint a plugin to
 	// a host role. A declaration narrows what a plugin reaches and never

@@ -235,6 +235,8 @@ func capName(c Capability) string {
 		return "CapStorage"
 	case CapUserProvisioner:
 		return "CapUserProvisioner"
+	case CapSessionSign:
+		return "CapSessionSign"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -411,7 +413,13 @@ func (h *ScopedHost) Tracer(name string) trace.Tracer {
 // while non-sensitive providers pass through unconditionally.
 
 // SignSessionToken forwards to inner if it implements SessionTokenSigner.
+// Denied without CapSessionSign, because the session it signs acts as the
+// account it names.
 func (h *ScopedHost) SignSessionToken(ctx context.Context, userID uuid.UUID, email string, roles []string) (string, error) {
+	if !h.has(CapSessionSign) {
+		h.warnDenied("SignSessionToken", "", CapSessionSign)
+		return "", ErrCapDenied
+	}
 	if s, ok := h.inner.(SessionTokenSigner); ok {
 		return s.SignSessionToken(ctx, userID, email, roles)
 	}
