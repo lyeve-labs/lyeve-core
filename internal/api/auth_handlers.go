@@ -194,7 +194,11 @@ func (h *AuthHandler) warnIfTenantMissing(ctx context.Context, tenant, email str
 	if h.tenantValidator(ctx, tenant) {
 		return
 	}
-	slog.WarnContext(ctx, "account is scoped to a tenant that is not on the roster",
+	// The line is about the account, so it goes under the tenant the account
+	// signs in to. A host whose tenant differs, such as one mapped to the
+	// default tenant, would otherwise show that tenant's admins the account's
+	// digest and tenant.
+	slog.WarnContext(accountContext(ctx, tenant), "account is scoped to a tenant that is not on the roster",
 		"subject_ref", compliance.SubjectRef(email), "tenant", tenant,
 		"hint", "every tenant-scoped read will return nothing; register the tenant or re-scope the account")
 }
@@ -542,6 +546,12 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The lines below are about the account behind the challenge. On a host
+	// that names no tenant of its own, such as one mapped to the default
+	// tenant, the request's tenant can be another, so they go under the
+	// tenant the challenge was issued for.
+	logCtx := accountContext(r.Context(), claims.TenantID)
+
 	// Challenge single-use enforcement
 	// Reject replayed challenges: if this token's jti has already been
 	// consumed by a successful MFA verification, treat it as expired.
@@ -550,7 +560,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	if claims.ID != "" {
 		used, jerr := h.mfaLockoutChecker.IsJTIUsed(r.Context(), claims.ID)
 		if jerr != nil {
-			slog.WarnContext(r.Context(), "mfa challenge replay state unreadable, refusing the challenge", "err", jerr)
+			slog.WarnContext(logCtx, "mfa challenge replay state unreadable, refusing the challenge", "err", jerr)
 		}
 		if used || jerr != nil {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeChallengeExpired, nil)
@@ -575,7 +585,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	// the outage lasts.
 	locked, lerr := h.mfaLockoutChecker.CheckMFALockout(r.Context(), userID)
 	if lerr != nil {
-		slog.WarnContext(r.Context(), "mfa lockout check failed, failing closed", "err", lerr, "user_id", userID)
+		slog.WarnContext(logCtx, "mfa lockout check failed, failing closed", "err", lerr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
 	}
@@ -585,7 +595,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	}
 	exhausted, cerr := h.mfaLockoutChecker.CheckChallengeLimit(r.Context(), challengeHash)
 	if cerr != nil {
-		slog.WarnContext(r.Context(), "mfa challenge limit check failed, failing closed", "err", cerr, "user_id", userID)
+		slog.WarnContext(logCtx, "mfa challenge limit check failed, failing closed", "err", cerr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
 	}
@@ -597,7 +607,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	// one of the allowed attempts. Done before TOTP verification so
 	// the attempt is counted regardless of the outcome.
 	if rerr := h.mfaLockoutChecker.RecordChallengeAttempt(r.Context(), challengeHash); rerr != nil {
-		slog.WarnContext(r.Context(), "failed to record mfa challenge attempt", "err", rerr, "user_id", userID)
+		slog.WarnContext(logCtx, "failed to record mfa challenge attempt", "err", rerr, "user_id", userID)
 	}
 
 	encSecret, _, err := h.mfaStore.GetEnabled(r.Context(), userID)
@@ -606,7 +616,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		slog.WarnContext(r.Context(), "mfa secret read failed", "err", err, "user_id", userID)
+		slog.WarnContext(logCtx, "mfa secret read failed", "err", err, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeMFAStoreError, nil)
 		return
 	}
@@ -619,7 +629,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	outcome, terr := acceptTOTP(r.Context(), h.mfaStore, userID, plainSecret, body.Code)
 	if terr != nil {
-		slog.WarnContext(r.Context(), "mfa code check failed, failing closed", "err", terr, "user_id", userID)
+		slog.WarnContext(logCtx, "mfa code check failed, failing closed", "err", terr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
 	}
@@ -636,7 +646,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		// spend that cannot be written refuses the sign-in.
 		found, spendErr := h.mfaStore.ConsumeBackupCode(r.Context(), userID, codeHash)
 		if spendErr != nil {
-			slog.WarnContext(r.Context(), "mfa recovery code spend failed, failing closed", "err", spendErr, "user_id", userID)
+			slog.WarnContext(logCtx, "mfa recovery code spend failed, failing closed", "err", spendErr, "user_id", userID)
 			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 			return
 		}
@@ -644,7 +654,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 			// Record the user-level failure so repeated bad codes
 			// trigger per-user lockout.
 			if rerr := h.mfaLockoutChecker.RecordMFAFailure(r.Context(), userID); rerr != nil {
-				slog.WarnContext(r.Context(), "failed to record mfa failure", "err", rerr, "user_id", userID)
+				slog.WarnContext(logCtx, "failed to record mfa failure", "err", rerr, "user_id", userID)
 			}
 			respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeMFAInvalidCode, nil)
 			return
@@ -656,7 +666,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	if claims.ID != "" {
 		won, merr := h.mfaLockoutChecker.MarkJTIUsed(r.Context(), claims.ID)
 		if merr != nil {
-			slog.WarnContext(r.Context(), "mfa challenge spend failed, failing closed", "err", merr, "user_id", userID)
+			slog.WarnContext(logCtx, "mfa challenge spend failed, failing closed", "err", merr, "user_id", userID)
 			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 			return
 		}
