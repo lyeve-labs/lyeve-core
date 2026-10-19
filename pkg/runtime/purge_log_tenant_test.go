@@ -58,7 +58,9 @@ func TestKernelPurge_LinesAboutAnotherTenantCarryNoTenant(t *testing.T) {
 		// At an install-wide Debug the lines are all there, with no tenant.
 		levels.SetDefaultLevel(slog.LevelDebug)
 		purge()
-		lines := ring.Snapshot(nil, 0)
+		// slog.Default is global, so the ring may also hold a line another
+		// goroutine wrote. Only the lines about globex are counted.
+		lines := ring.Snapshot(func(e logstream.Entry) bool { return e.Attrs["slug"] == other }, 0)
 		require.Len(t, lines, 1+len(coreOwnedTenantTables), "every purge line is still logged")
 		for _, e := range lines {
 			assert.Empty(t, e.TenantID, "%s: a line about globex is stamped %q", e.Message, e.TenantID)
