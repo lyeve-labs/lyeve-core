@@ -1681,3 +1681,79 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 		t.Fatalf("family with no version: status = %d, want 401", rr.Code)
 	}
 }
+
+// TOKEN: second factor
+
+// tokenRequest posts the right password for user@test.com to the content
+// API's token route.
+func tokenRequest(t *testing.T, h *AuthHandler) *httptest.ResponseRecorder {
+	t.Helper()
+	body := makeLoginBody("user@test.com", "correct-horse-battery-staple")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Token(rr, req)
+	return rr
+}
+
+func tokenTestUsers(t *testing.T) *fakeUserStore {
+	t.Helper()
+	hash, _ := auth.HashPassword("bcrypt", "correct-horse-battery-staple")
+	return &fakeUserStore{
+		byEmail: map[string]*domain.User{
+			"user@test.com": {ID: uuid.New(), Email: "user@test.com", PasswordHash: hash},
+		},
+	}
+}
+
+func TestToken_MFAEnrolledAccountGetsNoSessionToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &mfaEnrolledStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	resp := decodeAuthResponse(t, rr)
+	if _, ok := resp["token"]; ok {
+		t.Fatalf("a password alone must not become a session for an enrolled account: %v", resp)
+	}
+	if mfa, _ := resp["mfa_required"].(bool); !mfa {
+		t.Fatalf("expected mfa_required, got status %d and %v", rr.Code, resp)
+	}
+	challenge, _ := resp["challenge_token"].(string)
+	claims, err := auth.Parse("secret", challenge)
+	if err != nil || !claims.MFAPending {
+		t.Fatalf("challenge token does not parse as a pending challenge: %v", err)
+	}
+}
+
+func TestToken_MFAStoreErrorRefusesTheToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &failingMFAStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: an unreadable factor store must fail closed", rr.Code, http.StatusUnauthorized)
+	}
+	if _, ok := decodeAuthResponse(t, rr)["token"]; ok {
+		t.Fatal("a token was issued while the factor store could not be read")
+	}
+}
+
+func TestToken_AccountWithoutAFactorStillGetsAToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &fakeMFAStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%q", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := decodeAuthResponse(t, rr)
+	if tok, _ := resp["token"].(string); tok == "" {
+		t.Fatalf("no token for an account with no factor enrolled: %v", resp)
+	}
+	if _, ok := resp["mfa_required"]; ok {
+		t.Fatalf("an account with no factor was challenged: %v", resp)
+	}
+}

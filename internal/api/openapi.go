@@ -426,6 +426,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"post": {
 			Tags:        []string{"Content API / Auth"},
 			Summary:     "Obtain a Bearer token",
+			Description: "Returns `mfa_required: true` and a `challenge_token` in place of a token when the user has MFA enabled. Exchange the challenge for a session via `/api/admin/auth/mfa-verify`.",
 			RequestBody: jsonBody(map[string]any{"email": "user@example.com", "password": "changeme"}),
 			Responses:   map[string]any{"200": ok200, "401": err401},
 		},
