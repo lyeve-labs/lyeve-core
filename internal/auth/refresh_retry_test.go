@@ -43,8 +43,11 @@ func TestRefreshTokenStore_Rotate_RetryWithinWindowKeepsFamily(t *testing.T) {
 	rotated, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
 	require.NoError(t, err)
 
+	again, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err, "the first retry within the window is not replay")
+	require.Equal(t, rotated.RefreshToken, again.RefreshToken)
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
-	require.ErrorIs(t, err, auth.ErrTokenRotated, "a retry within the window is not replay")
+	require.ErrorIs(t, err, auth.ErrTokenRotated, "a later retry within the window is not replay")
 
 	_, err = store.Rotate(ctx, rotated.RefreshToken, 5*time.Minute)
 	require.NoError(t, err, "the successor must still rotate after the retry")
@@ -61,7 +64,7 @@ func TestRefreshTokenStore_Rotate_RetryAfterWindowIsReuse(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
-	require.ErrorIs(t, err, auth.ErrTokenRotated)
+	require.NoError(t, err)
 	closeRetryWindow(t, backend, "cms-test", issued.FamilyID)
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
 	require.ErrorIs(t, err, auth.ErrTokenReuse, "the window has closed")
@@ -122,4 +125,58 @@ func TestRefreshTokenStore_Unrotate_KeepsAnOlderTokenReplay(t *testing.T) {
 
 	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
 	require.ErrorIs(t, err, auth.ErrTokenReuse, "a restore must not reopen the window for the token before")
+}
+
+// A client whose refresh answer never arrived holds only the token it sent.
+// Its retry inside the window gets the successor the lost answer carried, so
+// the session goes on, and only once: the successor is not handed out again,
+// and the same token after the window still revokes the family.
+func TestRefreshTokenStore_Rotate_LostAnswerRetryGetsTheSameSuccessor(t *testing.T) {
+	backend := auth.NewMemoryBackend()
+	store := auth.NewRefreshTokenStore(backend, "cms-test")
+	ctx := context.Background()
+
+	issued, err := store.Issue(ctx, "user-1", 5*time.Minute)
+	require.NoError(t, err)
+	lost, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+
+	retried, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err, "the retry of an answer that never arrived ended the session")
+	require.Equal(t, lost.RefreshToken, retried.RefreshToken, "the retry must get the successor the lost answer carried")
+	require.Equal(t, lost.FamilyID, retried.FamilyID)
+	require.Equal(t, "user-1", retried.UserID)
+
+	stored, err := backend.Get(ctx, "cms-test:rt:family:"+issued.FamilyID)
+	require.NoError(t, err)
+	require.NotContains(t, string(stored), lost.RefreshToken, "the backend holds the successor in the clear")
+
+	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.ErrorIs(t, err, auth.ErrTokenRotated, "the successor was handed out twice")
+
+	closeRetryWindow(t, backend, "cms-test", issued.FamilyID)
+	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.ErrorIs(t, err, auth.ErrTokenReuse, "the replaced token after the window is replay")
+	_, err = store.Rotate(ctx, retried.RefreshToken, 5*time.Minute)
+	require.ErrorIs(t, err, auth.ErrFamilyRevoked)
+}
+
+// Only the token the last rotation replaced gets its successor again. A
+// token from an earlier generation is replay, inside the window or not.
+func TestRefreshTokenStore_Rotate_OnlyTheLastReplacedTokenGetsTheSuccessor(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	issued, err := store.Issue(ctx, "user-1", 5*time.Minute)
+	require.NoError(t, err)
+	first, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	second, err := store.Rotate(ctx, first.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+
+	again, err := store.Rotate(ctx, first.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, second.RefreshToken, again.RefreshToken)
+	_, err = store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.ErrorIs(t, err, auth.ErrTokenReuse, "a token two generations back is replay")
 }
