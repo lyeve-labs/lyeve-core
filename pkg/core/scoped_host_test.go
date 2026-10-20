@@ -829,3 +829,76 @@ func TestScopedHost_TenantRegionResolver_ForwardsWithoutACapability(t *testing.T
 		t.Errorf("TenantRegionResolver() on a host with no role = %v, want nil", got)
 	}
 }
+
+// secretStubHost serves every secret it holds, the way the engine's host does.
+type secretStubHost struct {
+	*stubHost
+	vals  map[string]string
+	lists map[string][]string
+}
+
+func (s *secretStubHost) Secret(key string) (string, bool) {
+	v, ok := s.vals[key]
+	return v, ok
+}
+
+func (s *secretStubHost) Secrets(key string) ([]string, bool) {
+	v, ok := s.lists[key]
+	return v, ok
+}
+
+// The session signing secret signs a session for any account on an install
+// that signs with HMAC, so CapConfigSecret alone does not serve it, in any
+// spelling the engine resolves to it. Every other secret still answers.
+func TestScopedHost_SessionKeyNeedsItsOwnCapability(t *testing.T) {
+	inner := &secretStubHost{
+		stubHost: &stubHost{},
+		vals: map[string]string{
+			"jwt_secret": "signing", "JWT_SECRET": "signing", "jwt.secret": "signing",
+			"jwt-secrets": "signing", "encryption_key": "sealing",
+		},
+		lists: map[string][]string{"jwt_secrets": {"signing"}, "JWT_SECRETS": {"signing"}},
+	}
+
+	secretOnly := NewScopedHost(inner, "test", CapConfigSecret)
+	for _, key := range []string{"jwt_secret", "JWT_SECRET", "jwt.secret", "jwt-secrets"} {
+		if v, ok := secretOnly.Secret(key); ok || v != "" {
+			t.Errorf("Secret(%q) served the signing secret without CapSessionKey", key)
+		}
+	}
+	for _, key := range []string{"jwt_secrets", "JWT_SECRETS"} {
+		if v, ok := secretOnly.Secrets(key); ok || v != nil {
+			t.Errorf("Secrets(%q) served the signing secrets without CapSessionKey", key)
+		}
+	}
+	if v, ok := secretOnly.Secret("encryption_key"); !ok || v != "sealing" {
+		t.Errorf("CapConfigSecret no longer serves an ordinary secret: %q, %v", v, ok)
+	}
+
+	keyHolder := NewScopedHost(inner, "test", CapConfigSecret|CapSessionKey)
+	if v, ok := keyHolder.Secret("jwt_secret"); !ok || v != "signing" {
+		t.Errorf("CapSessionKey did not serve jwt_secret: %q, %v", v, ok)
+	}
+	if v, ok := keyHolder.Secrets("jwt_secrets"); !ok || len(v) != 1 {
+		t.Errorf("CapSessionKey did not serve jwt_secrets: %v, %v", v, ok)
+	}
+
+	keyOnly := NewScopedHost(inner, "test", CapSessionKey)
+	if _, ok := keyOnly.Secret("jwt_secret"); ok {
+		t.Error("CapSessionKey without CapConfigSecret served the signing secret")
+	}
+}
+
+// The engine resolves a key it has no field for from the environment after
+// reading '.', '-' and ' ' as '_', so each of those spellings of a credential
+// is as secret as the one with underscores.
+func TestIsSecretKey_EverySpellingTheResolverReads(t *testing.T) {
+	for _, key := range []string{"jwt.secret", "jwt-secret", " jwt_secret ", "database.url", "Encryption-Key", "nats.token"} {
+		if !IsSecretKey(key) {
+			t.Errorf("IsSecretKey(%q) = false, but the engine resolves it to a credential", key)
+		}
+	}
+	if IsSecretKey("base.url") {
+		t.Error("base.url is not credential material")
+	}
+}

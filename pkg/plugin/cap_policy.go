@@ -21,11 +21,11 @@ import (
 // what a plugin supplies rather than what it reaches, the table gives each to
 // one plugin, and a declaration written before a role had a capability would
 // otherwise take the role from the plugin that supplies it. core.CapSessionSign
-// comes from the entry alone for the same reason: the sign-in plugins declared
-// their reach before signing had a capability.
+// and core.CapSessionKey come from the entry alone for the same reason: the
+// plugins that hold them declared their reach before either had a capability.
 func CapPolicy(name string) core.Capability {
 	if p, ok := capPolicyEntry(name); ok {
-		return p & (PluginCaps(name) | core.CapRoles | core.CapSessionSign)
+		return p & (PluginCaps(name) | core.CapRoles | core.CapSessionSign | core.CapSessionKey)
 	}
 	if caps, explicit := pluginCapsExplicit(name); explicit {
 		return caps
