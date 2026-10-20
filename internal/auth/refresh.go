@@ -497,12 +497,22 @@ func (s *RefreshTokenStore) saveFamily(ctx context.Context, familyID string, rec
 // and newBytes is the serialized state after mutation. Returns ErrCASFailed when
 // the backend CAS detects a conflicting write (cross-replica race), wrapped
 // so the caller can unwrap with errors.Is.
+//
+// A backend a plugin supplies cannot return ErrCASFailed, because this
+// package is internal, so it reports a lost race with a sentinel of its own.
+// A refusal from a backend that still answers is therefore read as a lost
+// race, and one from a backend that does not is ErrBackendUnavailable.
 func (s *RefreshTokenStore) casSave(ctx context.Context, familyID string, oldBytes, newBytes []byte, ttl time.Duration) error {
 	if cas, ok := s.backend.(CASBackend); ok {
-		if err := cas.CompareAndSet(ctx, s.familyKey(familyID), oldBytes, newBytes, ttl); err != nil {
-			return err // may be ErrCASFailed
+		err := cas.CompareAndSet(ctx, s.familyKey(familyID), oldBytes, newBytes, ttl)
+		switch {
+		case err == nil, errors.Is(err, ErrCASFailed):
+			return err
+		case s.unreachable(ctx, err):
+			return fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
+		default:
+			return fmt.Errorf("%w: %w", ErrCASFailed, err)
 		}
-		return nil
 	}
 	// Backend doesn't support CAS: fall back to plain Set.
 	return s.backend.Set(ctx, s.familyKey(familyID), newBytes, ttl)
