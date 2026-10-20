@@ -330,3 +330,32 @@ func TestScopedHost_GrantedSignSessionToken_Signs(t *testing.T) {
 		t.Fatalf("a granted signing logged %d denial(s)", len(recs))
 	}
 }
+
+func (h *signingHost) MFAChallengeAccount(context.Context, string) (MFAChallengeAccount, error) {
+	return MFAChallengeAccount{Email: "user@example.com"}, nil
+}
+
+func (h *signingHost) CompleteMFAChallenge(context.Context, string) (string, error) {
+	h.signed++
+	return "session-token", nil
+}
+
+// Completing a challenge signs a session, so it takes the signing grant.
+func TestScopedHost_MFAChallengeCompletionNeedsTheSigningGrant(t *testing.T) {
+	h := &signingHost{capturingHost: newCapturingHost()}
+	denied := NewScopedHost(h, "webhook", CapDBWrite|CapRawDB|CapRoutes|CapConfigSecret|CapHooks)
+	if _, err := denied.MFAChallengeAccount(context.Background(), "challenge"); !errors.Is(err, ErrCapDenied) {
+		t.Fatalf("MFAChallengeAccount err = %v, want ErrCapDenied", err)
+	}
+	if tok, err := denied.CompleteMFAChallenge(context.Background(), "challenge"); !errors.Is(err, ErrCapDenied) || tok != "" || h.signed != 0 {
+		t.Fatalf("CompleteMFAChallenge token %q, err %v, signed %d: want a denial", tok, err, h.signed)
+	}
+
+	granted := NewScopedHost(h, "mfa", CapDBWrite|CapRoutes|CapSessionSign)
+	if a, err := granted.MFAChallengeAccount(context.Background(), "challenge"); err != nil || a.Email != "user@example.com" {
+		t.Fatalf("MFAChallengeAccount %+v, err %v: want the engine's answer", a, err)
+	}
+	if tok, err := granted.CompleteMFAChallenge(context.Background(), "challenge"); err != nil || tok != "session-token" || h.signed != 1 {
+		t.Fatalf("CompleteMFAChallenge token %q, err %v, signed %d: want the engine's token, signed once", tok, err, h.signed)
+	}
+}

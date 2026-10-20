@@ -68,3 +68,36 @@ type SessionTokenSigner interface {
 // ErrAccountInactive is SignSessionToken's answer for a disabled or expired
 // account.
 var ErrAccountInactive = errors.New("account is disabled or expired")
+
+// MFAChallengeCompleter finishes a password sign-in's second-factor challenge
+// with a factor a plugin verified itself, such as a passkey. It applies the
+// rules the engine's own code completion applies: the challenge is single use
+// across every completion, it completes only on a host where its sign-in
+// could have started, and the session acts in the challenge's tenant with
+// the roles the account holds there.
+type MFAChallengeCompleter interface {
+	// MFAChallengeAccount names the account a challenge was issued for, so the
+	// caller can verify that account's factor. It spends nothing. A challenge
+	// that is malformed, expired, already spent, or for another tenant than
+	// the request's mapped domain is refused with ErrMFAChallengeInvalid.
+	MFAChallengeAccount(ctx context.Context, challengeToken string) (MFAChallengeAccount, error)
+
+	// CompleteMFAChallenge spends the challenge and signs the session. Call it
+	// only after the account's factor was verified. Of two calls for one
+	// challenge only one signs, and the other gets ErrMFAChallengeInvalid. A
+	// disabled or expired account gets ErrAccountInactive. Any other error is
+	// state the engine could not read or write, and nothing was signed.
+	CompleteMFAChallenge(ctx context.Context, challengeToken string) (string, error)
+}
+
+// MFAChallengeAccount is the account an MFA challenge was issued for.
+type MFAChallengeAccount struct {
+	UserID   uuid.UUID
+	Email    string
+	TenantID string
+}
+
+// ErrMFAChallengeInvalid is the MFAChallengeCompleter answer for a challenge
+// that cannot be completed. A sign-in route answers it as a failed
+// credential.
+var ErrMFAChallengeInvalid = errors.New("mfa challenge is invalid, expired or spent")
