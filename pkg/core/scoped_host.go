@@ -348,10 +348,20 @@ func (h *ScopedHost) ContentPage(ctx context.Context, schemaName string, after u
 	return cr.ContentPage(ctx, schemaName, after, limit)
 }
 
+// FlushContentCache forwards a content cache flush to the inner host.
+// Implements ContentCacheFlusher. A host with no content caches has nothing
+// to drop.
+func (h *ScopedHost) FlushContentCache(ctx context.Context, schemaName string) {
+	if f, ok := h.inner.(ContentCacheFlusher); ok {
+		f.FlushContentCache(ctx, schemaName)
+	}
+}
+
 var (
 	_ ContentWriter          = (*ScopedHost)(nil)
 	_ ContentStatusProjector = (*ScopedHost)(nil)
 	_ ContentReader          = (*ScopedHost)(nil)
+	_ ContentCacheFlusher    = (*ScopedHost)(nil)
 )
 
 // Config returns the host configuration. Without CapConfigSecret,

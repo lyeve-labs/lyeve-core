@@ -122,6 +122,16 @@ type ContentWriter interface {
 	SetContentStatus(ctx context.Context, schemaName string, id uuid.UUID, status string) error
 }
 
+// ContentCacheFlusher drops the content read caches after a write to
+// schemaName's table, on every replica. Only writes through ContentWriter
+// flush the lists and rows the read routes cache, so a plugin that writes a
+// content table with its own SQL, such as a batch import, calls it once each
+// write has committed. Until then a list read before the write keeps serving
+// the old rows for the cache's lifetime.
+type ContentCacheFlusher interface {
+	FlushContentCache(ctx context.Context, schemaName string)
+}
+
 // ContentReader pages through a schema's generated content table, every row
 // the tenant on ctx holds and every status, ordered by id. A soft-deleted row
 // is not read, since it is gone for every other reader too. It is for

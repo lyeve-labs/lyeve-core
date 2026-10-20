@@ -30,6 +30,14 @@ func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uu
 	return nil
 }
 
+// FlushContentCache drops the content read caches after a plugin wrote a
+// content table with its own SQL. Implements core.ContentCacheFlusher.
+func (h *engineHost) FlushContentCache(ctx context.Context, schemaName string) {
+	if h.contentStore != nil {
+		h.contentStore.FlushWritten(ctx, schemaName)
+	}
+}
+
 // DeleteContent mirrors a content delete into the per-schema table, treating a
 // missing row as success: the mirror is a projection, so deleting an
 // already-absent row is not an error. Implements core.ContentWriter.
