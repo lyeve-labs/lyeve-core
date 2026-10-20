@@ -103,3 +103,34 @@ func TestPresentationRoute_NeverSendsNullLinks(t *testing.T) {
 		})
 	}
 }
+
+// ceilingLinks is a licensing implementation that names a link for each
+// ceiling in its map and none for any other.
+type ceilingLinks map[string]string
+
+func (c ceilingLinks) CeilingURL(cap string) string { return c[cap] }
+
+func TestCeilingURL_ReturnsTheLinkTheImplementationNames(t *testing.T) {
+	m := ceilingLinks{
+		"example.items": "https://shop.example.com/pricing?utm_campaign=example.items",
+		"example.seats": "/admin/settings/license",
+	}
+	assert.Equal(t, "https://shop.example.com/pricing?utm_campaign=example.items", licensing.CeilingURL(m, "example.items"))
+	assert.Equal(t, "/admin/settings/license", licensing.CeilingURL(m, "example.seats"))
+	assert.Empty(t, licensing.CeilingURL(m, "example.other"), "a ceiling the implementation names no link for")
+}
+
+// The engine writes no destination of its own, so a build whose licensing
+// cannot answer, or links none, refuses with no link at all.
+func TestCeilingURL_ImplementationThatNamesNoneGivesNoLink(t *testing.T) {
+	assert.Empty(t, licensing.CeilingURL(nil, "example.items"))
+	assert.Empty(t, licensing.CeilingURL(struct{}{}, "example.items"))
+}
+
+// A console renders the link, so it passes the rule a presentation link
+// passes, whatever the implementation sent.
+func TestCeilingURL_DropsALinkThatIsNotHTTPSOrAConsolePath(t *testing.T) {
+	for _, u := range []string{"javascript:alert(1)", "data:text/html,hi", "http://example.com/", "https://", "//evil.example.com/", `/\evil.example.com`} {
+		assert.Empty(t, licensing.CeilingURL(ceilingLinks{"example.items": u}, "example.items"), u)
+	}
+}

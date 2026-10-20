@@ -21,16 +21,21 @@ func (h *engineHost) AdminSeatGuard() core.AdminSeatGuard {
 	}
 	return db.NewAdminSeatGuard(db.NewUserStore(h.pool),
 		func() int { return h.Capabilities().Limit(core.CapAdminSeats) },
-		func() core.MembershipReader {
-			if b := h.seatMembers.Load(); b != nil {
-				return b.reader
-			}
-			return nil
-		})
+		h.membershipReader)
+}
+
+// membershipReader is the running membership reader, or nil before
+// SetAdminSeatMembers or on an install with none.
+func (h *engineHost) membershipReader() core.MembershipReader {
+	if b := h.seatMembers.Load(); b != nil {
+		return b.reader
+	}
+	return nil
 }
 
 // SetAdminSeatMembers wires the running membership reader into the admin
-// seat guard, so an account holding a seat only through a membership counts.
+// seat guard, so an account holding a seat only through a membership counts,
+// and into the session signer, so a home membership sets a session's roles.
 // Nil clears it.
 func (h *engineHost) SetAdminSeatMembers(m core.MembershipReader) {
 	h.seatMembers.Store(&membershipBox{reader: m})

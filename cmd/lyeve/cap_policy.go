@@ -24,6 +24,15 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //   - core.CapConfigSectionsRead, because the plugin assembles a
 //     configuration bundle. A section exports its owner's secrets under the
 //     sealer its caller supplies, so only that plugin holds it.
+//   - a role capability (core.CapRoles), because the plugin supplies that
+//     host role: permissions the permission checker, email the email sender,
+//     localization the content localizer, content the entry writer and the
+//     revision store, storage the storage backend, scim the user
+//     provisioner. Each is held by that one plugin, and the role's registrar
+//     refuses every other. The schema engine and the flow roles need
+//     core.CapSchema and core.CapFlowRegistry, which schema and flow hold.
+//   - core.CapSessionSign, because the plugin signs a user in: magic-link,
+//     mfa, oauth and saml. A session it signs acts as the account it names.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
@@ -35,12 +44,12 @@ var capPolicy = map[string]core.Capability{
 	"cache":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"captcha":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"cluster":              core.CapDBWrite | core.CapRawDB | core.CapRoutes,
-	"content":              core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapRoutes | core.CapHooks,
+	"content":              core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapRoutes | core.CapHooks | core.CapContentEntryWriter | core.CapRecordRevisionStore,
 	"cron":                 core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"data-export":          core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"data-residency":       core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"device-fingerprint":   core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"email":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
+	"email":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapEmailSender,
 	"error-tracking":       core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"events":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
 	"flow":                 core.CapDBRead | core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapFlowRegistry,
@@ -48,16 +57,16 @@ var capPolicy = map[string]core.Capability{
 	"graphql":              core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
 	"grpc":                 core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapConfigSecret,
 	"idempotency":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
-	"localization":         core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapHooks,
+	"localization":         core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapHooks | core.CapContentLocalizer,
 	"logging":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
-	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"messagebroker":        core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"password-reset":       core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
-	"permissions":          core.CapDBWrite | core.CapRawDB | core.CapRoutes,
+	"permissions":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapPermissionChecker,
 	"pii-mask":             core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"profiler":             core.CapRoutes,
 	"query-monitor":        core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
@@ -66,11 +75,11 @@ var capPolicy = map[string]core.Capability{
 	"recommendations":      core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"request-capture":      core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"review":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
-	"saml":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"saml":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign,
 	"schema":               core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSectionsRead,
-	"scim":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes,
+	"scim":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapUserProvisioner,
 	"search":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"storage":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"storage":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapStorage,
 	"synthetic-monitoring": core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"telemetry":            core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapMetrics,
 	"waf":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes,

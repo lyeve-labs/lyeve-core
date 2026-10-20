@@ -13,11 +13,13 @@ import (
 // one.
 type validatorHost struct {
 	*stubHost
+	HostRoleRegistry
 	validator FlowDefinitionValidator
 }
 
-func (h *validatorHost) RegisterFlowDefinitionValidator(v FlowDefinitionValidator) {
+func (h *validatorHost) RegisterFlowDefinitionValidator(v FlowDefinitionValidator) error {
 	h.validator = v
+	return nil
 }
 func (h *validatorHost) FlowDefinitionValidator() FlowDefinitionValidator { return h.validator }
 

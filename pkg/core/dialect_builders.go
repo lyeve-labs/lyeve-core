@@ -77,20 +77,33 @@ func InsertDoNothing(dialectName string, table string, cols []string, conflictOn
 // too long for its column and a NULL in a NOT NULL column all reach the caller
 // as errors, because a write the database rejected is not a row someone else
 // already wrote.
-// A lost deadlock is retried rather than returned. Concurrent callers inserting
-// different rows still contend on MySQL, where the conflict path takes gap
-// locks and one of the pair is asked to restart the transaction. The statement
-// did not commit, so running it again is not a second write: the retry either
-// inserts or meets the duplicate, which is the answer the caller wanted either
-// way. Returning the deadlock instead would make "is this row already there"
-// fail under the concurrency it exists to arbitrate.
+// A lost deadlock is retried rather than returned when the statement is its
+// own transaction. Concurrent callers inserting different rows still contend
+// on MySQL, where the conflict path takes gap locks and one of the pair is
+// asked to restart the transaction. The statement did not commit, so running
+// it again is not a second write: the retry either inserts or meets the
+// duplicate, which is the answer the caller wanted either way.
+//
+// Inside a caller's transaction, a Tx passed as q or a serialized write on
+// ctx, the statement runs once and a deadlock is returned as it is, which
+// sqlx.IsRetryableTxError still recognizes. The deadlock has already ended
+// that transaction. MySQL and SQL Server roll it back whole, so a retry would
+// commit on its own outside it, and Postgres refuses every statement after
+// it. Only the caller can start the whole transaction over.
 func InsertIfAbsent(ctx context.Context, q Querier, dialectName, table string, cols, conflictOn []string, args ...any) (bool, error) {
+	stmt := InsertDoNothing(dialectName, table, cols, conflictOn)
 	var tag CommandTag
-	err := sqlx.RetryOnTxConflict(ctx, "insert_if_absent", func() error {
+	exec := func() error {
 		var execErr error
-		tag, execErr = q.Exec(ctx, InsertDoNothing(dialectName, table, cols, conflictOn), args...)
+		tag, execErr = q.Exec(ctx, stmt, args...)
 		return execErr
-	})
+	}
+	var err error
+	if _, isTx := q.(Tx); isTx || InTransaction(ctx) {
+		err = exec()
+	} else {
+		err = sqlx.RetryOnTxConflict(ctx, "insert_if_absent", exec)
+	}
 	if err != nil {
 		if isDuplicateKey(err) {
 			return false, nil

@@ -126,7 +126,8 @@ func TestRouteRateLimit_MountedRouteAdmitsItsDeclaredBurst(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 3, admittedCount)
-	require.NoError(t, l.Verify(), "a declared limit fills the per-route gap the verifier reports")
+	require.NoError(t, l.Verify())
+	assert.NotContains(t, l.GeneralRoutes(), "POST:/api/v1/probe/ping", "a declared limit takes the route off the general limit")
 }
 
 // A declaration the limiter skips is named at boot, so the route's author

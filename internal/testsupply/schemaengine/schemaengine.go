@@ -8,7 +8,9 @@ package schemaengine
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -75,11 +77,12 @@ func (e *Engine) createTable(ctx context.Context, sc *core.Schema) error {
 	return e.createTableOn(ctx, querierExec{q}, sc)
 }
 
-// execer is the one thing table creation needs, so the engine connection and
-// the request querier can both satisfy it. Each reports a different result
-// type, and none of this reads one.
+// execer is what table creation needs, so the engine connection and the
+// request querier can both satisfy it: a statement, and a count read back
+// to tell whether a table is there.
 type execer interface {
 	exec(ctx context.Context, query string) error
+	count(ctx context.Context, query string) (int, error)
 }
 
 type engineConnExec struct{ conn *sql.Conn }
@@ -89,11 +92,58 @@ func (e engineConnExec) exec(ctx context.Context, query string) error {
 	return err
 }
 
+func (e engineConnExec) count(ctx context.Context, query string) (int, error) {
+	var n int
+	err := e.conn.QueryRowContext(ctx, query).Scan(&n)
+	return n, err
+}
+
 type querierExec struct{ q core.Querier }
 
 func (e querierExec) exec(ctx context.Context, query string) error {
 	_, err := e.q.Exec(ctx, query)
 	return err
+}
+
+func (e querierExec) count(ctx context.Context, query string) (int, error) {
+	row, err := e.q.QueryRow(ctx, query)
+	if err != nil {
+		return 0, err
+	}
+	var n int
+	err = row.Scan(&n)
+	return n, err
+}
+
+// pivotKeyName names the key on a pivot's column. It is a digest, so it fits
+// every dialect whatever the pivot is called, and differs per pivot.
+func pivotKeyName(pivot, column string) string {
+	sum := sha256.Sum256([]byte(pivot + "." + column))
+	return "fk_" + hex.EncodeToString(sum[:8])
+}
+
+// pivotPresent reports whether table is there with both key columns,
+// the way the content store asks. Names reach it from validated type names,
+// so it carries them as literals.
+func (e *Engine) pivotPresent(ctx context.Context, q execer, table, aCol, bCol string) (bool, error) {
+	cut := func(name string) string { return name }
+	var query string
+	switch e.host.Dialect() {
+	case "mysql":
+		query = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '%s' AND COLUMN_NAME IN ('%s', '%s')"
+	case "mssql":
+		query = "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'%s', N'U') AND name IN (N'%s', N'%s')"
+	default:
+		cut = func(name string) string {
+			if len(name) > core.PivotNameLimit {
+				return name[:core.PivotNameLimit]
+			}
+			return name
+		}
+		query = "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '%s' AND column_name IN ('%s', '%s')"
+	}
+	n, err := q.count(ctx, fmt.Sprintf(query, cut(table), cut(aCol), cut(bCol)))
+	return n >= 2, err
 }
 
 func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) error {
@@ -206,14 +256,20 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 					"FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE %s",
 					fkCol, e.quote(core.TableName(f.RelationTo)), onDelete))
 			case core.RelManyToMany:
-				pivot := f.RelationThrough
-				if pivot == "" {
-					pivot = core.PivotTableName(sc.Name, f.RelationTo)
-				}
 				a := strings.TrimPrefix(core.TableName(sc.Name), "_") + "_id"
 				b := strings.TrimPrefix(core.TableName(f.RelationTo), "_") + "_id"
 				if a == b {
 					b = "related_" + b
+				}
+				pivot := f.RelationThrough
+				if pivot == "" {
+					var err error
+					pivot, err = core.ResolvePivotTable(sc.Name, f.RelationTo, func(name string) (bool, error) {
+						return e.pivotPresent(ctx, q, name, a, b)
+					})
+					if err != nil {
+						return fmt.Errorf("create table for %s: %w", sc.Name, err)
+					}
 				}
 				// The write path upserts a pivot row with ON CONFLICT on the
 				// pair, so the pair has to carry a unique constraint. Without
@@ -227,15 +283,17 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 					pivotAction = "NO ACTION"
 				}
 				// Table-level keys here too, for the reason given on the
-				// belongs_to above.
+				// belongs_to above. They are named, because MySQL names an
+				// unnamed key after its table, and a long pivot's name plus
+				// "_ibfk_1" passes the 64 characters MySQL allows.
 				pivots = append(pivots, e.createTableSQL(pivot, fmt.Sprintf(
 					"%s %s NOT NULL, %s %s NOT NULL, tenant_id VARCHAR(64), PRIMARY KEY (%s, %s), "+
-						"FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE %s, "+
-						"FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE %s",
+						"CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE %s, "+
+						"CONSTRAINT %s FOREIGN KEY (%s) REFERENCES %s(id) ON DELETE %s",
 					e.quote(a), uuidType, e.quote(b), uuidType,
 					e.quote(a), e.quote(b),
-					e.quote(a), e.quote(core.TableName(sc.Name)), pivotAction,
-					e.quote(b), e.quote(core.TableName(f.RelationTo)), pivotAction)))
+					e.quote(pivotKeyName(pivot, a)), e.quote(a), e.quote(core.TableName(sc.Name)), pivotAction,
+					e.quote(pivotKeyName(pivot, b)), e.quote(b), e.quote(core.TableName(f.RelationTo)), pivotAction)))
 			}
 			continue
 		}

@@ -31,6 +31,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	// Assigns core.PluginMigrate and core.PluginMigrateRollback from its init.
 	_ "github.com/lyeve-labs/lyeve-core/pkg/plugin"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugintest"
 )
 
 // Harness is a reusable 2-tenant integration test environment backed by a
@@ -78,6 +79,7 @@ var pgContainer struct {
 
 func ensureContainer(t *testing.T) {
 	t.Helper()
+	plugintest.SkipDialect(t, "postgres")
 	if pgContainer.ready {
 		return
 	}

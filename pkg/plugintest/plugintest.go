@@ -21,6 +21,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/lyeve-labs/lyeve-core/internal/auth"
+	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -79,6 +81,16 @@ func WithCapabilities(caps core.CapabilitySet) HostOption {
 	}
 }
 
+// WithPermissionChecker registers c as the host's rule engine, the way the
+// plugin that owns the access rules does on the engine host. When not set,
+// PermissionChecker answers the kernel's role-only checker, as an engine with
+// no rule plugin does.
+func WithPermissionChecker(c core.PermissionChecker) HostOption {
+	return func(h *testHost) {
+		h.perms = c
+	}
+}
+
 // dbPool is the minimal interface needed from a database pool.
 // db.DB (internal/db) satisfies this interface.
 type dbPool interface {
@@ -132,10 +144,15 @@ type testHost struct {
 	version string
 	storage core.Storage
 	caps    *core.CapabilitySet
+	perms   core.PermissionChecker
 
 	// configSections is the registry a plugin's Start registers its
 	// configuration section in, as it does on the engine host.
 	configSections core.ConfigSectionRegistry
+
+	// roleHolders records which plugin holds each host role, as the engine
+	// host does, for a scoped host wrapping this one.
+	roleHolders core.HostRoleRegistry
 
 	// Created on first cached read. Several constructors build a testHost
 	// literal, so this cannot be a constructor field.
@@ -152,6 +169,19 @@ var _ core.QueryCacheProvider = (*testHost)(nil)
 // connection by asserting this. A test host that does not satisfy it sends
 // every plugin suite down a different path from the one production takes.
 var _ core.EngineDBConnProvider = (*testHost)(nil)
+
+// A plugin that governs content reads the access rules by asserting this, as
+// it does on the engine host.
+var _ core.PermissionCheckerProvider = (*testHost)(nil)
+
+// PermissionChecker returns the checker WithPermissionChecker registered, or
+// the kernel's role-only checker.
+func (h *testHost) PermissionChecker() core.PermissionChecker {
+	if h.perms != nil {
+		return h.perms
+	}
+	return core.RoleOnlyPermissionChecker{}
+}
 
 // Querier returns a core.Querier backed by the database pool.
 func (h *testHost) Querier(ctx context.Context) core.Querier {
@@ -229,7 +259,10 @@ func (h *testHost) HookPublisher() core.HookPublisher {
 func (h *testHost) Storage() core.Storage { return h.storage }
 
 // SetStorage injects a storage backend for tests (e.g. in-memory memStorage).
-func (h *testHost) SetStorage(s core.Storage) { h.storage = s }
+func (h *testHost) SetStorage(s core.Storage) error {
+	h.storage = s
+	return nil
+}
 
 // Schema returns the configured SchemaEngine, or nil.
 func (h *testHost) Schema() core.SchemaEngine { return h.schema }
@@ -242,7 +275,18 @@ func (h *testHost) Schema() core.SchemaEngine { return h.schema }
 // outright, and every other plugin's suite would run against a host that
 // cannot accept an engine while production can. A double that implements less
 // than the real thing sends every suite down a path production does not take.
-func (h *testHost) RegisterSchemaEngine(e core.SchemaEngine) { h.schema = e }
+func (h *testHost) RegisterSchemaEngine(e core.SchemaEngine) error {
+	h.schema = e
+	return nil
+}
+
+// RegisterOwnedRole implements core.HostRoleOwnerRegistrar, which a scoped
+// host wrapping this one passes every role registration through, as it does
+// on the engine host. Without it an activator over this host would refuse
+// every role a plugin registers.
+func (h *testHost) RegisterOwnedRole(owner string, role core.HostRole, clear bool, set func() error) error {
+	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
+}
 
 // SchemaSource implements core.SchemaSourceProvider, answering the registry
 // the content path reads. It is whatever engine was registered or supplied,
@@ -255,8 +299,10 @@ func (h *testHost) SchemaSource() core.SchemaSource {
 }
 
 var (
-	_ core.SchemaEngineRegistrar = (*testHost)(nil)
-	_ core.SchemaSourceProvider  = (*testHost)(nil)
+	_ core.SchemaEngineRegistrar  = (*testHost)(nil)
+	_ core.SchemaSourceProvider   = (*testHost)(nil)
+	_ core.StorageSetter          = (*testHost)(nil)
+	_ core.HostRoleOwnerRegistrar = (*testHost)(nil)
 )
 
 // Tracer returns a no-op tracer.
@@ -353,7 +399,12 @@ func (h *testHost) Capabilities() core.CapabilitySet {
 	return defaultCapabilities()
 }
 
-func (h *testHost) HasFeature(ctx context.Context, feature string) bool { return true }
+// HasFeature answers from Capabilities, as the engine answers both halves of
+// core.LicenseHost from one license. A test that needs a gate open grants its
+// name through WithCapabilities.
+func (h *testHost) HasFeature(ctx context.Context, feature string) bool {
+	return h.Capabilities().Features[feature]
+}
 
 // RegisterConfigSection implements core.ConfigSectionRegistrar, so a plugin
 // that offers its configuration to a bundle registers it here the way it does
@@ -893,4 +944,48 @@ func (h *testHost) AdminSeatGuard() core.AdminSeatGuard {
 	}
 	return db.NewAdminSeatGuard(db.NewUserStore(pool),
 		func() int { return h.Capabilities().Limit(core.CapAdminSeats) }, nil)
+}
+
+var (
+	_ core.TenantAccountProvider   = (*testHost)(nil)
+	_ core.ProviderWindowProvider  = (*testHost)(nil)
+	_ core.PasswordPolicyValidator = (*testHost)(nil)
+)
+
+// ValidatePassword implements core.PasswordPolicyValidator with the engine's
+// default policy, the one an install runs with no PASSWORD_* setting.
+func (h *testHost) ValidatePassword(password string) error {
+	return auth.CheckPassword(auth.DefaultPasswordPolicy(), password)
+}
+
+// TenantAccounts implements core.TenantAccountProvider with the store the
+// engine host serves, over the test database, so a plugin suite finds, creates
+// and stamps accounts with the statements production runs. A host with no
+// database answers nil.
+func (h *testHost) TenantAccounts() core.TenantAccountStore {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return nil
+	}
+	return db.NewTenantAccountStore(pool)
+}
+
+// ProviderWindowDays implements core.ProviderWindowProvider with the engine's
+// reader over the test database. A host with no database reports the default.
+func (h *testHost) ProviderWindowDays(ctx context.Context, tenantID string) (int, error) {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return core.ProviderWindowDefaultDays, nil
+	}
+	return config.NewProviderWindows(pool).ProviderWindowDays(ctx, tenantID)
+}
+
+// ProviderWindowAdmitsAccount implements core.ProviderWindowProvider with the
+// engine's reader over the test database.
+func (h *testHost) ProviderWindowAdmitsAccount(ctx context.Context, tenantID string, seenAt *time.Time) (bool, error) {
+	pool, ok := h.pool.(db.DB)
+	if !ok {
+		return core.ProviderWindowAdmits(seenAt, core.ProviderWindowDefaultDays, time.Now()), nil
+	}
+	return config.NewProviderWindows(pool).ProviderWindowAdmitsAccount(ctx, tenantID, seenAt)
 }

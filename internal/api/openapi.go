@@ -8,6 +8,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
+	"github.com/lyeve-labs/lyeve-core/pkg/schemaimport"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
@@ -30,6 +31,19 @@ const (
 
 // adminPathPrefix separates the two halves.
 const adminPathPrefix = "/api/admin"
+
+// prometheusProtobufMediaType is the format the metrics route answers a
+// scraper whose Accept header names it. The Prometheus library negotiates it,
+// and every other request gets the text format.
+const prometheusProtobufMediaType = "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited"
+
+// metricsTokenScheme describes the metrics token to a client: the static
+// bearer credential a scraper presents in place of an account.
+var metricsTokenScheme = map[string]any{
+	"type":        "http",
+	"scheme":      "bearer",
+	"description": "The token the operator set in METRICS_TOKEN, sent as Authorization: Bearer <token>. Only GET /api/admin/metrics reads it.",
+}
 
 // openAPIHandler returns the OpenAPI 3.1 specification for the CMS API, or
 // the half of it the scope names.
@@ -158,6 +172,9 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	ok200 := map[string]any{"description": "OK"}
 	err400 := map[string]any{"description": "Bad request"}
 	err401 := map[string]any{"description": "Unauthorized"}
+	err403 := map[string]any{"description": "Forbidden"}
+	admins := []string{"admin", "super_admin"}
+	super := []string{"super_admin"}
 
 	paths := map[string]openAPIPath{}
 
@@ -262,50 +279,72 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	// serve.
 	// Admin API: users
 	paths["/api/admin/users"] = openAPIPath{
-		"get": {
+		"get": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "List all users", Security: bothAuth,
-			Responses: map[string]any{"200": ok200},
-		},
-		"post": {
+			Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
+		}, super...),
+		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "Create a user", Security: bothAuth,
 			RequestBody: jsonBody(map[string]any{"email": "user@example.com", "password": "pass", "roles": []string{"editor"}}),
-			Responses:   map[string]any{"201": map[string]any{"description": "Created"}},
-		},
+			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "403": err403},
+		}, super...),
+	}
+
+	// Admin API: the provider window of the request's tenant
+	paths["/api/admin/auth/provider-window"] = openAPIPath{
+		"get": requiringRoles(&openAPIOperation{
+			Tags: []string{"Admin / Auth"}, Summary: "Days an account created by the tenant's identity provider may still sign in by password, reset or magic link after the provider last signed it in", Security: bothAuth,
+			Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
+		}, admins...),
+		"put": requiringRoles(&openAPIOperation{
+			Tags: []string{"Admin / Auth"}, Summary: "Set the provider window, a whole number of days from 0 to 365. 0 means only through the identity provider", Security: bothAuth,
+			RequestBody: jsonBody(map[string]any{"days": 30}),
+			Responses:   map[string]any{"200": ok200, "401": err401, "403": err403, "422": map[string]any{"description": "Days outside 0 to 365, or not a whole number"}},
+		}, admins...),
 	}
 
 	// Admin API: configuration
 	paths["/api/admin/config"] = openAPIPath{
-		"get": {
+		"get": requiringRoles(&openAPIOperation{
 			Tags:      []string{"Admin / Configuration"},
 			Summary:   "Report every setting and the layer it comes from",
 			Security:  bothAuth,
-			Responses: map[string]any{"200": ok200, "401": err401},
-		},
-		"put": {
+			Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
+		}, super...),
+		"put": requiringRoles(&openAPIOperation{
 			Tags:     []string{"Admin / Configuration"},
 			Summary:  "Store engine settings in the admin layer",
 			Security: bothAuth,
 			Responses: map[string]any{
-				"200": ok200, "400": err400, "401": err401,
+				"200": ok200, "400": err400, "401": err401, "403": err403,
 				"409": map[string]any{"description": "Every submitted key is pinned by a higher layer"},
 				"412": map[string]any{"description": "A credential was submitted with no encryption key configured"},
 			},
-		},
+		}, super...),
 	}
 
 	paths["/api/admin/schemas/export"] = openAPIPath{
-		"get": {
+		"get": requiringRoles(&openAPIOperation{
 			Tags:     []string{"Admin / Content Types"},
 			Summary:  "Export every content type as a portable bundle",
 			Security: bothAuth,
 			Parameters: []openAPIParameter{
 				{Name: "format", In: "query", Schema: map[string]any{"type": "string", "enum": []any{"yaml", "json"}, "default": "yaml"}},
 			},
-			Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Schema engine unavailable"}},
-		},
+			Responses: map[string]any{
+				"200": openAPIResponse{
+					Description: "The bundle: a YAML file to download, or JSON when format is json",
+					Content: map[string]openAPIMediaType{
+						"application/yaml": {Schema: map[string]any{"type": "string"}},
+						"application/json": {Schema: map[string]any{"type": "object"}},
+					},
+				},
+				"401": err401, "403": err403, "503": map[string]any{"description": "Schema engine unavailable"},
+			},
+		}, admins...),
 	}
 	paths["/api/admin/schemas/import"] = openAPIPath{
-		"post": {
+		"post": requiringRoles(&openAPIOperation{
 			Tags:    []string{"Admin / Content Types"},
 			Summary: "Import content types from a bundle or another system",
 			Description: "Reports what would change. Nothing is written unless apply=true, because " +
@@ -318,43 +357,65 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 				}},
 				{Name: "apply", In: "query", Schema: map[string]any{"type": "boolean", "default": false}},
 			},
+			RequestBody: schemaImportBody(),
 			Responses: map[string]any{
-				"200": ok200, "400": err400, "401": err401,
+				"200": ok200, "400": err400, "401": err401, "403": err403,
 				"409": map[string]any{"description": "References cannot be satisfied; nothing was applied"},
+				"413": map[string]any{"description": "The definitions are larger than the request body limit"},
 				"422": map[string]any{"description": "Definitions could not be read"},
+				"503": map[string]any{"description": "Schema engine unavailable"},
 			},
-		},
+		}, super...),
 	}
 
 	// Admin API: GDPR DSAR
 	paths["/api/admin/gdpr/export"] = openAPIPath{
-		"post": {Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com", "identifier_type": "email"}), Responses: map[string]any{"200": ok200, "400": err400}},
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com", "identifier_type": "email"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403}}, super...),
 	}
 	paths["/api/admin/gdpr/erase"] = openAPIPath{
-		"post": {Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com", "identifier_type": "email"}), Responses: map[string]any{"200": ok200, "400": err400}},
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com", "identifier_type": "email"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403}}, super...),
 	}
 
 	// Admin API: probe endpoints
+	// These probes take any credential the engine accepts, a key minted for
+	// content work included. An orchestrator's probes are /healthz, /readyz
+	// and /startup, which take none.
 	paths["/api/admin/health"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "Liveness probe - is the process alive?", Responses: map[string]any{"200": ok200, "503": map[string]any{"description": "Database unreachable"}}},
+		"get": {Tags: []string{"System"}, Summary: "Liveness probe - is the process alive?", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Database unreachable"}}},
 	}
 	paths["/api/admin/ready"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "Readiness probe - is the server ready to serve traffic?", Responses: map[string]any{"200": ok200, "503": map[string]any{"description": "Not ready"}}},
+		"get": {Tags: []string{"System"}, Summary: "Readiness probe - is the server ready to serve traffic?", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Not ready"}}},
 	}
 	paths["/api/admin/metrics"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "Prometheus metrics", Responses: map[string]any{"200": map[string]any{"description": "Prometheus text format"}}},
+		"get": requiringRoles(&openAPIOperation{
+			Tags:        []string{"System"},
+			Summary:     "Prometheus metrics",
+			Description: "A scraper presents the metrics token and needs no account. A super admin's session reaches the route too. While METRICS_TOKEN is set, any other bearer token is refused, so that session has to come from the cookie.",
+			Security:    []map[string][]any{{"metricsToken": {}}, bearerAuth, cookieAuth},
+			Responses: map[string]any{
+				"200": openAPIResponse{
+					Description: "The Prometheus text format, version 0.0.4, or the delimited protobuf format when the Accept header asks for it",
+					Content: map[string]openAPIMediaType{
+						"text/plain":                {Schema: map[string]any{"type": "string"}},
+						prometheusProtobufMediaType: {},
+					},
+				},
+				"401": map[string]any{"description": "No credential, or a bearer token other than the metrics token while one is set"},
+				"403": map[string]any{"description": "A session without the super_admin role"},
+			},
+		}, super...),
 	}
 	paths["/api/admin/pool/health"] = openAPIPath{
-		"get": {Tags: []string{"Admin / System"}, Summary: "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)", Security: bothAuth, Responses: map[string]any{"200": ok200, "503": map[string]any{"description": "Pool unhealthy"}}},
+		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "503": map[string]any{"description": "Pool unhealthy"}}}, admins...),
 	}
 	paths["/api/admin/openapi.json"] = openAPIPath{
-		"get": {Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}}},
+		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),
 	}
 	paths["/api/admin/openapi/public.json"] = openAPIPath{
-		"get": {Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the content API and every route outside /api/admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}}},
+		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the content API and every route outside /api/admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),
 	}
 	paths["/api/admin/openapi/admin.json"] = openAPIPath{
-		"get": {Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the /api/admin routes", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "403": map[string]any{"description": "Not a super admin"}}},
+		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the /api/admin routes", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": map[string]any{"description": "Not a super admin"}}}, super...),
 	}
 
 	// The content API, once, as the {schema} family the router registers.
@@ -370,10 +431,10 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		},
 	}
 	paths["/api/v1/health"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "API server liveness probe", Responses: map[string]any{"200": ok200}},
+		"get": {Tags: []string{"System"}, Summary: "API server liveness probe", Security: []map[string][]any{bearerAuth}, Responses: map[string]any{"200": ok200, "401": err401}},
 	}
 	paths["/api/v1/ready"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "API server readiness probe", Responses: map[string]any{"200": ok200}},
+		"get": {Tags: []string{"System"}, Summary: "API server readiness probe", Security: []map[string][]any{bearerAuth}, Responses: map[string]any{"200": ok200, "401": err401}},
 	}
 	// The remaining engine admin routes, then the routes the active plugins
 	// and the other owners declare. None overwrites an entry written before
@@ -413,8 +474,33 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 					"name":        security.SessionCookieName,
 					"description": "Session cookie set at sign-in. A server running without secure cookies names it " + security.SessionCookieNameInsecure + ".",
 				},
-				"adminToken": adminTokenScheme,
+				"adminToken":   adminTokenScheme,
+				"metricsToken": metricsTokenScheme,
 			},
 		},
+	}
+}
+
+// schemaImportBody documents what the import reads: a bundle as the export
+// writes it, or the definitions another system exports, in YAML or JSON,
+// under each media type the router admits on the import's path. The JSON is
+// left untyped because a source may export a list as well as an object.
+func schemaImportBody() *openAPIRequestBody {
+	content := map[string]openAPIMediaType{
+		"application/json": {Schema: map[string]any{"example": map[string]any{
+			"version": schemaimport.BundleVersion,
+			"schemas": []any{map[string]any{
+				"name": "notes", "display_name": "Notes",
+				"fields": []any{map[string]any{"name": "title", "field_type": "text"}},
+			}},
+		}}},
+	}
+	for _, mediaType := range schemaImportMediaTypes {
+		content[mediaType] = openAPIMediaType{Schema: map[string]any{"type": "string"}}
+	}
+	return &openAPIRequestBody{
+		Description: "A bundle as GET /api/admin/schemas/export writes it, or the definitions of the system the from parameter names, in YAML or JSON.",
+		Required:    true,
+		Content:     content,
 	}
 }

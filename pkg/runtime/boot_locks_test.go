@@ -105,7 +105,7 @@ func testBootWithLeaderLocks(t *testing.T, pool db.DB, dsn string) {
 	const leaders = 8
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	host := enginehost.NewHost(pool, sqlDBOf(t, pool), &config.Config{}, nil, "test")
-	attachSessionPools(context.Background(), host, pool.Engine(), dsn, logger)
+	require.NoError(t, attachSessionPools(context.Background(), host, pool.Engine(), dsn))
 	require.NotSame(t, sqlDBOf(t, pool), host.RawDB(), "RawDB must serve the guarded pool, as the engine does")
 
 	suffix := time.Now().UnixNano()

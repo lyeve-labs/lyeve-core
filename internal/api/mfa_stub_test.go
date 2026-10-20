@@ -21,8 +21,8 @@ func (s *stubMFAStore) GetEnabled(_ context.Context, _ uuid.UUID) (string, []str
 	return "", nil, errors.New("MFA not configured")
 }
 
-func (s *stubMFAStore) UpdateBackupCodes(_ context.Context, _ uuid.UUID, _ []string) error {
-	return errors.New("not implemented")
+func (s *stubMFAStore) ConsumeBackupCode(_ context.Context, _ uuid.UUID, _ string) (bool, error) {
+	return false, errors.New("not implemented")
 }
 
 func (s *stubMFAStore) HasWebAuthn(_ context.Context, _ uuid.UUID) (bool, error) {

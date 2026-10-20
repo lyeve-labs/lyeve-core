@@ -14,6 +14,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 )
 
 // TestMySQL_ConnectAndMigrate verifies the full MySQL lifecycle:
@@ -26,6 +28,7 @@ func TestMySQL_ConnectAndMigrate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx := context.Background()
 
@@ -180,6 +183,7 @@ func TestMySQL_DialectRewrite(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL integration test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx := context.Background()
 
@@ -237,6 +241,7 @@ func TestMySQL_MigrationsIdempotent(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping MySQL migration idempotency test in short mode")
 	}
+	testdialect.Require(t, "mysql")
 
 	ctx := context.Background()
 

@@ -55,6 +55,10 @@ var translations = map[Code]map[string]string{
 		"en": "Password must be at least {min} characters.",
 		"fr": "Le mot de passe doit comporter au moins {min} caractères.",
 	},
+	CodePasswordTooLong: {
+		"en": "Password must be at most {max} bytes. A character outside ASCII takes two bytes or more.",
+		"fr": "Le mot de passe ne doit pas dépasser {max} octets. Un caractère hors ASCII occupe deux octets ou plus.",
+	},
 	CodePasswordHashFailed: {
 		"en": "Failed to process the password. Please try again.",
 		"fr": "Échec du traitement du mot de passe. Veuillez réessayer.",
@@ -94,6 +98,10 @@ var translations = map[Code]map[string]string{
 	CodeTokenReuse: {
 		"en": "Refresh token reuse detected. This session has been revoked for security.",
 		"fr": "Réutilisation du jeton détectée. Cette session a été révoquée par sécurité.",
+	},
+	CodeTokenRotated: {
+		"en": "This refresh token was renewed by another request a moment ago. Continue with the newest one.",
+		"fr": "Ce jeton a été renouvelé par une autre requête il y a un instant. Continuez avec le plus récent.",
 	},
 	CodeTokenExpired: {
 		"en": "Your session has expired. Please log in again.",
@@ -236,6 +244,10 @@ var translations = map[Code]map[string]string{
 	CodeValidationUnknownField: {
 		"en": "The field {field} failed validation.",
 		"fr": "Le champ {field} n'a pas passé la validation.",
+	},
+	CodeValidationRelationTarget: {
+		"en": "The field {field} must name an existing entry.",
+		"fr": "Le champ {field} doit désigner une entrée existante.",
 	},
 
 	// Schema Validation

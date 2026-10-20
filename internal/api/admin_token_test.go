@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -24,6 +25,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
@@ -38,10 +40,11 @@ import (
 // The owner's email and erasure come from sys_users, which the engine creates,
 // so they are read back from the pool the way the real store's join does.
 type fakeAdminTokens struct {
-	mu   sync.Mutex
-	pool db.DB
-	rows map[uuid.UUID]*core.AdminToken
-	reqs []core.AdminTokenRequest
+	mu        sync.Mutex
+	pool      db.DB
+	rows      map[uuid.UUID]*core.AdminToken
+	reqs      []core.AdminTokenRequest
+	createErr error // returned by Create when set, as a store that cannot write does
 }
 
 func newFakeAdminTokens(pool db.DB) *fakeAdminTokens {
@@ -69,6 +72,9 @@ func (f *fakeAdminTokens) hydrate(ctx context.Context, t *core.AdminToken) *core
 func (f *fakeAdminTokens) Create(_ context.Context, t *core.AdminToken) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return f.createErr
+	}
 	stored := *t
 	f.rows[t.ID] = &stored
 	return nil
@@ -377,6 +383,10 @@ func (rg *tokenRig) do(c tokenCall) *httptest.ResponseRecorder {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 	for k, v := range c.header {
+		if k == "Host" {
+			req.Host = v
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	if c.remote != "" {
@@ -640,6 +650,47 @@ func TestAdminToken_TenantAndAddress(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), msgAdminTokenAddress)
 	rec = rg.do(tokenCall{method: http.MethodGet, path: "/api/admin/schemas", bearer: held, remote: "198.51.100.7:4000"})
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+// A super admin of the default tenant issues a token for acme, and the
+// default tenant's admin has raised its level to Debug. The audit entry and
+// the line a failed write logs are about acme's token, so both go under no
+// tenant. A token the super admin issues in their own tenant keeps its stamp.
+func TestAdminToken_IssuedForAnotherTenantIsNotFiledUnderTheIssuers(t *testing.T) {
+	audit := &recordingAuditWriter{}
+	compliance.RegisterAuditWriter(audit)
+	t.Cleanup(compliance.ClearAuditWriter)
+	ring, sink := engineLogs(t, core.DefaultTenantSlug)
+	rg := newTokenRig(t, WithScalingHost(auditOnlyHost{}))
+	_, session := rg.user("super_admin")
+
+	_, otherID := rg.issue(session, []string{core.AdminGrantSchemasRead}, map[string]any{"tenant_id": "acme"})
+	_, ownID := rg.issue(session, []string{core.AdminGrantSchemasRead}, nil)
+	filed := map[string]string{}
+	for _, e := range audit.entries {
+		if e.Action == "admin_token.create" {
+			filed[e.ResourceID] = e.TenantID
+		}
+	}
+	require.Contains(t, filed, otherID)
+	assert.Empty(t, filed[otherID], "the entry about acme's token goes under no tenant")
+	assert.Equal(t, core.DefaultTenantSlug, filed[ownID], "the entry about the issuer's own tenant keeps it")
+
+	const failure = "acme token store is unreachable"
+	rg.tokens.createErr = errors.New(failure)
+	rec := rg.do(tokenCall{method: http.MethodPost, path: "/api/admin/admin-tokens", bearer: session, body: map[string]any{
+		"name":       "ci",
+		"grants":     []string{core.AdminGrantSchemasRead},
+		"expires_at": time.Now().Add(7 * 24 * time.Hour).UTC().Format(time.RFC3339),
+		"password":   tokenTestPassword,
+		"tenant_id":  "acme",
+	}})
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, rec.Body.String())
+	assert.Equal(t, 1, countNaming(ring, failure), "the failure is still logged")
+	for _, line := range visibleTo(t, core.DefaultTenantSlug, ring, sink) {
+		assert.NotContains(t, line, failure)
+		assert.NotContains(t, line, otherID)
+	}
 }
 
 func TestAdminToken_CannotManageTokens(t *testing.T) {

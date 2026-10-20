@@ -34,7 +34,7 @@ func cloneContent(c *domain.Content) *domain.Content {
 		return nil
 	}
 	out := *c
-	out.Data = cloneJSONMap(c.Data)
+	out.Data = domain.CloneJSONMap(c.Data)
 	return &out
 }
 
@@ -49,40 +49,4 @@ func cloneContents(in []*domain.Content) []*domain.Content {
 		out[i] = cloneContent(c)
 	}
 	return out
-}
-
-func cloneJSONMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = cloneJSONValue(v)
-	}
-	return out
-}
-
-// cloneJSONValue copies the container shapes a content document can hold. Those
-// are the shapes a JSON column decodes into, plus the []map[string]any that
-// relation population writes for a has-many field. Anything else is a scalar or
-// an immutable value and is copied as it is.
-func cloneJSONValue(v any) any {
-	switch t := v.(type) {
-	case map[string]any:
-		return cloneJSONMap(t)
-	case []any:
-		out := make([]any, len(t))
-		for i, e := range t {
-			out[i] = cloneJSONValue(e)
-		}
-		return out
-	case []map[string]any:
-		out := make([]map[string]any, len(t))
-		for i, e := range t {
-			out[i] = cloneJSONMap(e)
-		}
-		return out
-	default:
-		return v
-	}
 }

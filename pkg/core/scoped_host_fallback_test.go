@@ -32,6 +32,8 @@ func TestScopedHost_ForwardersFallBackGracefully(t *testing.T) {
 	assert.NotPanics(t, func() { h.RegisterEmailSender(nil) })
 	assert.NoError(t, h.RevokeAllRefreshTokens(ctx, "user-1"))
 	assert.Nil(t, h.UserProvisioner())
+	assert.ErrorIs(t, h.ValidatePassword("Correct-Horse-9"), ErrHostRoleUnsupported,
+		"no password policy -> the plugin applies its own checks")
 
 	// AcquireTenantConn passes the context through with a no-op release.
 	gotCtx, release, err := h.AcquireTenantConn(ctx, "tenant-1")

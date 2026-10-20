@@ -12,7 +12,7 @@ import (
 
 // adminKeyDeprecationLink is the page that replaces an API key holding an
 // admin role on the admin API.
-const adminKeyDeprecationLink = `<https://docs.lyeve.com/how-to/admin-tokens/>; rel="deprecation"`
+const adminKeyDeprecationLink = `<https://lyeve.com/docs/how-to/admin-tokens/>; rel="deprecation"`
 
 // adminKeyLogInterval bounds the warning to one line per key per interval,
 // so a pipeline calling every second does not fill the log.

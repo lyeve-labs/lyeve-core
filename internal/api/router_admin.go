@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -14,7 +15,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/debug"
@@ -37,7 +37,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// Built-in middleware (rate limiter, response time, etc.). The caller's
 	// address is resolved ahead of it, so the per-address limiter and the IP
 	// allowlist see the client rather than the proxy in front of the engine.
-	applyBuiltinMiddleware(r, cfg, pluginBodyOverrides(o.declaredRouteSets()),
+	applyBuiltinMiddleware(r, cfg, withBodyLimits(pluginBodyOverrides(o.declaredRouteSets()), engineBodyLimits),
 		apimw.CSPNonce(), apimw.SecurityHeaders(cfg.SecureCookie),
 		apimw.StripUntrustedProxyHeaders(o.trustedProxies),
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
@@ -53,8 +53,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// A declared route may name further media types for itself, as a SAML
 	// assertion consumer does for the form its identity provider posts.
 	r.Use(apimw.RequireJSONContentType(declaredMediaTypes(r, o.declaredRouteSets()),
-		apimw.AllowMediaTypes("/api/admin/schemas/import",
-			"application/yaml", "application/x-yaml", "text/yaml")))
+		apimw.AllowMediaTypes("/api/admin/schemas/import", schemaImportMediaTypes...)))
 	// Locale detection: parse Accept-Language and stash on context.
 	// Runs early so all downstream handlers see the resolved locale.
 	r.Use(apimw.Locale)
@@ -64,8 +63,8 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		AllowCredentials: true,
 		PreflightMaxAge:  cfg.CORSPreflightMaxAge,
 		AllowMethods:     cfg.CORSAllowMethods,
-		AllowHeaders:     cfg.CORSAllowHeaders,
-		ExposeHeaders:    cfg.CORSExposeHeaders,
+		AllowHeaders:     allowedHeaders(cfg.CORSAllowHeaders, o.declaredRouteSets()),
+		ExposeHeaders:    exposedHeaders(cfg.CORSExposeHeaders, o.declaredRouteSets()),
 		AllowedDomains:   cfg.CORSAllowedDomains,
 	}))
 	// Pre-auth middleware: a plugin implementing
@@ -195,12 +194,11 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		OwnerRoutes:         o.documentedOwnerRoutes(),
 		Ungated:             func(name string) bool { return o.entitlements.Plugin(name).Ungated },
 	}
-	authHandler.WithPasswordPolicy(auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-	})
+	// Setup and the users routes share one policy, so a router test through
+	// setup also holds the rules for user create and for a super admin
+	// setting a password.
+	passwordPolicy := cfg.PasswordPolicy()
+	authHandler.WithPasswordPolicy(passwordPolicy)
 	if o.refreshTokenStore != nil {
 		authHandler.WithRefreshTokenStore(o.refreshTokenStore, time.Duration(cfg.RefreshTokenTTL)*time.Second)
 	}
@@ -215,15 +213,11 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	usersHandler := NewUsersHandler(userStore, cfg.PasswordHashAlgo)
 	usersHandler.seats = o.adminSeats(userStore)
+	usersHandler.ceilingURL = o.ceilingURL
 	if o.refreshTokenStore != nil {
 		usersHandler.revokeRefresh = o.refreshTokenStore.RevokeAllForUser
 	}
-	usersHandler.passwordPolicy = auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-	}
+	usersHandler.passwordPolicy = passwordPolicy
 
 	// Kubernetes health probes
 	// Mounted on the outer router before JWT auth middleware: Kubernetes
@@ -329,7 +323,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			r.Use(requireAuth)
 			r.Use(tokenVersionCheck(tokenVersionGetter(userStore)))
 			r.Use(apimw.CSRFCheck)
-			r.Use(apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes))
+			r.Use(withEngineBodyLimits(apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes)))
 			// API key scope enforcement: gates X-API-Key requests by their
 			// scopes. JWT requests pass through. Mirrors the API router.
 			r.Use(apimw.RequireScoped)
@@ -360,6 +354,14 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			r.With(requireRole("super_admin")).Put("/users/{id}/state", usersHandler.UpdateState)
 			r.With(requireRole("super_admin")).Put("/users/{id}/password", usersHandler.SetPassword)
 			r.With(requireRole("super_admin")).Delete("/users/{id}", usersHandler.Delete)
+
+			// The provider window of the request's tenant. An admin sets their
+			// own tenant's, a super admin any tenant's through X-Tenant-ID.
+			if pluginConfigStore != nil {
+				windows := &providerWindowHandler{store: pluginConfigStore, windows: config.NewProviderWindows(pool), host: o.scalingHost}
+				r.With(requireRole("admin", "super_admin")).Get("/auth/provider-window", windows.get)
+				r.With(requireRole("admin", "super_admin")).Put("/auth/provider-window", windows.put)
+			}
 
 			// Auto-mounted via RoutesPlugin.
 
@@ -526,12 +528,16 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			respond(w, http.StatusOK, tracker.Snapshot())
 		})
 
-		// Verify every public route wrapped by the limiter has a matching
-		// config entry. Missing config means the route has NO per-endpoint
-		// rate limiting: a silent brute-force gap.
+		// A public route with no limit of its own runs on the general limit,
+		// the global cap, unless no global cap is set: then it runs unlimited,
+		// a silent brute-force gap, and Verify names it. The routes on the
+		// general limit are listed once, so an operator can see which an
+		// administrator may give a limit of their own.
 		if publicRL != nil {
 			if err := publicRL.Verify(); err != nil {
-				slog.Error("public rate-limit config gap: add missing entries or disable rate limiting explicitly", "err", err)
+				slog.Error("public rate-limit config gap: add missing entries or set a global cap", "err", err)
+			} else if general := publicRL.GeneralRoutes(); len(general) > 0 {
+				slog.Info("public routes on the general rate limit", "routes", general)
 			}
 		}
 	})
@@ -553,4 +559,55 @@ func exceptTenantLifecycle(mw func(http.Handler) http.Handler) func(http.Handler
 			guarded.ServeHTTP(w, r)
 		})
 	}
+}
+
+// engineBodyLimits are the routes this router serves whose handler takes a
+// larger body than the group's JSON limit, keyed by method and pattern the
+// way the body guards key them. A plugin route says the same with
+// RouteDecl.MaxBodyBytes. A pattern here is literal, because the global guard
+// runs before routing and can match only a path.
+//
+// Both guards ahead of the handler have to admit the larger body, or the
+// limit the route documents is one no caller can reach. The global guard
+// takes these as overrides. The group's JSON guard holds the route to its own
+// limit instead, and leaves refusing a body declared past it to the handler,
+// which answers in the words its documentation gives.
+var engineBodyLimits = map[string]int64{
+	apimw.BodyLimitKey(http.MethodPost, "/api/admin/schemas/import"): maxBundleBytes,
+}
+
+// withEngineBodyLimits applies jsonGuard to every route but the ones
+// engineBodyLimits names. Those read through a reader bounded at their own
+// limit, and their handler refuses a body declared past it before reading
+// any of it. It runs after routing, so it reads the pattern the request is
+// served under rather than its path, and a path that only resembles one of
+// those routes keeps the JSON guard.
+func withEngineBodyLimits(jsonGuard func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		guarded := jsonGuard(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			limit, ok := engineBodyLimits[apimw.BodyLimitKey(r.Method, chi.RouteContext(r.Context()).RoutePattern())]
+			if !ok {
+				guarded.ServeHTTP(w, r)
+				return
+			}
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// withBodyLimits adds limits to the overrides the global body guard matches,
+// keeping the larger figure where both name a route.
+func withBodyLimits(overrides, limits map[string]int64) map[string]int64 {
+	out := make(map[string]int64, len(overrides)+len(limits))
+	maps.Copy(out, overrides)
+	for key, n := range limits {
+		if n > out[key] {
+			out[key] = n
+		}
+	}
+	return out
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -87,7 +88,7 @@ func RunSubjectExportAcrossTenants(
 				// A tenant that cannot be scoped is data the bundle is missing,
 				// not a tenant with no data. Recorded so Incomplete is true and
 				// the gap is nameable.
-				slog.ErrorContext(ctx, "subject export: tenant could not be scoped",
+				slog.ErrorContext(logging.ContextAbout(ctx, tenant), "subject export: tenant could not be scoped",
 					"tenant", tenant, "err", err)
 				result.Errors = append(result.Errors, ExportError{
 					Index: -1,

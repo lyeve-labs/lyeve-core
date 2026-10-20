@@ -638,9 +638,16 @@ func (s *simpleMFAStore) RegenerateBackupCodes(ctx context.Context, userID uuid.
 	return nil, nil
 }
 
-func (s *simpleMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM test_mfa_backup_codes WHERE user_id = $1`, userID)
-	return err
+func (s *simpleMFAStore) ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error) {
+	res, err := s.pool.Exec(ctx,
+		`UPDATE test_mfa_backup_codes SET used_at = NOW() WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL`,
+		userID, codeHash,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 // A bearer token issued before logout must stop authenticating the moment

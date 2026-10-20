@@ -28,11 +28,15 @@ func (f *fakeEntryWriter) DeleteContentEntry(context.Context, uuid.UUID) error {
 // engine host does once the owning plugin has registered one.
 type entryWriterHost struct {
 	*stubHost
+	HostRoleRegistry
 	writer ContentEntryWriter
 }
 
-func (h *entryWriterHost) RegisterContentEntryWriter(w ContentEntryWriter) { h.writer = w }
-func (h *entryWriterHost) ContentEntryWriter() ContentEntryWriter          { return h.writer }
+func (h *entryWriterHost) RegisterContentEntryWriter(w ContentEntryWriter) error {
+	h.writer = w
+	return nil
+}
+func (h *entryWriterHost) ContentEntryWriter() ContentEntryWriter { return h.writer }
 
 // The owning plugin registers through its scoped host and an importing
 // plugin reads the same writer through its own, with the input passed

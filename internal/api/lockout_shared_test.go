@@ -270,10 +270,15 @@ func TestSharedMFALockout_JTIMarkedOnOneSeenOnAnother(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, used)
 
-	require.NoError(t, a.MarkJTIUsed(ctx, "jti-1"))
+	won, err := a.MarkJTIUsed(ctx, "jti-1")
+	require.NoError(t, err)
+	require.True(t, won)
 	used, err = b.IsJTIUsed(ctx, "jti-1")
 	require.NoError(t, err)
 	assert.True(t, used)
+	won, err = b.MarkJTIUsed(ctx, "jti-1")
+	require.NoError(t, err)
+	assert.False(t, won, "a challenge spent on one replica cannot be spent again on another")
 }
 
 func TestSharedMFALockout_FailuresOnTwoReplicasLockTheUser(t *testing.T) {

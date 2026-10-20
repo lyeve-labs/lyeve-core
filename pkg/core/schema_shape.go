@@ -1,6 +1,10 @@
 package core
 
-import "strings"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"strings"
+)
 
 // Schema defines the structure of a content type.
 //
@@ -127,6 +131,55 @@ func PivotTableName(a, b string) string {
 		an, bn = bn, an
 	}
 	return "_pivot_" + an + "_" + bn
+}
+
+// PivotNameLimit is the longest pivot table name a new many_to_many is given.
+// PostgreSQL keeps 63 bytes of a name and cuts the rest without an error, so
+// two long names sharing their first 63 bytes would name one table and mix
+// two relations' pairs in it. MySQL refuses a name past 64 characters. The
+// strictest limit holds on every dialect, so a definition names the same
+// table wherever it is applied.
+const PivotNameLimit = 63
+
+// pivotHashLen is how many hex characters of the hash a bounded name keeps.
+const pivotHashLen = 8
+
+// BoundedPivotTableName returns the name a pivot between a and b is created
+// under when no table holds it yet: PivotTableName when that fits
+// PivotNameLimit, and otherwise its first PivotNameLimit-9 characters, an
+// underscore and the first 8 hex characters of its SHA-256. The same pair
+// always bounds to the same name, and two long pairs that share a prefix
+// still differ. Type names are ASCII, so characters and bytes count alike.
+func BoundedPivotTableName(a, b string) string {
+	natural := PivotTableName(a, b)
+	if len(natural) <= PivotNameLimit {
+		return natural
+	}
+	sum := sha256.Sum256([]byte(natural))
+	return natural[:PivotNameLimit-pivotHashLen-1] + "_" + hex.EncodeToString(sum[:])[:pivotHashLen]
+}
+
+// ResolvePivotTable returns the table a many_to_many between a and b keeps
+// its pairs in. A PivotTableName that fits PivotNameLimit is that table. A
+// longer one is kept when present reports a table under it, because an
+// install made before pivot names were bounded may hold one (MySQL at 64
+// characters, SQL Server up to 128, PostgreSQL under the 63 bytes it cut the
+// name to), and is BoundedPivotTableName otherwise. The schema engine and the
+// content store both resolve through it, so they name one table. present is
+// asked only about a name past the limit.
+func ResolvePivotTable(a, b string, present func(name string) (bool, error)) (string, error) {
+	natural := PivotTableName(a, b)
+	if len(natural) <= PivotNameLimit {
+		return natural, nil
+	}
+	ok, err := present(natural)
+	if err != nil {
+		return "", err
+	}
+	if ok {
+		return natural, nil
+	}
+	return BoundedPivotTableName(a, b), nil
 }
 
 // FKColumn returns the FK column name for a belongs_to or has_one field.

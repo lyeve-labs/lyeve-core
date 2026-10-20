@@ -82,7 +82,7 @@ func TestWriteJSON_Success(t *testing.T) {
 }
 
 func TestWriteJSON_MarshalError(t *testing.T) {
-	// Passing a channel or func should cause sonic to fail.
+	// Passing a channel or func should cause marshaling to fail.
 	err := WriteJSON(&bytes.Buffer{}, make(chan int))
 	assert.Error(t, err, "marshaling a channel should fail")
 }
@@ -101,21 +101,21 @@ func TestWriteJSON_NilTarget(t *testing.T) {
 	assert.Equal(t, "null\n", buf.String())
 }
 
-// PrewarmSonic
+// PrewarmJSON
 
-func TestPrewarmSonic_DoesNotPanic(t *testing.T) {
-	// PrewarmSonic suppresses all errors internally. The contract is that
+func TestPrewarmJSON_DoesNotPanic(t *testing.T) {
+	// PrewarmJSON suppresses all errors internally. The contract is that
 	// it does not panic.
 	assert.NotPanics(t, func() {
-		PrewarmSonic()
+		PrewarmJSON()
 	})
 }
 
-func TestPrewarmSonic_Idempotent(t *testing.T) {
+func TestPrewarmJSON_Idempotent(t *testing.T) {
 	// Multiple calls should be safe.
-	PrewarmSonic()
-	PrewarmSonic()
+	PrewarmJSON()
+	PrewarmJSON()
 	assert.NotPanics(t, func() {
-		PrewarmSonic()
+		PrewarmJSON()
 	})
 }

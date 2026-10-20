@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"io/fs"
+)
 
 // Plugin is the contract every plugin implements. A plugin is registered
 // via RegisterPlugin from its package's init() function. The runtime decides
@@ -52,12 +55,28 @@ type Depender interface {
 	Dependencies() []PluginDependency
 }
 
+// MigrationDeclarer is an optional interface a Plugin implements to name the
+// migration trees it applies with PluginMigrate. The engine reads it from an
+// instance that has never started, so the operator's mark-applied repair finds
+// a plugin's scripts and bookkeeping table without booting the plugin.
+type MigrationDeclarer interface {
+	MigrationTrees() []MigrationTree
+}
+
+// MigrationTree is one set of migration scripts, laid out as PluginMigrate
+// reads them, and the bookkeeping table it records them in.
+type MigrationTree struct {
+	Table string
+	Files fs.FS
+}
+
 // Capability is a bitmask describing what a plugin is allowed to do.
 // Plugins declare capabilities at registration time via RegisterPluginWithCaps.
 // The engine wraps each plugin's Host with a ScopedHost that checks the
 // granted caps before delegating to the real engine host. The grant is the
 // host capability policy's entry for the plugin narrowed by its declaration,
-// or the declaration alone when the policy has no entry.
+// or the declaration alone when the policy has no entry. A declaration does
+// not narrow the role capabilities in CapRoles, nor CapSessionSign.
 //
 // CapDBWrite implies CapDBRead.
 // A plugin that registers via RegisterPlugin declares nothing, so it gets the
@@ -80,13 +99,18 @@ const (
 	CapRoutes // register HTTP routes
 	// CapAdmin grants access to admin-only endpoints. PRIVILEGED.
 	CapAdmin // admin-only endpoints (PRIVILEGED)
-	// CapSchema grants schema DDL operations (Apply, Delete, ApplyPending).
-	CapSchema // schema DDL operations (Apply/Delete/ApplyPending)
+	// CapSchema grants schema DDL operations (Apply, Delete, ApplyPending),
+	// and RegisterSchemaEngine. The engine it registers serves every content
+	// read and write, so it is held to the grant that already reshapes every
+	// content table.
+	CapSchema // schema DDL operations (Apply/Delete/ApplyPending), RegisterSchemaEngine
 	// CapFlowRegistry grants FlowRegistry(): the node and trigger types every
-	// started plugin contributes. Only the plugin that runs flows reads it.
-	// Contributing types needs no grant, because a contribution is the plugin
-	// offering something and the node runs under the plugin's own host.
-	CapFlowRegistry // read the flow registry (FlowRegistry)
+	// started plugin contributes. Only the plugin that runs flows reads it,
+	// and only that plugin registers the flow definition validator and the
+	// flow invoker the other plugins fetch. Contributing types needs no
+	// grant, because a contribution is the plugin offering something and the
+	// node runs under the plugin's own host.
+	CapFlowRegistry // read the flow registry (FlowRegistry), register the flow validator and invoker
 	// CapMetrics grants MetricsGatherer(): the engine's own registry, with
 	// every tenant's request series in it. Only a plugin that exports the
 	// instance's metrics reads it.
@@ -99,12 +123,57 @@ const (
 	// configuration.
 	CapConfigSectionsRead // read every registered configuration section (ConfigSections)
 
+	// Each capability from here to CapUserProvisioner appoints a plugin to
+	// supply a host role, a service the engine and every other plugin use,
+	// through the role's registrar on ScopedHost. Without it the registrar
+	// refuses a registration and a clear alike, so no other plugin can
+	// replace the service or take it away.
+
+	// CapPermissionChecker grants RegisterPermissionChecker. The checker
+	// decides every access rule on the install.
+	CapPermissionChecker // register the permission checker
+	// CapEmailSender grants RegisterEmailSender. Every plugin's transactional
+	// mail goes out through the sender.
+	CapEmailSender // register the email sender
+	// CapContentLocalizer grants RegisterContentLocalizer. The localizer
+	// rewrites every content read that names a locale.
+	CapContentLocalizer // register the content localizer
+	// CapContentEntryWriter grants RegisterContentEntryWriter. An import
+	// saves its entries through the writer.
+	CapContentEntryWriter // register the content entry writer
+	// CapRecordRevisionStore grants RegisterRecordRevisionStore. The store
+	// keeps and serves the content API's revisions.
+	CapRecordRevisionStore // register the record revision store
+	// CapStorage grants SetStorage. Every upload lands in the storage it
+	// sets.
+	CapStorage // set the storage backend
+	// CapUserProvisioner grants SetUserProvisioner. The provisioner creates
+	// accounts at single sign-on.
+	CapUserProvisioner // set the single sign-on user provisioner
+
+	// CapSessionSign grants SignSessionToken: a session for any active
+	// account, which is a sign-in as that account. Only the plugins whose job
+	// is sign-in hold it. Like a role it comes from the policy entry alone,
+	// because a declaration written before signing had a capability would
+	// otherwise take sign-in from the plugin that serves it.
+	CapSessionSign // sign a session for an account (SignSessionToken)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead
+		CapConfigSectionsRead | CapRoles | CapSessionSign
+
+	// CapRoles is every capability that does nothing but appoint a plugin to
+	// a host role. A declaration narrows what a plugin reaches and never
+	// these. The build's table gives each one to the plugin that supplies the
+	// role, and a declaration written before the role had a capability would
+	// otherwise take the role from that plugin. The schema engine and the
+	// flow roles hang on CapSchema and CapFlowRegistry, which also grant
+	// reach, so a declaration narrows those as it always has.
+	CapRoles Capability = CapPermissionChecker | CapEmailSender | CapContentLocalizer |
+		CapContentEntryWriter | CapRecordRevisionStore | CapStorage | CapUserProvisioner
 )
 
 // Has reports whether this capability set includes c.

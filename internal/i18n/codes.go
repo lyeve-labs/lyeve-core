@@ -31,6 +31,7 @@ const (
 	CodeSetupTokenInvalid       Code = "AUTH_SETUP_TOKEN_INVALID"
 	CodeSetupModeRequired       Code = "SETUP_REQUIRED"
 	CodePasswordTooShort        Code = "AUTH_PASSWORD_TOO_SHORT"
+	CodePasswordTooLong         Code = "AUTH_PASSWORD_TOO_LONG"
 	CodePasswordHashFailed      Code = "AUTH_PASSWORD_HASH_FAILED"
 	CodePasswordNeedsComplexity Code = "AUTH_PASSWORD_NEEDS_COMPLEXITY"
 	CodePasswordTooCommon       Code = "AUTH_PASSWORD_TOO_COMMON"
@@ -41,6 +42,7 @@ const (
 	CodeMFANotConfigured        Code = "AUTH_MFA_NOT_CONFIGURED"
 	CodeMFAInvalidCode          Code = "AUTH_MFA_INVALID_CODE"
 	CodeTokenReuse              Code = "AUTH_TOKEN_REUSE"
+	CodeTokenRotated            Code = "AUTH_TOKEN_ROTATED"
 	CodeTokenExpired            Code = "AUTH_TOKEN_EXPIRED"
 	CodeSessionRevoked          Code = "AUTH_SESSION_REVOKED"
 	CodeRefreshNotEnabled       Code = "AUTH_REFRESH_NOT_ENABLED"
@@ -91,6 +93,10 @@ const (
 	CodeValidationStrongPassword Code = "VALIDATION_STRONG_PASSWORD"
 	CodeValidationUnknownField   Code = "VALIDATION_UNKNOWN_FIELD"
 	CodeValidationFieldType      Code = "VALIDATION_FIELD_TYPE"
+	// CodeValidationRelationTarget refuses a relation whose value names no
+	// entry of the caller's tenant. It does not say whether the entry exists
+	// elsewhere.
+	CodeValidationRelationTarget Code = "VALIDATION_RELATION_TARGET"
 
 	// Schema Validation
 	CodeSchemaValidationEmail        Code = "SCHEMA_VALIDATION_EMAIL"

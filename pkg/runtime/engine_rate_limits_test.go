@@ -116,7 +116,11 @@ func TestPublishEngineRateLimits_ReportsWhatTheMountedRoutesDeclare(t *testing.T
 		_, found := findEngineLimit(host.limits, "public", endpoint)
 		assert.False(t, found, "%s is not a limit the public limiter applies", endpoint)
 	}
-	assert.Len(t, host.limits, len(engineRateLimits(0, 0, false, nil, "", nil))+1)
+	// The declared limit adds a public row, and the zero-rate route, whose
+	// limit the limiter skips, runs on the general limit and adds a general row.
+	assert.Len(t, host.limits, len(engineRateLimits(0, 0, false, nil, "", nil))+2)
+	_, found = findEngineLimit(host.limits, "general", "POST /api/v1/probe/zero")
+	assert.True(t, found)
 
 	publishEngineRateLimits(host, &config.Config{}, nil)
 	_, found = findEngineLimit(host.limits, "public", "POST /api/v1/probe/ping")
@@ -130,3 +134,27 @@ type rateLimitRecorder struct {
 }
 
 func (h *rateLimitRecorder) WithEngineRateLimits(limits []core.EngineRateLimit) { h.limits = limits }
+
+func TestGeneralRouteLimits_ListsPublicRoutesWithNoLimitOfTheirOwn(t *testing.T) {
+	routes := []plugin.PluginRoutes{{Name: "probe", Routes: []plugin.RouteDecl{
+		{Method: "GET", Pattern: "/api/v1/probe/search", Group: plugin.GroupPublic},
+		{Method: "POST", Pattern: "/api/v1/probe/pong", Group: plugin.GroupPublic, RateLimit: &core.RouteRateLimit{Rate: 30, Burst: 60}},
+		{Method: "GET", Pattern: "/api/admin/probe/settings", Group: plugin.GroupAdmin},
+		{Method: "GET", Pattern: "/api/v1/probe/search", Group: plugin.GroupPublic},
+	}}}
+	limits := engineRateLimits(0, 0, false, nil, "", api.DeclaredPublicRateLimits(routes))
+	general := generalRouteLimits(routes, limits)
+
+	require.Len(t, general, 1, "a declared limit and a non-public route are not on the general limit, and a route is listed once")
+	assert.Equal(t, core.EngineRateLimit{
+		Scope: "general", Endpoint: "GET /api/v1/probe/search", Rate: 50, Burst: 100,
+		Source: "default", Setting: "PUBLIC_RATE_LIMIT_GLOBAL",
+	}, general[0])
+}
+
+func TestGeneralRouteLimits_NothingIsOnAGeneralLimitThatDoesNotExist(t *testing.T) {
+	routes := []plugin.PluginRoutes{{Name: "probe", Routes: []plugin.RouteDecl{
+		{Method: "GET", Pattern: "/api/v1/probe/search", Group: plugin.GroupPublic},
+	}}}
+	assert.Empty(t, generalRouteLimits(routes, []core.EngineRateLimit{{Scope: "global", Endpoint: "*", Rate: 1, Burst: 1}}))
+}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -118,13 +119,15 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 	action := "gdpr.export"
 	if body.AllTenants {
 		action = "gdpr.export.all_tenants"
-		slog.WarnContext(r.Context(), "cross-tenant DSAR export",
+		// The line names other tenants, so it is logged with no tenant and
+		// only an operator reading the whole log sees it.
+		slog.WarnContext(logging.WithoutTenant(r.Context()), "cross-tenant DSAR export",
 			"tenants_requested", result.Scope.Requested,
 			"tenants_covered", result.Scope.Covered,
 			"matched_tenants", result.MatchedTenants,
 		)
 	}
-	h.writeAudit(r, action, "gdpr_dsar", body.Identifier)
+	h.writeAudit(r, action, "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 
 	httpx.JSON(w, http.StatusOK, result)
 }
@@ -181,7 +184,7 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit log.
-	h.writeAudit(r, "gdpr.erase", "gdpr_dsar", body.Identifier)
+	h.writeAudit(r, "gdpr.erase", "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 
 	httpx.JSON(w, http.StatusOK, resp)
 }

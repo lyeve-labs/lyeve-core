@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"io/fs"
+	"mime"
 	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -183,6 +185,33 @@ type RouteDecl struct {
 	// does not open it to a cross-site form.
 	MediaTypes []string
 
+	// ExposeHeaders names response headers this route sets that a script on
+	// another origin has to be able to read. A browser shows such a script the
+	// CORS-safelisted headers and the ones Access-Control-Expose-Headers
+	// names, and nothing else, so a header the route answers with, such as the
+	// id of an operation the caller wants to follow, is invisible to it
+	// otherwise.
+	//
+	// The engine adds the names to the CORS_EXPOSE_HEADERS list every router
+	// sends, because the CORS answer is given before the request is routed.
+	// Naming a header that a response does not carry exposes nothing, and the
+	// origin check is unchanged: only an origin the operator allowed is told
+	// anything. A name that is not a header field name, and the wildcard, are
+	// logged and ignored.
+	ExposeHeaders []string
+
+	// AllowHeaders names request headers this route reads that a script on
+	// another origin has to be able to send. A browser sends such a script's
+	// header outside the CORS-safelisted set only after a preflight answer
+	// names it in Access-Control-Allow-Headers, so a route that reads one,
+	// such as the id a caller gives an operation in order to follow it, is
+	// closed to that script otherwise.
+	//
+	// The engine adds the names to the CORS_ALLOW_HEADERS list every router's
+	// preflight answers with, for the reason ExposeHeaders gives, and ignores
+	// the same names it does.
+	AllowHeaders []string
+
 	// SelfScoping says this route carries the tenant it is for inside the
 	// request itself, in something the engine issued and verifies, and so must
 	// not be refused for arriving on a hostname that resolves no tenant.
@@ -286,6 +315,41 @@ type RouteDoc struct {
 	RequestExample any
 	// Responses maps each status the route answers to its description.
 	Responses map[int]string
+	// ResponseMediaTypes names what the route's success body is served as:
+	// text/event-stream for a stream, text/csv for an export, image/* for a
+	// stored image, or application/json with a schema worth publishing. A
+	// route that picks one by a query parameter or the Accept header lists
+	// each. They describe every 2xx status Responses names that carries a
+	// body, which is all of them but 204 and 205, or the 200 the document
+	// writes when Responses names none. Left empty, no response names a
+	// media type.
+	ResponseMediaTypes []RouteMediaType
+}
+
+// RouteMediaType is one media type a route's success body is served as.
+type RouteMediaType struct {
+	// MediaType is what the response's Content-Type names, parameters
+	// optional. A range, type/* or */*, stands for a body whose exact type
+	// is the stored file's own. One that ParseResponseMediaType refuses is
+	// left out of the document.
+	MediaType string
+	// Schema is the JSON Schema of the body served as this type, or nil.
+	Schema map[string]any
+}
+
+// ParseResponseMediaType reads a RouteMediaType's MediaType. It returns the
+// type without its parameters and reports whether it can name a body: a type
+// and a subtype, where the only ranges are type/* and */*.
+func ParseResponseMediaType(s string) (string, bool) {
+	mediaType, _, err := mime.ParseMediaType(s)
+	if err != nil {
+		return "", false
+	}
+	typ, sub, ok := strings.Cut(mediaType, "/")
+	if !ok || typ == "" || sub == "" || (typ == "*" && sub != "*") {
+		return "", false
+	}
+	return mediaType, true
 }
 
 // RouteParam is one documented parameter. In is "path", "query", "header"

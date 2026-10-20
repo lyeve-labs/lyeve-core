@@ -1,7 +1,8 @@
 // Package httpx holds the HTTP helpers the engine and its plugins share: JSON
 // responses, the localized error envelope, error-to-status mapping, request
 // validation, plugin secret encryption, the 402 responses of a license gate,
-// and the feature names a license may carry.
+// the feature names a license may carry, and the write deadline a long-lived
+// stream holds.
 package httpx
 
 import (

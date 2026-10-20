@@ -179,7 +179,7 @@ func NewLockDB(ctx context.Context, engine string, dsn string) (*sql.DB, error) 
 }
 
 func openGuarded(ctx context.Context, engine, dsn string, maxOpen, maxIdle int) (*sql.DB, error) {
-	connector, err := connectorForDSN(engine, dsn)
+	connector, err := connectorForDSN(engine, driverDSN(engine, dsn))
 	if err != nil {
 		return nil, fmt.Errorf("dml_guard: create connector: %w", err)
 	}

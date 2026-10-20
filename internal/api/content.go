@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	internalschema "github.com/lyeve-labs/lyeve-core/internal/schema"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -25,6 +28,27 @@ type ContentHandler struct {
 	perms     core.PermissionCheckerProvider   // nil = the kernel's role-only checker
 	localizer core.ContentLocalizerProvider    // nil = reads ignore any locale
 	revisions core.RecordRevisionStoreProvider // nil = no plugin keeps revisions
+
+	// streamHeartbeat is how often an idle change stream writes a comment.
+	// Zero is contentStreamHeartbeat. Each write moves the write deadline two
+	// heartbeats ahead, so it also sets how long a client that stops reading
+	// holds its connection.
+	streamHeartbeat time.Duration
+	// streamDeadlineWarn keeps the warning about a chain that cannot move the
+	// write deadline to one line, since every stream through it fails the
+	// same way. A pointer, so a copy of the handler shares it. Nil warns on
+	// every stream.
+	streamDeadlineWarn *sync.Once
+	// streamCredential asks whether the credential a change stream opened
+	// with still admits its caller, before each event. The router sets it
+	// from the checks every request passes. Nil asks nothing, which is a
+	// handler built outside the router.
+	streamCredential func(*http.Request) error
+	// streamSlots counts the change streams open on this instance, so no
+	// credential or tenant holds more than its cap. A pointer, so a copy of
+	// the handler counts against the same caps. Nil caps nothing, which is a
+	// handler built outside the router.
+	streamSlots *streamSlots
 }
 
 // revisionStore resolves the store that keeps revision history, or answers
@@ -249,44 +273,20 @@ func (h *ContentHandler) checkPermission(w http.ResponseWriter, r *http.Request,
 	return false
 }
 
-// The refusals authorize reports. Anything else it returns is the rule
-// store failing.
+// The refusals authorize reports, shared with every other content transport
+// so a refusal means the same thing whichever one the caller used.
 var (
-	errNoCaller         = errors.New("no caller")
-	errSchemaNotAllowed = errors.New("schema not allowed for this credential")
-	errScopeDenied      = errors.New("insufficient scope")
-	errPermissionDenied = errors.New("permission denied")
+	errNoCaller         = core.ErrNoCaller
+	errSchemaNotAllowed = core.ErrSchemaNotAllowed
+	errScopeDenied      = core.ErrScopeDenied
+	errPermissionDenied = core.ErrPermissionDenied
 )
 
 // authorize is checkPermission without the response, for a caller that has
 // to decide what to do with a refusal itself, such as a populated relation
 // that is left out rather than failing the read it belongs to.
 func (h *ContentHandler) authorize(r *http.Request, schema, action string) error {
-	claims := requestClaims(r)
-	if claims == nil {
-		return errNoCaller
-	}
-	if !claims.AllowsSchema(schema) {
-		return errSchemaNotAllowed
-	}
-	// The scope gate in front of the content routes reads the schema the
-	// path names. A relation and a populated field reach a second schema the
-	// path never names, so a key held to content.posts would read authors
-	// through posts. Each schema a request touches is held to the key's
-	// scope here, on the same terms the gate uses: a key with an admin role
-	// answers to its role instead.
-	if claims.IsAPIKey && !claims.HasRole("admin") && !claims.HasRole("super_admin") &&
-		!core.ScopeGrants(claims.Scopes, "content."+schema, action) {
-		return errScopeDenied
-	}
-	allowed, err := h.checker().Allowed(r.Context(), claims.Roles, schema, action)
-	if err != nil {
-		return fmt.Errorf("permission check %s: %w", schema, err)
-	}
-	if !allowed {
-		return errPermissionDenied
-	}
-	return nil
+	return core.AuthorizeContent(r.Context(), h.checker(), requestClaims(r), schema, action)
 }
 
 // maskFor resolves this request's field mask once and returns the function
@@ -315,38 +315,32 @@ func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema 
 
 // fieldMask is maskFor without the response.
 func (h *ContentHandler) fieldMask(r *http.Request, schema string) (func(map[string]any) map[string]any, error) {
-	keep := func(data map[string]any) map[string]any { return data }
-	masker, ok := h.checker().(core.FieldMasker)
-	if !ok {
-		return keep, nil
-	}
-	claims := requestClaims(r)
-	if claims == nil {
-		return nil, errNoCaller
-	}
-	fields, err := masker.FieldMask(r.Context(), claims.Roles, schema)
+	hidden, err := h.hiddenFields(r, schema)
 	if err != nil {
+		return nil, err
+	}
+	return hidden.Apply, nil
+}
+
+// hiddenFields resolves the fields of schema the caller may not read, with
+// each relation's column and populated record hidden together through the
+// schema's own definition. A schema the source does not know keeps the names
+// the rule gave, since no read of it can succeed. A source that cannot answer
+// fails the read, because guessing which column a relation uses could serve
+// the one the rule meant to hide.
+func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.HiddenFields, error) {
+	hidden, err := core.ContentHiddenFields(r.Context(), h.checker(), requestClaims(r), schema)
+	if err != nil || len(hidden) == 0 || h.schemas == nil {
+		return hidden, err
+	}
+	sc, err := h.schemas.GetByName(r.Context(), schema)
+	switch {
+	case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
+		return hidden, nil
+	case err != nil:
 		return nil, fmt.Errorf("field mask %s: %w", schema, err)
 	}
-	if len(fields) == 0 {
-		return keep, nil
-	}
-	hidden := make(map[string]struct{}, len(fields))
-	for _, f := range fields {
-		hidden[f] = struct{}{}
-	}
-	return func(data map[string]any) map[string]any {
-		if len(data) == 0 {
-			return data
-		}
-		out := make(map[string]any, len(data))
-		for k, v := range data {
-			if _, off := hidden[k]; !off {
-				out[k] = v
-			}
-		}
-		return out
-	}, nil
+	return hidden.WithRelations(sc.Fields), nil
 }
 
 // populate resolves ?populate= and ?depth= on items, putting every relation
@@ -379,9 +373,15 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			mask, mErr := h.fieldMask(r, target)
 			if mErr != nil {
 				ruleErr = mErr
-			} else {
-				d = decision{mask: mask, ok: true}
+				break
 			}
+			// A related row is held to the rule its own schema's reads
+			// follow: a draft is served to a caller who may read drafts
+			// there, and to anyone else it is absent.
+			if !h.draftResponse(w, r, target) {
+				mask = publishedOnly(mask)
+			}
+			d = decision{mask: mask, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
@@ -395,6 +395,17 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 		return false
 	}
 	return true
+}
+
+// publishedOnly wraps a field mask so an unpublished record is hidden, which
+// the populate walk serves as a null relation or leaves out of a list.
+func publishedOnly(mask func(map[string]any) map[string]any) func(map[string]any) map[string]any {
+	return func(data map[string]any) map[string]any {
+		if !isPublished(data) {
+			return nil
+		}
+		return mask(data)
+	}
 }
 
 // validatePatch validates the body of a partial update: only the fields it
@@ -434,6 +445,23 @@ func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Requ
 		return nil, false
 	}
 	return s, true
+}
+
+// relationRefused answers a write the store refused because a relation names
+// no entry of the caller's tenant, as a validation error naming the field, and
+// reports whether it did. A row another tenant holds and a row nobody holds
+// get the same answer, so it says nothing about other tenants.
+func relationRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	var refused *core.RelationTargetError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	internalschema.ValidationErrors{{
+		Field: refused.Field,
+		Code:  i18n.CodeValidationRelationTarget,
+		Rule:  "relation",
+	}}.Respond(w, r, http.StatusUnprocessableEntity)
+	return true
 }
 
 func (h *ContentHandler) validateAgainst(w http.ResponseWriter, r *http.Request, s *domain.Schema, data map[string]any) bool {

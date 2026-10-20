@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -36,15 +37,31 @@ func registerSysUserExporter(host core.Host) {
 	compliance.RegisterSubjectExporter(newSysUserExporter(host))
 }
 
-// ExportSubject returns the account record whose email or id matches
-// identifier, under the "sys_users" section. Returns (nil, nil) when nothing
-// matches.
+// ExportSubject returns the accounts of the tenant ctx names whose email, id
+// or provider address matches identifier, under the "sys_users" section.
+// Returns (nil, nil) when nothing matches.
+//
+// One address can hold an account in several tenants, and the DSAR
+// orchestrator runs every exporter once per tenant it covers. Each run
+// therefore keeps to its own tenant, or a tenant's export would carry another
+// tenant's accounts and a sweep would count each account once per tenant. An
+// account stored with no tenant acts in the default tenant, so the default
+// tenant's run exports it. A context naming no tenant is refused, because
+// the only answer it could give is every tenant's accounts.
 //
 // password_hash and token_version are withheld: a credential digest is not
 // portable subject data and handing it out weakens the account it protects.
 func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) (map[string]any, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return nil, nil
+	}
+	tenant, err := core.RequireTenantID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("sys_users export: %w", err)
+	}
+	tenantCond := "tenant_id = $5"
+	if tenant == core.DefaultTenantSlug {
+		tenantCond = "tenant_id IN ($5, '')"
 	}
 
 	// The id column is UUID on Postgres and a fixed-width string elsewhere, so
@@ -68,15 +85,20 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 		boolFalse = "false"
 	}
 
-	// The email and id halves take separate parameters for the reason the
-	// eraser gives: stored addresses are lower case, so a subject request
-	// naming Foo@x.com has to be folded before it can match, while the cast id
-	// is compared as supplied.
+	// SQL selects the candidate accounts and compliance.SameAddress keeps the
+	// ones that hold the address, for the reason the eraser gives: under
+	// MySQL's and SQL Server's collations a request for an address that holds
+	// no account would export the account of its accent or ß variant. An
+	// address also matches provider_email, where a tenant-local account keeps
+	// the address its provider asserted. The cast id is compared as supplied.
 	rows, err := e.host.Querier(ctx).Query(ctx, fmt.Sprintf(`
-		SELECT %s, email, roles, tenant_id, disabled, expires_at, created_at, updated_at
+		SELECT %s, email, roles, tenant_id, disabled, expires_at, created_at, updated_at, provider_email, provider_seen_at,
+		       CASE WHEN %s = $4 THEN 1 ELSE 0 END
 		FROM sys_users
-		WHERE (email = $1 OR %s = $2) AND anonymized = %s`, idCast, idCast, boolFalse),
-		core.NormalizeEmail(identifier), identifier)
+		WHERE (%s OR %s OR %s = $4) AND anonymized = %s AND %s`,
+		idCast, idCast, compliance.AddressCandidates("email", 1), compliance.AddressCandidates("provider_email", 1),
+		idCast, boolFalse, tenantCond),
+		append(compliance.AddressForms(identifier), identifier, tenant)...)
 	if err != nil {
 		return nil, fmt.Errorf("sys_users export: %w", err)
 	}
@@ -90,16 +112,26 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 			disabled             bool
 			expiresAt            *time.Time
 			createdAt, updatedAt time.Time
+			providerEmail        sql.NullString
+			providerSeenAt       *time.Time
+			byID                 int
 		)
 		if err := rows.Scan(&id, &email, db.NewRolesScanner(&roles), &tenantID,
-			&disabled, &expiresAt, &createdAt, &updatedAt); err != nil {
+			&disabled, &expiresAt, &createdAt, &updatedAt, &providerEmail, &providerSeenAt, &byID); err != nil {
 			return nil, fmt.Errorf("sys_users export scan: %w", err)
+		}
+		if byID == 0 && !compliance.SameAddress(email, identifier) &&
+			(!providerEmail.Valid || !compliance.SameAddress(providerEmail.String, identifier)) {
+			continue
 		}
 		if roles == nil {
 			roles = []string{}
 		}
 		row := map[string]any{
-			"id":         id,
+			// SQL Server renders a UNIQUEIDENTIFIER cast to text in upper
+			// case. Every other answer names an account by the lower case
+			// form, so a consumer matching ids as strings finds this one.
+			"id":         strings.ToLower(id),
 			"email":      email,
 			"roles":      roles,
 			"tenant_id":  tenantID,
@@ -109,6 +141,12 @@ func (e *sysUserExporter) ExportSubject(ctx context.Context, identifier string) 
 		}
 		if expiresAt != nil {
 			row["expires_at"] = *expiresAt
+		}
+		if providerEmail.Valid {
+			row["provider_email"] = providerEmail.String
+		}
+		if providerSeenAt != nil {
+			row["provider_seen_at"] = *providerSeenAt
 		}
 		out = append(out, row)
 	}

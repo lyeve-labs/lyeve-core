@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -209,7 +210,7 @@ func (h *adminTokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Create(r.Context(), tok); err != nil {
-		slog.WarnContext(r.Context(), "create admin token failed", "err", err)
+		slog.WarnContext(logging.ContextAbout(r.Context(), tenant), "create admin token failed", "err", err)
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to create admin token")
 		return
 	}
@@ -427,8 +428,15 @@ func (h *adminTokenHandler) audit(r *http.Request, action string, tok *core.Admi
 	if h.host == nil {
 		return
 	}
+	// A super admin may issue a token for another tenant. The entry is about
+	// that tenant, so it goes under none rather than the one the request
+	// acts in.
+	var opts []compliance.AuditOption
+	if tok.TenantID != core.TenantIDFromCtx(r.Context()) {
+		opts = append(opts, compliance.WithoutTenant())
+	}
 	compliance.RecordAudit(r.Context(), h.host, action, "admin_token", tok.ID.String(),
-		clientIP(r), r.UserAgent())
+		clientIP(r), r.UserAgent(), opts...)
 }
 
 // clientIP is the caller's address as the ClientAddress middleware resolved
@@ -539,8 +547,13 @@ func pageParams(w http.ResponseWriter, r *http.Request) (int, int, bool) {
 }
 
 // stepUp confirms, before a token is issued or rotated, that the person at
-// the session is its owner. An account with MFA enrolled answers with a
-// current code. One without answers with its password. A zero status passes.
+// the session is its owner. An account with an authenticator app answers with
+// a current code. One with no second factor answers with its password. A zero
+// status passes.
+//
+// An account whose only second factor is a passkey holds no code, and step-up
+// takes no passkey assertion. It is refused rather than asked for its
+// password, which would ask less of it than the factor it enrolled.
 //
 // Both answers are guessable by a caller who already holds the session, so
 // both are counted: a wrong code against the MFA lockout, a wrong password
@@ -557,13 +570,21 @@ func (h *AuthHandler) stepUp(r *http.Request, u *domain.User, mfaCode, password 
 		}
 		enrolled = on
 	}
-	if enrolled {
-		return h.stepUpCode(r, u, strings.TrimSpace(mfaCode))
+	if !enrolled {
+		return h.stepUpPassword(r, u, password)
 	}
-	return h.stepUpPassword(r, u, password)
+	encSecret, _, err := h.mfaStore.GetEnabled(ctx, u.ID)
+	if errors.Is(err, core.ErrNotFound) {
+		return http.StatusForbidden, "This account's only second factor is a passkey, which cannot confirm this change."
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "step-up totp secret read failed", "err", err, "user_id", u.ID)
+		return http.StatusServiceUnavailable, "account check unavailable"
+	}
+	return h.stepUpCode(r, u, encSecret, strings.TrimSpace(mfaCode))
 }
 
-func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, code string) (int, string) {
+func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, code string) (int, string) {
 	ctx := r.Context()
 	if code == "" {
 		return http.StatusForbidden, "mfa_code is required: this account has MFA enrolled."
@@ -574,10 +595,6 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, code string) (
 	}
 	if locked {
 		return http.StatusTooManyRequests, "Too many MFA attempts. Try again later."
-	}
-	encSecret, _, err := h.mfaStore.GetEnabled(ctx, u.ID)
-	if err != nil {
-		return http.StatusServiceUnavailable, "account check unavailable"
 	}
 	secret, err := h.totpSecretAny(stepUpSealTenants(r, u), encSecret)
 	if err != nil {

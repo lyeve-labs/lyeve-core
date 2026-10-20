@@ -80,7 +80,7 @@ var expectedPlugins = []string{
 	"email", "graphql", "grpc", "multitenant", "webhook",
 	"ai", "analytics", "apianalytics", "apikey", "audit", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
 	"flow", "goroutine-engine", "idempotency", "profiler",
-	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "pii-mask", "query-monitor",
+	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "permissions", "pii-mask", "query-monitor",
 	"rate-limit", "realtime", "recommendations", "request-capture", "review", "usage",
 	"saml",
 	"schema", "scim", "search", "storage", "telemetry", "waf",
@@ -91,6 +91,11 @@ func main() {
 	// Container HEALTHCHECK probes its own /healthz and exits before engine boot.
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		runtime.Healthcheck()
+	}
+	if len(os.Args) > 1 {
+		runtime.Migrate(os.Args[1:])
+		runtime.Version(os.Args[1], version, commit, buildDate)
+		runtime.Usage(os.Args[1])
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))

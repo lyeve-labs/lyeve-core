@@ -143,7 +143,14 @@ func (s *ContentStore) OnInvalidate(fn func(ctx context.Context, schemaName stri
 }
 
 // invalidateSchema flushes all item and list caches for a schema on any write.
+// A write that joined a caller's transaction flushes once that transaction
+// commits: until then a reader still gets the old row from the database, and
+// a flush before the commit would let it cache that row past it.
 func (s *ContentStore) invalidateSchema(ctx context.Context, schemaName string, id uuid.UUID) {
+	afterCommit(ctx, func(ctx context.Context) { s.flushSchema(ctx, schemaName, id) })
+}
+
+func (s *ContentStore) flushSchema(ctx context.Context, schemaName string, id uuid.UUID) {
 	if s.onInvalidate != nil && (s.itemCache != nil || s.listCache != nil) {
 		s.onInvalidate(ctx, schemaName)
 	}
@@ -175,14 +182,33 @@ func (s *ContentStore) FlushCaches(ctx context.Context) {
 }
 
 // Insert creates a new row in the collection table, tagged with the request's
-// tenant. Only keys matching defined (non-system) field names are written.
-// Unknown keys are ignored.
+// tenant. Only keys matching defined (non-system) field names are written,
+// with _status on a schema with draft and publish. Unknown keys are ignored.
 func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[string]any) (*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
+	var result *domain.Content
+	err = s.writeChecked(ctx, insertRelationValues(sc, data), func(ctx context.Context) error {
+		var werr error
+		result, werr = s.insertRow(ctx, sc, schemaName, table, data)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, result.ID)
+	return result, nil
+}
+
+// insertRow writes one new row under an id the database or the dialect
+// mints and reads it back.
+func (s *ContentStore) insertRow(ctx context.Context, sc *domain.Schema, schemaName, table string, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -200,12 +226,7 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 		if qErr != nil {
 			return nil, fmt.Errorf("content insert: %w", qErr)
 		}
-		result, err := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-		if err != nil {
-			return nil, err
-		}
-		s.invalidateSchema(ctx, schemaName, result.ID)
-		return result, nil
+		return scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 	}
 
 	// MySQL / MSSQL: generate UUID in Go, INSERT with explicit id, then SELECT.
@@ -227,7 +248,6 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 	if err != nil {
 		return nil, fmt.Errorf("content insert select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, result.ID)
 	return result, nil
 }
 
@@ -241,6 +261,24 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
+	var result *domain.Content
+	err = s.writeChecked(ctx, insertRelationValues(sc, data), func(ctx context.Context) error {
+		var werr error
+		result, werr = s.insertRowWithID(ctx, sc, schemaName, table, id, data)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, result.ID)
+	return result, nil
+}
+
+// insertRowWithID writes one new row under id and reads it back.
+func (s *ContentStore) insertRowWithID(ctx context.Context, sc *domain.Schema, schemaName, table string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 	cols, args := buildInsert(sc, data, d)
@@ -257,12 +295,7 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 		if qErr != nil {
 			return nil, fmt.Errorf("content insert: %w", qErr)
 		}
-		result, err := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-		if err != nil {
-			return nil, err
-		}
-		s.invalidateSchema(ctx, schemaName, result.ID)
-		return result, nil
+		return scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 	}
 
 	// MySQL / MSSQL: no RETURNING. Read back the row just written.
@@ -280,7 +313,6 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 	if err != nil {
 		return nil, fmt.Errorf("content insert select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, result.ID)
 	return result, nil
 }
 
@@ -311,7 +343,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 
 	// Cache read
 	tenantID := tenant.ID(ctx)
-	if s.listCache != nil {
+	if s.listCache != nil && writeTx(ctx) == nil {
 		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
 		if cached, ok := s.listCache.Get(ctx, key); ok {
 			s.ListCacheHits.Add(1)
@@ -403,7 +435,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 	}
 	// Cache write: skip for oversized limits (abusive or direct-caller paths).
 	// The handler clamps to ≤200. This guard covers unclamped callers.
-	if s.listCache != nil && limit <= 200 {
+	if s.listCache != nil && limit <= 200 && writeTx(ctx) == nil {
 		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
 		// The cache keeps its own copy so that what it holds stays as the
 		// database returned it, whatever the caller does to the page it got.
@@ -421,9 +453,11 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 // caller as a 503 on a request that never made it to the row. The read did not
 // happen, so running it again is not a duplicate. Postgres and MySQL read from
 // a snapshot and rarely take this path, but the retry costs them nothing.
+// Inside a caller's transaction the deadlock goes to the caller instead, as
+// retryOwnTx says.
 func (s *ContentStore) GetByID(ctx context.Context, schemaName string, id uuid.UUID) (*domain.Content, error) {
 	var out *domain.Content
-	err := sqlx.RetryOnTxConflict(ctx, "content get", func() error {
+	err := retryOwnTx(ctx, "content get", func() error {
 		var gerr error
 		out, gerr = s.getByIDOnce(ctx, schemaName, id)
 		return gerr
@@ -435,9 +469,10 @@ func (s *ContentStore) GetByID(ctx context.Context, schemaName string, id uuid.U
 }
 
 func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uuid.UUID) (*domain.Content, error) {
-	// Cache read
+	// A read inside a caller's transaction can see writes that have not
+	// committed, so it neither reads the cache nor fills it.
 	tenantID := tenant.ID(ctx)
-	if s.itemCache != nil {
+	if s.itemCache != nil && writeTx(ctx) == nil {
 		key := cacheItemKey(tenantID, schemaName, id)
 		if cached, ok := s.itemCache.Get(ctx, key); ok {
 			return cloneContent(cached), nil
@@ -467,10 +502,20 @@ func (s *ContentStore) getByIDOnce(ctx context.Context, schemaName string, id uu
 		return nil, err
 	}
 	// Cache write
-	if s.itemCache != nil {
+	if s.itemCache != nil && writeTx(ctx) == nil {
 		_ = s.itemCache.Set(ctx, cacheItemKey(tenantID, schemaName, id), cloneContent(c), 0) // err suppressed: cache is best-effort
 	}
 	return c, nil
+}
+
+// draftWhere returns the WHERE fragment that keeps a read to published rows,
+// or nothing when the schema has no draft and publish or the caller may read
+// drafts. A NULL status reads as published, the way the list filter treats it.
+func draftWhere(sc *domain.Schema, alias string, drafts bool) string {
+	if drafts || sc == nil || !sc.WithDraftPublish {
+		return ""
+	}
+	return fmt.Sprintf(" AND (%s._status = 'published' OR %s._status IS NULL)", alias, alias)
 }
 
 // softDeleteWhere returns an extra WHERE clause fragment when soft-delete is enabled.
@@ -489,10 +534,11 @@ func softDeleteWhere(sc *domain.Schema) string {
 // A deadlock victim is retried. SQL Server picks one of two contending writers
 // and rolls its statement back whole with error 1205, and MySQL and Postgres do
 // the same under their own codes. Without a retry that concurrency loss would
-// reach the caller as a 503 on a write that never happened.
+// reach the caller as a 503 on a write that never happened. Inside a caller's
+// transaction the deadlock goes to the caller instead, as retryOwnTx says.
 func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	var out *domain.Content
-	err := sqlx.RetryOnTxConflict(ctx, "content update", func() error {
+	err := retryOwnTx(ctx, "content update", func() error {
 		var uerr error
 		out, uerr = s.updateOnce(ctx, schemaName, id, data, expectedUpdatedAt)
 		return uerr
@@ -501,6 +547,20 @@ func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UU
 		return nil, err
 	}
 	return out, nil
+}
+
+// retryOwnTx runs fn under sqlx.RetryOnTxConflict, unless ctx carries a
+// transaction a caller opened, which fn joins. A deadlock ends that
+// transaction: MySQL and SQL Server roll it back whole, so a statement run
+// again would commit on its own outside it, and PostgreSQL refuses every
+// statement after it. Only the caller can start its transaction over, so fn
+// runs once and the deadlock reaches the caller as it is, which
+// sqlx.IsRetryableTxError still recognizes.
+func retryOwnTx(ctx context.Context, label string, fn func() error) error {
+	if writeTx(ctx) != nil {
+		return fn()
+	}
+	return sqlx.RetryOnTxConflict(ctx, label, fn)
 }
 
 // updateOnce runs one attempt of Update. Safe to repeat: a rolled-back
@@ -512,11 +572,29 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 		return nil, err
 	}
 
+	if _, _, err := contentStatus(sc, data); err != nil {
+		return nil, fmt.Errorf("content update: %w", err)
+	}
 	sets, args := buildUpdate(sc, data, dialect.Must(s.pool.Engine()))
 	if len(sets) == 0 {
 		return s.GetByID(ctx, schemaName, id)
 	}
 
+	var c *domain.Content
+	err = s.writeChecked(ctx, core.RelationValues(sc.Fields, data), func(ctx context.Context) error {
+		var werr error
+		c, werr = s.updateRow(ctx, sc, schemaName, table, id, sets, args, expectedUpdatedAt)
+		return werr
+	})
+	if err != nil {
+		return nil, err
+	}
+	s.invalidateSchema(ctx, schemaName, id)
+	return c, nil
+}
+
+// updateRow writes sets to one row of the caller's tenant and reads it back.
+func (s *ContentStore) updateRow(ctx context.Context, sc *domain.Schema, schemaName, table string, id uuid.UUID, sets []string, args []any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
 
@@ -546,7 +624,6 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 		if err != nil {
 			return nil, err
 		}
-		s.invalidateSchema(ctx, schemaName, id)
 		return c, nil
 	}
 
@@ -574,7 +651,6 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 	if err != nil {
 		return nil, fmt.Errorf("content update select: %w", err)
 	}
-	s.invalidateSchema(ctx, schemaName, id)
 	return c, nil
 }
 
@@ -712,9 +788,9 @@ func (w *actionWalker) delete(schemaName string, id uuid.UUID) (int64, error) {
 					}
 				}
 			case domain.RelManyToMany:
-				pivot := f.RelationThrough
-				if pivot == "" {
-					pivot = domain.PivotTableName(sc.Name, f.RelationTo)
+				pivot, err := w.store.pivotTable(w.ctx, sc.Name, f)
+				if err != nil {
+					return 0, fmt.Errorf("delete %s: %w", schemaName, err)
 				}
 				pivot = w.store.qualify(pivot)
 				for _, side := range []string{sc.Name, f.RelationTo} {
@@ -759,7 +835,12 @@ func (w *actionWalker) ids(q string, args ...any) ([]uuid.UUID, error) {
 // cursor-based (keyset) pagination for efficient large-dataset traversal.
 // cursor is the UUID of the last seen row. Pass "" for the first page.
 // Rows are returned in ascending id order.
-func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int) ([]*domain.Content, error) {
+//
+// A soft-deleted row is never served. An unpublished row is served only when
+// drafts is true, which the caller decides from who is asking: this list has
+// no filter, so it cannot follow the offset list's default of published
+// unless a status is named.
+func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int, drafts bool) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
@@ -775,6 +856,7 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 		limitClause = "OFFSET 0 ROWS FETCH NEXT $1 ROWS ONLY"
 	}
 	tenantID := tenant.ID(ctx)
+	visible := softDeleteWhere(sc) + draftWhere(sc, "r", drafts)
 
 	var (
 		query string
@@ -785,9 +867,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE tenant_id = $2
+			WHERE tenant_id = $2%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, tenantID}
 	} else {
 		cursorID, parseErr := uuid.Parse(cursor)
@@ -798,9 +880,9 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE id > $2 AND tenant_id = $3
+			WHERE id > $2 AND tenant_id = $3%s
 			ORDER BY id ASC
-			%s`, dataExpr, table, limitClause)
+			%s`, dataExpr, table, visible, limitClause)
 		args = []any{limit, cursorID, tenantID}
 	}
 
@@ -823,66 +905,74 @@ func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor
 
 // BulkInsert inserts multiple rows in a single transaction.
 // Returns the inserted records. If any row fails the whole batch is rolled back.
+// A relation in any row that names no row of the caller's tenant refuses the
+// whole batch before a row is written.
 func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items []map[string]any) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
 	}
 
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin bulk insert tx: %w", err)
+	var values []core.RelationValue
+	for _, data := range items {
+		if _, _, err := contentStatus(sc, data); err != nil {
+			return nil, fmt.Errorf("bulk insert: %w", err)
+		}
+		values = append(values, insertRelationValues(sc, data)...)
 	}
-	defer tx.Rollback() //nolint:errcheck // deferred rollback. Commit result takes precedence
 
 	isPG := s.pool.Engine() == "postgres"
 	tenantID := tenant.ID(ctx)
 	tenantCol := dialect.Must(s.pool.Engine()).QuoteIdentifier(TenantColumnName)
-	results := make([]*domain.Content, 0, len(items))
-	for _, data := range items {
-		cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
-		cols = append([]string{tenantCol}, cols...)
-		args = append([]any{tenantID}, args...)
-		if isPG {
-			ph := placeholders(len(args))
-			row := tx.QueryRowContext(ctx,
-				fmt.Sprintf(`INSERT INTO %s AS r (%s) VALUES (%s) RETURNING %s`,
-					table, strings.Join(cols, ", "), ph, writtenRowColumns(s.pool.Engine(), sc)),
-				args...,
-			)
-			c, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
-			if scanErr != nil {
-				return nil, fmt.Errorf("bulk insert row scan: %w", scanErr)
+	var results []*domain.Content
+	err = s.inTransactionChecked(ctx, values, func(ctx context.Context) error {
+		results = make([]*domain.Content, 0, len(items))
+		for _, data := range items {
+			cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
+			cols = append([]string{tenantCol}, cols...)
+			args = append([]any{tenantID}, args...)
+			if isPG {
+				ph := placeholders(len(args))
+				row, qErr := s.pool.QueryRow(ctx,
+					fmt.Sprintf(`INSERT INTO %s AS r (%s) VALUES (%s) RETURNING %s`,
+						table, strings.Join(cols, ", "), ph, writtenRowColumns(s.pool.Engine(), sc)),
+					args...,
+				)
+				if qErr != nil {
+					return fmt.Errorf("bulk insert row: %w", qErr)
+				}
+				c, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
+				if scanErr != nil {
+					return fmt.Errorf("bulk insert row scan: %w", scanErr)
+				}
+				results = append(results, c)
+				continue
 			}
-			results = append(results, c)
-		} else {
 			// MySQL / MSSQL: generate UUID in Go, INSERT with explicit id, then SELECT.
 			newID := uuid.New()
 			cols = append([]string{"id"}, cols...)
 			args = append([]any{newID}, args...)
 			ph := placeholders(len(args))
-
-			insertSQL, insertArgs := rewritePlaceholders(
+			if _, execErr := s.pool.Exec(ctx,
 				fmt.Sprintf(`INSERT INTO %s (%s) VALUES (%s)`, table, strings.Join(cols, ", "), ph),
-				s.pool.Engine(), args,
-			)
-			if _, execErr := tx.ExecContext(ctx, insertSQL, insertArgs...); execErr != nil {
-				return nil, fmt.Errorf("bulk insert row: %w", execErr)
+				args...,
+			); execErr != nil {
+				return fmt.Errorf("bulk insert row: %w", execErr)
 			}
-			selectSQL, selectArgs := rewritePlaceholders(
-				writtenRowSelect(s.pool.Engine(), sc, table),
-				s.pool.Engine(), []any{newID, tenantID},
-			)
-			result, scanErr := scanWrittenRow(s.pool.Engine(), tx.QueryRowContext(ctx, selectSQL, selectArgs...), schemaName, sc)
+			row, qErr := s.pool.QueryRow(ctx, writtenRowSelect(s.pool.Engine(), sc, table), newID, tenantID)
+			if qErr != nil {
+				return fmt.Errorf("bulk insert row select: %w", qErr)
+			}
+			result, scanErr := scanWrittenRow(s.pool.Engine(), row, schemaName, sc)
 			if scanErr != nil {
-				return nil, fmt.Errorf("bulk insert row select: %w", scanErr)
+				return fmt.Errorf("bulk insert row select: %w", scanErr)
 			}
 			results = append(results, result)
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit bulk insert: %w", err)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return results, nil
 }
@@ -1055,18 +1145,13 @@ func normalizeContentTime(v any) any {
 }
 
 // dataColumnExpr returns the SQL expression that extracts user-defined columns
-// as a JSON value, aliased as "data". PostgreSQL uses to_jsonb, and MySQL/MSSQL
-// uses JSON_OBJECT built from the schema field list.
+// as a JSON value, aliased as "data". Every dialect builds it from the schema
+// field list, never from the row: a removed field keeps its column until the
+// drop is applied, and the definition is what a reader is served.
 // Column-name references are dialect-quoted (backticks/brackets/double-quotes)
 // via QuoteIdentifier so reserved-word field names (order, group, key, etc.)
 // do not cause syntax errors.
 func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
-	if engine == "postgres" {
-		// tenant_id is an isolation marker, never user data: exclude it from
-		// the returned JSON object.
-		return fmt.Sprintf("(to_jsonb(%s) - 'id' - 'created_at' - 'updated_at' - '%s') AS data", alias, TenantColumnName)
-	}
-	// MySQL / MSSQL: build a JSON object from known schema columns.
 	d := dialect.Must(engine)
 	qi := d.QuoteIdentifier
 	cols := make([]string, 0, len(sc.Fields)+3)
@@ -1075,8 +1160,7 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 			continue
 		}
 		// Virtual relations (has_one, has_many, many_to_many) hold no column
-		// on this table. PostgreSQL's to_jsonb never emits them, and the
-		// physical column does not exist to reference here.
+		// on this table to reference.
 		if f.FieldType == "relation" &&
 			(f.RelationType == domain.RelHasOne || f.RelationType == domain.RelHasMany || f.RelationType == domain.RelManyToMany) {
 			continue
@@ -1092,6 +1176,21 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 	}
 	if sc.WithLocalization {
 		cols = append(cols, "_locale")
+	}
+
+	if engine == "postgres" {
+		// jsonb_build_object takes at most 50 pairs, so the row is projected
+		// through a subquery whose column names become the keys. A bare d
+		// would resolve to a column named d, a field or a foreign key, before
+		// the subquery's row, so the row is written d.*.
+		if len(cols) == 0 {
+			return "'{}'::jsonb AS data"
+		}
+		sel := make([]string, len(cols))
+		for i, col := range cols {
+			sel[i] = alias + "." + qi(col) + " AS " + qi(col)
+		}
+		return "(SELECT to_jsonb(d.*) FROM (SELECT " + strings.Join(sel, ", ") + ") d) AS data"
 	}
 
 	if engine == "mssql" {
@@ -1149,8 +1248,31 @@ func scanWrittenRow(engine string, row interface{ Scan(...any) error }, schemaNa
 	return c, nil
 }
 
+// contentStatus returns the publication status a write carries in the
+// _status key, and whether it carries one. Only a schema with draft and
+// publish has the column. On any other schema the key is ignored, because a
+// projection sends the status whatever the schema it writes into. A value the
+// read filters never match is domain.ErrValidation, so the row cannot be
+// stored in a state no read path can classify.
+func contentStatus(sc *domain.Schema, data map[string]any) (string, bool, error) {
+	if !sc.WithDraftPublish {
+		return "", false, nil
+	}
+	v, ok := data["_status"]
+	if !ok || v == nil {
+		return "", false, nil
+	}
+	status, isString := v.(string)
+	if !isString || !core.ValidContentStatus(status) {
+		return "", false, fmt.Errorf("%w: unknown status %v", domain.ErrValidation, v)
+	}
+	return status, true, nil
+}
+
 // buildInsert returns column names and argument values for an INSERT, using
-// only schema-defined non-system fields present in data.
+// the schema-defined non-system fields present in data and _status when the
+// schema has draft and publish. Callers check the status with contentStatus
+// first, which is where an invalid one is refused.
 // Column names come from the schema definition (server-controlled, never
 // from user input), so no SQL injection surface exists here.
 // For belongs_to relation fields the physical column is {name}_id. Data is
@@ -1188,6 +1310,13 @@ func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (col
 		cols = append(cols, qi(col))
 		args = append(args, bindContentValue(f, v))
 	}
+	// _status is a system column, so the field loop never sees it. Without
+	// this the column takes its default of published, and a write that asked
+	// for a draft makes the entry public.
+	if status, ok, _ := contentStatus(sc, data); ok {
+		cols = append(cols, qi("_status"))
+		args = append(args, status)
+	}
 	return
 }
 
@@ -1210,6 +1339,10 @@ func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (set
 			args = append(args, bindContentValue(f, v))
 			i++
 		}
+	}
+	if status, ok, _ := contentStatus(sc, data); ok {
+		sets = append(sets, fmt.Sprintf("%s = $%d", qi("_status"), i))
+		args = append(args, status)
 	}
 	return
 }

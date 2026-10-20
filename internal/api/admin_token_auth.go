@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -203,6 +204,10 @@ func (a *adminTokenAuth) authenticate(next http.Handler) http.Handler {
 // status admits it.
 func (a *adminTokenAuth) admit(r *http.Request, tok *core.AdminToken, ip string) (*core.AuthClaims, int, string) {
 	ctx := r.Context()
+	// This runs before tenancy is resolved, so the context holds the tenant a
+	// mapped domain names, which need not be the token's. The lines below are
+	// about the token, so they keep that tenant only when it is the token's.
+	logCtx := logging.ContextAbout(ctx, tok.TenantID)
 	now := a.now()
 	if tok.RevokedAt != nil {
 		return nil, http.StatusUnauthorized, msgAdminTokenRevoked
@@ -220,7 +225,7 @@ func (a *adminTokenAuth) admit(r *http.Request, tok *core.AdminToken, ip string)
 		if errors.Is(err, domain.ErrNotFound) {
 			return nil, http.StatusUnauthorized, msgAdminTokenOwner
 		}
-		slog.WarnContext(ctx, "admin token owner lookup failed", "err", err, "token_id", tok.ID)
+		slog.WarnContext(logCtx, "admin token owner lookup failed", "err", err, "token_id", tok.ID)
 		return nil, httpx.StoreStatusFor(err), msgAdminTokenCheckFailed
 	}
 	// An erased account keeps its row, marked anonymized, which the token
@@ -244,7 +249,7 @@ func (a *adminTokenAuth) admit(r *http.Request, tok *core.AdminToken, ip string)
 		if errors.Is(err, errNotAMember) {
 			return nil, http.StatusUnauthorized, msgAdminTokenOwner
 		}
-		slog.WarnContext(ctx, "admin token owner membership lookup failed", "err", err, "token_id", tok.ID)
+		slog.WarnContext(logCtx, "admin token owner membership lookup failed", "err", err, "token_id", tok.ID)
 		return nil, httpx.StoreStatusFor(err), msgAdminTokenCheckFailed
 	}
 	// Only an admin of the tenant may own a token there, on every request:
@@ -255,7 +260,7 @@ func (a *adminTokenAuth) admit(r *http.Request, tok *core.AdminToken, ip string)
 	}
 	return &core.AuthClaims{
 		UserID:       owner.ID.String(),
-		Email:        owner.Email,
+		Email:        owner.SignInEmail(),
 		Roles:        tokenRoles(roles),
 		TenantID:     tok.TenantID,
 		TokenType:    "admin_token",

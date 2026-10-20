@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -62,7 +63,7 @@ func deleteCoreTableRows(ctx context.Context, q core.Querier, slug string, table
 		if err != nil {
 			return fmt.Errorf("%s purge: %w", t, err)
 		}
-		slog.DebugContext(ctx, "core table purge rows affected",
+		slog.DebugContext(logging.ContextAbout(ctx, slug), "core table purge rows affected",
 			"table", t, "slug", slug, "rows", tag.RowsAffected)
 	}
 	return nil

@@ -16,9 +16,16 @@ import (
 // RegisterPluginWithCaps, never the implicit core.CapAll, so a plugin someone
 // forgets to list cannot silently run with secret, raw database or admin
 // access.
+//
+// The role capabilities in core.CapRoles come from the entry alone. They name
+// what a plugin supplies rather than what it reaches, the table gives each to
+// one plugin, and a declaration written before a role had a capability would
+// otherwise take the role from the plugin that supplies it. core.CapSessionSign
+// comes from the entry alone for the same reason: the sign-in plugins declared
+// their reach before signing had a capability.
 func CapPolicy(name string) core.Capability {
 	if p, ok := capPolicyEntry(name); ok {
-		return p & PluginCaps(name)
+		return p & (PluginCaps(name) | core.CapRoles | core.CapSessionSign)
 	}
 	if caps, explicit := pluginCapsExplicit(name); explicit {
 		return caps

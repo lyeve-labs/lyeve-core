@@ -2,8 +2,10 @@ package db
 
 import (
 	"context"
+	"crypto/md5" //nolint:gosec // MD5 names a lock
 	"database/sql"
 	"database/sql/driver"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -253,6 +255,12 @@ func Migrate(dsn, migrationsRoot string, seed VersionSeed) (int, error) {
 	}
 	// Lock auto-releases when lockConn is closed on function return.
 
+	if engine == "mysql" {
+		if err := ensureMySQLCollation(context.Background(), lockConn); err != nil {
+			return 0, err
+		}
+	}
+
 	m, err := migrate.New("file://"+abs, withMigrationsTable(migrateDSN))
 	if err != nil {
 		return 0, fmt.Errorf("create migrator (%s): %w", engine, err)
@@ -279,6 +287,49 @@ func Migrate(dsn, migrationsRoot string, seed VersionSeed) (int, error) {
 	}
 	after, _, _ := m.Version()
 	return int(after) - int(before), nil
+}
+
+// mysqlCollation is the collation every MySQL table the engine and its plugins
+// create must share. Plugin migrations name it on their tables, and the
+// engine's take the database default, so the two meet in joins and foreign
+// keys only when the database default is this one too.
+const mysqlCollation = "utf8mb4_unicode_ci"
+
+// ensureMySQLCollation gives a database the engine has not yet installed into
+// the collation its tables need.
+//
+// MySQL 8 and later default a new database to utf8mb4_0900_ai_ci, and so does
+// the official container image. Under that default the engine's tables and a
+// plugin's disagree, and the first migration that compares them fails with
+// error 1267, "Illegal mix of collations". Changing a database's default
+// alters no existing table, so it is safe while the engine's tables are absent.
+// Once they exist under another collation it would split them further, so the
+// engine only says what is wrong.
+func ensureMySQLCollation(ctx context.Context, conn *sql.Conn) error {
+	var collation string
+	if err := conn.QueryRowContext(ctx, "SELECT @@collation_database").Scan(&collation); err != nil {
+		return fmt.Errorf("read database collation: %w", err)
+	}
+	if collation == mysqlCollation {
+		return nil
+	}
+	var installed int
+	if err := conn.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'sys_users'").Scan(&installed); err != nil {
+		return fmt.Errorf("read installed tables: %w", err)
+	}
+	if installed > 0 {
+		slog.Warn("database default collation differs from the engine's tables",
+			"collation", collation, "want", mysqlCollation,
+			"fix", "create the database with CHARACTER SET utf8mb4 COLLATE "+mysqlCollation)
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, "ALTER DATABASE CHARACTER SET utf8mb4 COLLATE "+mysqlCollation); err != nil {
+		return fmt.Errorf("set database collation to %s (create the database with CHARACTER SET utf8mb4 COLLATE %s): %w",
+			mysqlCollation, mysqlCollation, err)
+	}
+	slog.Info("set the database default collation", "from", collation, "to", mysqlCollation)
+	return nil
 }
 
 // withMigrationsTable points golang-migrate at MigrationsTable. Every driver
@@ -350,9 +401,12 @@ func tryMigrationLock(ctx context.Context, conn *sql.Conn, engine string) (bool,
 		// GET_LOCK names are server-wide and capped at 64 characters, so the
 		// lock is keyed by a digest of the target schema. Two instances
 		// migrating different databases on one server must not block each other.
+		name, err := mysqlSchemaLockName(ctx, conn, "lyeve_migration")
+		if err != nil {
+			return false, err
+		}
 		var result sql.NullInt64
-		if err := conn.QueryRowContext(ctx,
-			"SELECT GET_LOCK(CONCAT('lyeve_migration_', MD5(DATABASE())), 0)").Scan(&result); err != nil {
+		if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK('"+name+"', 0)").Scan(&result); err != nil {
 			return false, err
 		}
 		return result.Valid && result.Int64 == 1, nil
@@ -367,6 +421,21 @@ func tryMigrationLock(ctx context.Context, conn *sql.Conn, engine string) (bool,
 		// No advisory lock for this engine: proceed rather than block forever.
 		return true, nil
 	}
+}
+
+// mysqlSchemaLockName returns prefix, an underscore and the MD5 of the current
+// schema's name in lowercase hex: the name CONCAT(prefix, '_', MD5(DATABASE()))
+// gave when the server computed it. The digest is taken here because MySQL 9
+// has no MD5 function, and it stays MD5 so an engine that still asks the server
+// for it takes the same lock during an upgrade. It is a lock key, not a
+// security control, and hex after a fixed prefix is safe to inline in SQL.
+func mysqlSchemaLockName(ctx context.Context, conn *sql.Conn, prefix string) (string, error) {
+	var schema sql.NullString
+	if err := conn.QueryRowContext(ctx, "SELECT DATABASE()").Scan(&schema); err != nil {
+		return "", fmt.Errorf("read current schema: %w", err)
+	}
+	sum := md5.Sum([]byte(schema.String)) //nolint:gosec // a lock key, not a security control
+	return prefix + "_" + hex.EncodeToString(sum[:]), nil
 }
 
 // EngineFromDSN identifies the database engine a connection string targets, from
@@ -400,7 +469,7 @@ func EngineFromDSN(dsn string) string {
 // unchanged.
 func driverDSN(engine, dsn string) string {
 	if engine == "mysql" {
-		return withUTCLocation(withClientFoundRows(withMultiStatements(strings.TrimPrefix(dsn, "mysql://"))))
+		return withUTCLocation(withParseTime(withClientFoundRows(withMultiStatements(strings.TrimPrefix(dsn, "mysql://")))))
 	}
 	return dsn
 }
@@ -422,25 +491,59 @@ func withClientFoundRows(dsn string) string {
 	return appendDSNParam(dsn, "clientFoundRows=true")
 }
 
+// withParseTime guarantees parseTime=true on a MySQL DSN, rewriting an
+// explicit false.
+//
+// Without it the driver returns DATETIME and TIMESTAMP columns as bytes, and
+// every scan into a time.Time fails with "unsupported Scan". The engine boots
+// without reading a time, so a URL that lacks the flag starts cleanly and then
+// refuses its own setup request.
+func withParseTime(dsn string) string {
+	base, query, ok := strings.Cut(dsn, "?")
+	if !ok {
+		return appendDSNParam(dsn, "parseTime=true")
+	}
+	params := strings.Split(query, "&")
+	for i, p := range params {
+		if strings.HasPrefix(p, "parseTime=") {
+			params[i] = "parseTime=true"
+			return base + "?" + strings.Join(params, "&")
+		}
+	}
+	return appendDSNParam(dsn, "parseTime=true")
+}
+
 // withUTCLocation holds the MySQL driver's time location at UTC, which is its
-// default, by rewriting any loc parameter a DATABASE_URL carries.
+// default, by rewriting any loc parameter a DATABASE_URL carries, and pins the
+// session time zone to UTC in place of any time_zone the URL names.
 //
 // A DATETIME column keeps no offset. The driver writes a time.Time as the
 // wall clock in its location, and the content read path takes every stored
 // datetime to be UTC, because that is the only way three databases can return
 // one value. Under loc=Local on a host that is not on UTC, a datetime written
 // at 09:30Z would be stored as the host's wall clock and read back hours off.
+//
+// MySQL evaluates NOW(), CURRENT_TIMESTAMP and column defaults in the session
+// zone, which is the server's own unless the session sets one. On a server
+// that is not on UTC those times would read back off by its offset, and a
+// comparison between a Go time and NOW() would be off by the same amount. The
+// driver sends time_zone='+00:00' on every new connection, and the offset form
+// needs no time zone tables on the server.
 func withUTCLocation(dsn string) string {
-	base, query, ok := strings.Cut(dsn, "?")
-	if !ok {
-		return dsn
-	}
-	params := strings.Split(query, "&")
-	for i, p := range params {
-		if strings.HasPrefix(p, "loc=") {
-			params[i] = "loc=UTC"
+	base, query, _ := strings.Cut(dsn, "?")
+	var params []string
+	if query != "" {
+		for _, p := range strings.Split(query, "&") {
+			if strings.HasPrefix(p, "time_zone=") {
+				continue
+			}
+			if strings.HasPrefix(p, "loc=") {
+				p = "loc=UTC"
+			}
+			params = append(params, p)
 		}
 	}
+	params = append(params, "time_zone=%27%2B00%3A00%27")
 	return base + "?" + strings.Join(params, "&")
 }
 

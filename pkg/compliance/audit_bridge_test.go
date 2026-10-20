@@ -108,6 +108,78 @@ func TestRecordAuditWithState_ActingTenantWinsOverClaim(t *testing.T) {
 	assert.Equal(t, "acme", w.last.TenantID)
 }
 
+func TestRecordAudit_WithoutTenantFilesUnderNoTenant(t *testing.T) {
+	w := &captureAuditWriter{}
+	RegisterAuditWriter(w)
+	t.Cleanup(ClearAuditWriter)
+
+	// A super admin whose home tenant is "default" deletes tenant "acme". The
+	// entry names acme, so neither default's nor acme's admins may read it.
+	claims := &core.AuthClaims{UserID: uuid.New().String(), TenantID: "default"}
+	scoped := core.WithTenantID(context.WithValue(context.Background(), core.ClaimsKey, claims), "default")
+	unscoped := core.WithTenantID(context.WithValue(context.Background(), core.ClaimsKey, claims), "")
+
+	for name, ctx := range map[string]context.Context{"scoped": scoped, "claims only": unscoped} {
+		w.last = AuditEntry{}
+		RecordAudit(ctx, nil, "tenant.delete", "tenant", "acme", "ip", "ua", WithoutTenant())
+		assert.Empty(t, w.last.TenantID, name)
+		assert.Equal(t, "tenant.delete", w.last.Action, name)
+		assert.NotNil(t, w.last.UserID, name)
+
+		w.last = AuditEntry{}
+		r := httptest.NewRequest(http.MethodDelete, "/api/admin/tenants/acme", nil).WithContext(ctx)
+		RecordAuditFromRequestWithState(r, nil, "tenant.delete", "tenant", "acme", nil, nil, WithoutTenant(), WithSync())
+		assert.Empty(t, w.last.TenantID, name)
+		assert.NotNil(t, w.last.UserID, name)
+	}
+
+	// Without the option the claim still fills a context that names no tenant.
+	RecordAudit(unscoped, nil, "tenant.update", "tenant", "default", "ip", "ua")
+	assert.Equal(t, "default", w.last.TenantID)
+}
+
+// WithoutTenant changes where an entry is filed and nothing else. An entry
+// that also asks for a confirmed write still reaches the synchronous writer,
+// in either order.
+func TestRecordAudit_WithoutTenantKeepsWithSync(t *testing.T) {
+	w := &captureAuditWriter{}
+	RegisterAuditWriter(w)
+	t.Cleanup(ClearAuditWriter)
+
+	ctx := core.WithTenantID(context.Background(), "acme")
+	for name, opts := range map[string][]AuditOption{
+		"without tenant first": {WithoutTenant(), WithSync()},
+		"sync first":           {WithSync(), WithoutTenant()},
+	} {
+		w.syncCalls, w.asyncCalls, w.last = 0, 0, AuditEntry{TenantID: "unset"}
+		RecordAudit(ctx, nil, "tenant.delete", "tenant", "globex", "ip", "ua", opts...)
+		assert.Equal(t, 1, w.syncCalls, name)
+		assert.Zero(t, w.asyncCalls, name)
+		assert.Empty(t, w.last.TenantID, name)
+	}
+}
+
+// RecordAuditFromRequest hands its options on. Dropped there, an entry about
+// another tenant would be filed under the request's tenant and written
+// without the confirmation its caller asked for.
+func TestRecordAuditFromRequest_PassesItsOptions(t *testing.T) {
+	w := &captureAuditWriter{}
+	RegisterAuditWriter(w)
+	t.Cleanup(ClearAuditWriter)
+
+	r := httptest.NewRequest(http.MethodDelete, "/api/admin/tenants/globex", nil)
+	r = r.WithContext(core.WithTenantID(r.Context(), "acme"))
+
+	RecordAuditFromRequest(r, nil, "tenant.delete", "tenant", "globex", WithoutTenant(), WithSync())
+	assert.Equal(t, 1, w.syncCalls)
+	assert.Zero(t, w.asyncCalls)
+	assert.Empty(t, w.last.TenantID)
+
+	RecordAuditFromRequest(r, nil, "tenant.update", "tenant", "acme")
+	assert.Equal(t, 1, w.asyncCalls)
+	assert.Equal(t, "acme", w.last.TenantID, "without options the request's tenant files it")
+}
+
 func TestRecordAuditWithState_SyncErrorIsLoggedNotPanicked(t *testing.T) {
 	w := &captureAuditWriter{syncErr: errors.New("write failed")}
 	RegisterAuditWriter(w)

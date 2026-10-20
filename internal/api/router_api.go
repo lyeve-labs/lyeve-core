@@ -3,6 +3,8 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -53,8 +55,8 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 		AllowCredentials: false,
 		PreflightMaxAge:  cfg.CORSPreflightMaxAge,
 		AllowMethods:     cfg.CORSAllowMethods,
-		AllowHeaders:     cfg.CORSAllowHeaders,
-		ExposeHeaders:    cfg.CORSExposeHeaders,
+		AllowHeaders:     allowedHeaders(cfg.CORSAllowHeaders, o.declaredRouteSets()),
+		ExposeHeaders:    exposedHeaders(cfg.CORSExposeHeaders, o.declaredRouteSets()),
 		AllowedDomains:   cfg.CORSAllowedDomains,
 	}))
 	// Pre-auth middleware: a plugin implementing
@@ -94,26 +96,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	}
 	schemaPresent := func() bool { return !schemaEngineAbsent(contentSchemas) }
 
-	// The kernel's content caches stay in process memory whatever
-	// CACHE_DRIVER says. A shared backend would not help: a write flushes the
-	// list cache whole, which on a shared backend flushes every key in it.
-	// Replicas keep their memory caches coherent through the instance bus.
-	cacheCfg := cache.CacheConfig{
-		Driver:     "memory",
-		TTL:        cfg.CacheTTL,
-		MaxEntries: cfg.CacheMaxEntries,
-	}
-	itemCache, ierr := cache.New[*domain.Content](cacheCfg, "content:item")
-	if ierr != nil {
-		slog.Error("failed to init item cache; falling back to no-cache", "error", ierr)
-		itemCache = nil
-	}
-	listCache, lerr := cache.New[[]*domain.Content](cacheCfg, "content:list")
-	if lerr != nil {
-		slog.Error("failed to init list cache; falling back to no-cache", "error", lerr)
-		listCache = nil
-	}
-	contentStore := db.NewContentStoreWithCache(pool, contentSchemas, itemCache, listCache)
+	contentStore := newContentStore(pool, contentSchemas, cfg.CacheTTL, cfg.CacheMaxEntries)
 	// Hand the same instance to the plugin host: a plugin that writes content
 	// must invalidate the very caches these reads are served from.
 	if o.contentStoreSink != nil {
@@ -125,7 +108,8 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	userStore := db.NewUserStore(pool)
 	// Auto-mounted via RoutesPlugin.
 
-	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions}
+	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once), streamSlots: new(streamSlots),
+		streamCredential: streamCredential(tokenVersionGetter(userStore), o.apiKeyAuth)}
 
 	secureCook := cfg.SecureCookie
 	authHandler := NewAuthHandler(userStore, o.mfaStore, pool, cfg.JWTSecret, cfg.JWTExpirySecs, secureCook)
@@ -251,7 +235,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			// because a client reading content has to discover what it may
 			// read without holding admin rights, and they answer 503 rather
 			// than an empty list when no engine is registered.
-			catalog := &schemaCatalog{source: o.schemaSource}
+			catalog := &schemaCatalog{source: o.schemaSource, perms: o.permissionChecker}
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas", catalog.List)
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas/{name}", catalog.Get)
 
@@ -276,15 +260,47 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			r.With(requireRole("editor", "admin", "super_admin")).Put("/content/{schema}/{id}/revisions/{rev_id}/restore", contentHandler.RestoreRevision)
 		})
 
-		// Verify every public route wrapped by the limiter has a matching
-		// config entry. Missing config means the route has NO per-endpoint
-		// rate limiting: a silent brute-force gap.
+		// A public route with no limit of its own runs on the general limit,
+		// the global cap, unless no global cap is set: then it runs unlimited,
+		// a silent brute-force gap, and Verify names it. The routes on the
+		// general limit are listed once, so an operator can see which an
+		// administrator may give a limit of their own.
 		if publicRL != nil {
 			if err := publicRL.Verify(); err != nil {
-				slog.Error("public rate-limit config gap: add missing entries or disable rate limiting explicitly", "err", err)
+				slog.Error("public rate-limit config gap: add missing entries or set a global cap", "err", err)
+			} else if general := publicRL.GeneralRoutes(); len(general) > 0 {
+				slog.Info("public routes on the general rate limit", "routes", general)
 			}
 		}
 	})
 
 	return r, nil
+}
+
+// newContentStore builds the content store the API serves, with its item and
+// list read caches. The content handler tests build theirs here too, so they
+// read through the same caches an install does. A test over an uncached store
+// passes whatever the store does with a cached row.
+//
+// The kernel's content caches stay in process memory whatever CACHE_DRIVER
+// says. A shared backend would not help: a write flushes the list cache whole,
+// which on a shared backend flushes every key in it. Replicas keep their
+// memory caches coherent through the instance bus.
+func newContentStore(pool db.DB, schemas core.SchemaSource, ttl time.Duration, maxEntries int) *db.ContentStore {
+	cacheCfg := cache.CacheConfig{
+		Driver:     "memory",
+		TTL:        ttl,
+		MaxEntries: maxEntries,
+	}
+	itemCache, ierr := cache.New[*domain.Content](cacheCfg, "content:item")
+	if ierr != nil {
+		slog.Error("failed to init item cache; falling back to no-cache", "error", ierr)
+		itemCache = nil
+	}
+	listCache, lerr := cache.New[[]*domain.Content](cacheCfg, "content:list")
+	if lerr != nil {
+		slog.Error("failed to init list cache; falling back to no-cache", "error", lerr)
+		listCache = nil
+	}
+	return db.NewContentStoreWithCache(pool, schemas, itemCache, listCache)
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // The engine offers no self-service password reset, so this route is the
@@ -97,4 +98,55 @@ func TestUsersHandler_SetPassword(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, auth.VerifyPassword("bcrypt", again.PasswordHash, "The-third-password-3"))
 	})
+}
+
+// A super admin acting in acme sets the password of a globex account, and the
+// account's refresh tokens cannot be revoked. acme's admin has raised acme's
+// level to Debug. The line is about globex's account, so nothing acme's
+// admins read names it. The same failure for an acme account keeps acme.
+func TestUsersHandler_SetPasswordLogsAnotherTenantsAccountUnderNoTenant(t *testing.T) {
+	if !testdb.ShouldTest("postgres") {
+		t.Skip("CI_DIALECT excludes postgres")
+	}
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	const home = "acme"
+	pool := testdb.Postgres(t)
+	store := db.NewUserStore(pool)
+	ctx := context.Background()
+	ring, sink := engineLogs(t, home)
+
+	hash, err := auth.HashPassword("bcrypt", "the-old-password-1")
+	require.NoError(t, err)
+	theirs, err := store.Create(ctx, "globex-"+uuid.NewString()[:8]+"@ex.com", hash, []string{"editor"}, "globex")
+	require.NoError(t, err)
+	mine, err := store.Create(ctx, "acme-"+uuid.NewString()[:8]+"@ex.com", hash, []string{"editor"}, home)
+	require.NoError(t, err)
+
+	h := NewUsersHandler(store)
+	h.revokeRefresh = func(context.Context, string) error { return errors.New("refresh store unreachable") }
+	set := func(id uuid.UUID) {
+		r := httptest.NewRequest(http.MethodPut, "/api/admin/users/"+id.String()+"/password", strings.NewReader(`{"password":"The-new-password-2"}`))
+		r = chiCtx(r, map[string]string{"id": id.String()})
+		r = r.WithContext(core.WithTenantID(r.Context(), home))
+		rr := httptest.NewRecorder()
+		h.SetPassword(rr, r)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	set(theirs.ID)
+	require.Equal(t, 1, countNaming(ring, theirs.ID.String()), "the line is still logged")
+	for _, line := range visibleTo(t, home, ring, sink) {
+		require.NotContains(t, line, theirs.ID.String(), "a record acme's admins read names globex's account")
+	}
+
+	set(mine.ID)
+	own := 0
+	for _, line := range visibleTo(t, home, ring, sink) {
+		if strings.Contains(line, mine.ID.String()) {
+			own++
+		}
+	}
+	require.Equal(t, 2, own, "a line about acme's own account keeps acme's stamp")
 }

@@ -145,8 +145,13 @@ type PermissionResourceRules interface {
 // Registering nil does not leave the engine without an answer. The host falls
 // back to RoleOnlyPermissionChecker, which answers as an install with no rules
 // does.
+//
+// Through ScopedHost a registration needs CapPermissionChecker, and only the
+// plugin that registered the checker may clear it. A refusal comes back as
+// the error, which the plugin's Start should return or log, because the
+// rules it owns are not enforced.
 type PermissionCheckerRegistrar interface {
-	RegisterPermissionChecker(c PermissionChecker)
+	RegisterPermissionChecker(c PermissionChecker) error
 }
 
 // PermissionCheckerProvider is implemented by the engine host and forwarded

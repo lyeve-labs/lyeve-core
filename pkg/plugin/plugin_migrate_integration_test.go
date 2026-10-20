@@ -15,7 +15,9 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	_ "github.com/microsoft/go-mssqldb"
 
 	"github.com/testcontainers/testcontainers-go"
@@ -97,6 +99,7 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = '_idx_test_items_status')
 
 func migrateTestPostgres(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "postgres")
 	ctx := context.Background()
 	ctr, err := postgres.Run(ctx,
 		"postgres:16-alpine",
@@ -131,6 +134,7 @@ func migrateTestPostgres(t *testing.T) *sql.DB {
 
 func migrateTestMySQL(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "mysql")
 	ctx := context.Background()
 	ctr, err := mysql.Run(ctx,
 		"mysql:8",
@@ -162,6 +166,7 @@ func migrateTestMySQL(t *testing.T) *sql.DB {
 
 func migrateTestMSSQL(t *testing.T) *sql.DB {
 	t.Helper()
+	testdialect.Require(t, "mssql")
 	ctx := context.Background()
 	ctr, err := tcmssql.Run(ctx,
 		"mcr.microsoft.com/azure-sql-edge:latest",
@@ -532,6 +537,8 @@ func TestPluginMigrate_DataSurvivesMigrationCycle(t *testing.T) {
 // (inserted by another concurrent boot), PluginMigrate does NOT re-execute
 // the migration SQL. It commits an empty transaction and moves on.
 func TestPluginMigrate_VersionAlreadyInserted(t *testing.T) {
+	declareTestMigrations(t, "test_preinserted_migrations")
+	repair := "lyeve migrate mark-applied --plugin migrate-test --version 002_add_meta"
 	for _, tc := range migrateDialects(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := tc.fresh(t)
@@ -583,7 +590,6 @@ func TestPluginMigrate_VersionAlreadyInserted(t *testing.T) {
 				// implicitly, so the claim survives the failed script as a row
 				// marked incomplete, and the repair the engine names has to
 				// mark that row rather than insert a second one.
-				repair := "UPDATE test_preinserted_migrations SET completed = 1 WHERE version = '002_add_meta'"
 				require.Error(t, err, "re-running a bare ADD COLUMN must not look like success")
 				assert.Contains(t, err.Error(), repair, "a failure the operator can repair has to name the repair")
 				assert.Equal(t, 1, recorded, "the claim commits on this engine")
@@ -602,8 +608,7 @@ func TestPluginMigrate_VersionAlreadyInserted(t *testing.T) {
 				assert.Contains(t, err.Error(), repair, "the refusal names the same repair")
 
 				// The repair the engine named lets the next boot through.
-				_, err = db.ExecContext(ctx, repair)
-				require.NoError(t, err)
+				require.NoError(t, plugin.MarkMigrationApplied(ctx, db, tc.dialect, testMigrations, "test_preinserted_migrations", "002_add_meta"))
 				assert.NoError(t,
 					core.PluginMigrate(ctx, db, tc.dialect, testMigrations, "test_preinserted_migrations"),
 					"the boot after the named repair is clean")
@@ -611,17 +616,19 @@ func TestPluginMigrate_VersionAlreadyInserted(t *testing.T) {
 				// The re-apply fails and the claim rolls back with it, so
 				// every later boot repeats the same failure. The install
 				// does not recover on its own, which is why the engine
-				// answers with the INSERT that would repair it.
+				// names the command that records the version.
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), "INSERT INTO test_preinserted_migrations (version) VALUES ('002_add_meta')",
-					"this is the engine that never recovers on its own, so the row is the only way out")
+				assert.Contains(t, err.Error(), repair,
+					"this is the engine that never recovers on its own, so the repair is the only way out")
 				assert.Equal(t, 0, recorded, "the claim rolls back here, which is why the next boot fails too")
-				assert.Error(t,
+				require.Error(t,
 					core.PluginMigrate(ctx, db, tc.dialect, testMigrations, "test_preinserted_migrations"),
 					"this engine does not recover on its own")
-				// Put the bookkeeping back so the rest of this test can run.
-				_, err = db.ExecContext(ctx, preinsertSQL(tc.dialect), "002_add_meta")
-				require.NoError(t, err)
+
+				require.NoError(t, plugin.MarkMigrationApplied(ctx, db, tc.dialect, testMigrations, "test_preinserted_migrations", "002_add_meta"))
+				assert.NoError(t,
+					core.PluginMigrate(ctx, db, tc.dialect, testMigrations, "test_preinserted_migrations"),
+					"the boot after the repair is clean")
 			}
 
 			// Simulate the loser-skip path: pre-insert all 3 versions,
@@ -671,4 +678,22 @@ func preinsertSQL(dialect string) string {
 	default:
 		return "INSERT INTO test_preinserted_migrations (version, applied_at) VALUES ($1, NOW())"
 	}
+}
+
+// declareTestMigrations registers a plugin that declares testMigrations under
+// table, so a failure on that table names the engine command that repairs it.
+func declareTestMigrations(t *testing.T, table string) {
+	t.Helper()
+	core.RegisterPlugin("migrate-test", func() core.Plugin { return migrationDeclaringPlugin{table: table} })
+	t.Cleanup(func() { plugin.UnregisterPlugin("migrate-test") })
+}
+
+type migrationDeclaringPlugin struct{ table string }
+
+func (migrationDeclaringPlugin) Name() string                           { return "migrate-test" }
+func (migrationDeclaringPlugin) Start(context.Context, core.Host) error { return nil }
+func (migrationDeclaringPlugin) Stop(context.Context) error             { return nil }
+
+func (p migrationDeclaringPlugin) MigrationTrees() []core.MigrationTree {
+	return []core.MigrationTree{{Table: p.table, Files: testMigrations}}
 }

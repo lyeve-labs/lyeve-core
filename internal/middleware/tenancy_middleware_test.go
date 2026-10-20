@@ -133,7 +133,7 @@ func TestTenantHeader_SuperAdminOverride(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Tenant-ID", "override_slug")
 	claims := &auth.Claims{
-		TenantID: "jwt-slug",
+		TenantID: "jwt_slug",
 		Roles:    []string{"super_admin"},
 	}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -158,7 +158,7 @@ func TestTenantHeader_NonSuperAdminCannotOverride(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Tenant-ID", "evil_override")
 	claims := &auth.Claims{
-		TenantID: "legit-tenant",
+		TenantID: "legit_tenant",
 		Roles:    []string{"admin"},
 	}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -167,8 +167,8 @@ func TestTenantHeader_NonSuperAdminCannotOverride(t *testing.T) {
 	w := httptest.NewRecorder()
 	m(next).ServeHTTP(w, req)
 
-	if capturedTenant != "legit-tenant" {
-		t.Errorf("non-super_admin: got %q, want %q", capturedTenant, "legit-tenant")
+	if capturedTenant != "legit_tenant" {
+		t.Errorf("non-super_admin: got %q, want %q", capturedTenant, "legit_tenant")
 	}
 }
 
@@ -183,7 +183,7 @@ func TestTenantHeader_SuperAdminEmptyHeaderFallsBack(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	// No X-Tenant-ID header set.
 	claims := &auth.Claims{
-		TenantID: "jwt-tenant",
+		TenantID: "jwt_tenant",
 		Roles:    []string{"super_admin"},
 	}
 	ctx := context.WithValue(req.Context(), auth.ClaimsKey, claims)
@@ -192,8 +192,8 @@ func TestTenantHeader_SuperAdminEmptyHeaderFallsBack(t *testing.T) {
 	w := httptest.NewRecorder()
 	m(next).ServeHTTP(w, req)
 
-	if capturedTenant != "jwt-tenant" {
-		t.Errorf("super_admin fallback: got %q, want %q", capturedTenant, "jwt-tenant")
+	if capturedTenant != "jwt_tenant" {
+		t.Errorf("super_admin fallback: got %q, want %q", capturedTenant, "jwt_tenant")
 	}
 }
 

@@ -214,6 +214,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return err
 	}
 	logger := blog.logger
+	// Before any plugin starts, so no outbound client is built without it.
+	if err := applyOutboundAllowance(cfg, logger); err != nil {
+		return err
+	}
 	defer func() {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -275,11 +279,11 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		if err := db.ConnectReplica(context.Background(), pool, cfg.DatabaseReplicaURL, cfg.DatabaseReplicaMaxConns); err != nil {
 			logger.Warn("read replica unavailable - falling back to primary for all reads",
 				"err", err,
-				"replica_url", cfg.DatabaseReplicaURL,
+				"replica_url", db.RedactDSN(cfg.DatabaseReplicaURL),
 			)
 		} else {
 			logger.Info("read replica connected",
-				"replica_url", cfg.DatabaseReplicaURL,
+				"replica_url", db.RedactDSN(cfg.DatabaseReplicaURL),
 				"max_conns", cfg.DatabaseReplicaMaxConns,
 			)
 		}
@@ -301,10 +305,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// pings against the pool to pre-fill to the configured MinConns.
 	db.WarmupConnections(ctx, pool, int(poolOpts.MinConns))
 
-	// Sonic JSON prewarm
-	// Prime sonic's JIT compiler with common CMS response shapes so the
+	// JSON encoder prewarm
+	// Prime the encoder's per-type cache with common CMS response shapes so the
 	// first real request doesn't stall on encoder compilation.
-	poolpkg.PrewarmSonic()
+	poolpkg.PrewarmJSON()
 
 	// Latency tracker
 	// Per-endpoint p50/p95/p99 latency histograms for the /api/admin/debug/latency
@@ -482,7 +486,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// in-process plugin.
 	hostBase := enginehost.NewHost(pool, rawDB, cfg, hookRegistry, opts.Version)
 	if rawDB != nil {
-		attachSessionPools(context.Background(), hostBase, pool.Engine(), cfg.DatabaseURL, logger)
+		if err := attachSessionPools(context.Background(), hostBase, pool.Engine(), cfg.DatabaseURL); err != nil {
+			logger.Error("failed to open a session pool", "err", err)
+			return fmt.Errorf("session pools: %w", err)
+		}
 	}
 	// Wire the query cache so plugins can use host.CachedFetch() for
 	// transparent read-result caching.
@@ -1617,27 +1624,27 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 // sessions on a pool of their own: every plugin singleton keeps its lock
 // while it leads, so if those sessions came from the guarded pool the first
 // two leaders would take both connections, and the next plugin to ask for a
-// lock would block its Start, and the boot, forever.
-func attachSessionPools(ctx context.Context, host core.Host, engine, dsn string, logger *slog.Logger) {
+// lock would block its Start, and the boot, forever. A pool that cannot open
+// fails the start: without the guard RawDB would serve the raw pool, and
+// without the lock pool leaders would hold sessions on their caller's pool.
+// A host that offers neither setter, as some tests build, takes no side pool.
+func attachSessionPools(ctx context.Context, host core.Host, engine, dsn string) error {
 	if dsn == "" {
-		return
+		return nil
 	}
 	if setter, ok := host.(interface{ WithDMLGuardedDB(*sql.DB) }); ok {
 		guard, err := db.NewDMLGuardDB(ctx, engine, dsn)
 		if err != nil {
-			logger.Warn("failed to create DML-guarded DB, so RawDB returns the raw pool",
-				"err", err)
-		} else {
-			setter.WithDMLGuardedDB(guard)
+			return fmt.Errorf("open the DML guard pool: %w", err)
 		}
+		setter.WithDMLGuardedDB(guard)
 	}
 	if setter, ok := host.(interface{ WithLockDB(*sql.DB) }); ok {
 		locks, err := db.NewLockDB(ctx, engine, dsn)
 		if err != nil {
-			logger.Warn("failed to create the lock session pool - locks will hold sessions on the pool their caller passes",
-				"err", err)
-		} else {
-			setter.WithLockDB(locks)
+			return fmt.Errorf("open the lock session pool: %w", err)
 		}
+		setter.WithLockDB(locks)
 	}
+	return nil
 }

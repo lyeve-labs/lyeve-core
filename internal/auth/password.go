@@ -11,6 +11,9 @@ import (
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
+
 	"crypto/rand"
 )
 
@@ -54,14 +57,23 @@ const DummyBcryptHash = "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL1
 //   - "$argon2id$..." -> argon2id
 //   - "$2a$..." / "$2b$..." -> bcrypt
 //
-// The special sentinel OAuthOnlyMarker is rejected immediately: these accounts
-// are OAuth-only and password authentication is disabled.
+// An account with no password is always refused: an empty hash (SAML and
+// SCIM accounts), OAuthOnlyMarker and ExternalIssuerMarker. The refusal still
+// runs one bcrypt compare against DummyBcryptHash, so it costs what an unknown
+// address costs and its timing does not reveal that the account exists.
 func VerifyPassword(_, hash, password string) error {
-	if hash == OAuthOnlyMarker {
-		return errors.New("account is oauth-only: no password authentication")
+	var refused error
+	switch hash {
+	case "":
+		refused = errors.New("account has no password: no password authentication")
+	case OAuthOnlyMarker:
+		refused = errors.New("account is oauth-only: no password authentication")
+	case ExternalIssuerMarker:
+		refused = errors.New("account belongs to a trusted issuer: no password authentication")
 	}
-	if hash == ExternalIssuerMarker {
-		return errors.New("account belongs to a trusted issuer: no password authentication")
+	if refused != nil {
+		_ = bcrypt.CompareHashAndPassword([]byte(DummyBcryptHash), []byte(password)) // timing only, the result is discarded
+		return refused
 	}
 	if strings.HasPrefix(hash, "$argon2id$") {
 		return verifyArgon2id(hash, password)
@@ -138,16 +150,32 @@ type PasswordPolicy struct {
 	RequireUpperLower bool // require at least one uppercase and one lowercase letter
 	RequireDigit      bool // require at least one digit
 	CheckCommon       bool // check against embedded common password list
+	MaxBytes          int  // longest password the hasher reads whole, 0 for no limit
+}
+
+// MaxBcryptPasswordBytes is the longest password bcrypt accepts. x/crypto
+// refuses a longer one outright instead of truncating it.
+const MaxBcryptPasswordBytes = 72
+
+// MaxPasswordBytes returns the PasswordPolicy.MaxBytes for a hash algorithm,
+// with the same default HashPassword applies: anything but argon2id is bcrypt.
+func MaxPasswordBytes(algo string) int {
+	if algo == "argon2id" {
+		return 0
+	}
+	return MaxBcryptPasswordBytes
 }
 
 // DefaultPasswordPolicy returns a secure default policy:
-// min 12 chars, mixed case + digit required, common password check enabled.
+// min 12 chars, mixed case + digit required, common password check enabled,
+// and no longer than bcrypt, the default hasher, reads.
 func DefaultPasswordPolicy() PasswordPolicy {
 	return PasswordPolicy{
 		MinLength:         12,
 		RequireUpperLower: true,
 		RequireDigit:      true,
 		CheckCommon:       true,
+		MaxBytes:          MaxBcryptPasswordBytes,
 	}
 }
 
@@ -157,14 +185,19 @@ var (
 	ErrPasswordTooShort     = errors.New("password too short")
 	ErrPasswordNoComplexity = errors.New("password must include uppercase, lowercase, and digit")
 	ErrPasswordTooCommon    = errors.New("password is too common")
+	ErrPasswordTooLong      = errors.New("password too long")
 )
 
 // ValidatePassword checks password against the given policy.
 // Returns nil if the password satisfies all rules. Otherwise returns one of
-// ErrPasswordTooShort, ErrPasswordNoComplexity, or ErrPasswordTooCommon.
+// ErrPasswordTooShort, ErrPasswordTooLong, ErrPasswordNoComplexity, or
+// ErrPasswordTooCommon.
 func ValidatePassword(policy PasswordPolicy, password string) error {
 	if len(password) < policy.MinLength {
 		return fmt.Errorf("%w: need %d got %d", ErrPasswordTooShort, policy.MinLength, len(password))
+	}
+	if policy.MaxBytes > 0 && len(password) > policy.MaxBytes {
+		return fmt.Errorf("%w: at most %d bytes got %d", ErrPasswordTooLong, policy.MaxBytes, len(password))
 	}
 
 	if policy.RequireUpperLower || policy.RequireDigit {
@@ -192,4 +225,33 @@ func ValidatePassword(policy PasswordPolicy, password string) error {
 	}
 
 	return nil
+}
+
+// PasswordViolationCode maps a ValidatePassword error to the error code the
+// engine answers with status 422 and the values its message names.
+func PasswordViolationCode(err error, policy PasswordPolicy) (i18n.Code, map[string]any) {
+	switch {
+	case errors.Is(err, ErrPasswordTooShort):
+		return i18n.CodePasswordTooShort, map[string]any{"min": policy.MinLength}
+	case errors.Is(err, ErrPasswordTooLong):
+		return i18n.CodePasswordTooLong, map[string]any{"max": policy.MaxBytes}
+	case errors.Is(err, ErrPasswordNoComplexity):
+		return i18n.CodePasswordNeedsComplexity, nil
+	case errors.Is(err, ErrPasswordTooCommon):
+		return i18n.CodePasswordTooCommon, nil
+	default:
+		return i18n.CodePasswordTooShort, nil
+	}
+}
+
+// CheckPassword validates password against policy and answers a refusal as
+// the *core.PasswordViolation a plugin reads through
+// core.PasswordPolicyValidator.
+func CheckPassword(policy PasswordPolicy, password string) error {
+	err := ValidatePassword(policy, password)
+	if err == nil {
+		return nil
+	}
+	code, params := PasswordViolationCode(err, policy)
+	return &core.PasswordViolation{Code: string(code), Params: params}
 }

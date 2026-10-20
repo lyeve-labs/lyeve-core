@@ -19,6 +19,7 @@ package ssrf
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -30,40 +31,76 @@ import (
 
 // Blocklist: IP ranges that are always blocked unless allowlisted.
 
-// blockedCIDRs is the canonical list of IP ranges the SSRF guard blocks.
-// These cover: RFC 1918 private, loopback, link-local (AWS/cloud IMDS),
-// IPv6 loopback/unspecified/ULA/link-local, multicast (v4 and v6), reserved,
-// and "this network". Every IPv4 range has an IPv6 counterpart: an address
-// family that blocks one spelling of the local host but not the other is a
-// bypass, not a hardened list.
-var blockedCIDRs = []string{
-	"10.0.0.0/8",     // RFC 1918 private
-	"172.16.0.0/12",  // RFC 1918 private
-	"192.168.0.0/16", // RFC 1918 private
-	"127.0.0.0/8",    // Loopback
-	"169.254.0.0/16", // Link-local (AWS IMDS, Azure IMDS, GCP metadata)
-	"0.0.0.0/8",      // "This network" (defense in depth)
-	"224.0.0.0/4",    // Multicast (defense in depth)
-	"240.0.0.0/4",    // Reserved / Class E (defense in depth)
-	"::1/128",        // IPv6 loopback
-	"::/128",         // IPv6 unspecified: reaches the local host like 0.0.0.0
-	"fc00::/7",       // IPv6 unique local
-	"fe80::/10",      // IPv6 link-local
-	"ff00::/8",       // IPv6 multicast (defense in depth)
+// blockedCIDRs is the canonical list of IP ranges the SSRF guard blocks, each
+// with the class a refusal names in the log. These cover: RFC 1918 private,
+// the shared address space, loopback, link-local (AWS/cloud IMDS), IPv6
+// loopback/unspecified/ULA/link-local, the IPv4-compatible and SIIT forms
+// that carry an IPv4 address, multicast (v4 and v6), reserved,
+// "this network", and the local-use NAT64 range. Every IPv4 range has an IPv6
+// counterpart: an address family that blocks one spelling of the local host
+// but not the other is a bypass, not a hardened list.
+var blockedCIDRs = []struct{ cidr, class string }{
+	{"10.0.0.0/8", "private"},     // RFC 1918 private
+	{"172.16.0.0/12", "private"},  // RFC 1918 private
+	{"192.168.0.0/16", "private"}, // RFC 1918 private
+	// RFC 6598 shared address space. Carrier NAT and cloud metadata services
+	// (Alibaba Cloud's 100.100.100.200) live here, and so do Tailscale
+	// addresses, which an install allows with AddAllowlist.
+	{"100.64.0.0/10", "shared address space"},
+	{"127.0.0.0/8", "loopback"},            // Loopback
+	{"169.254.0.0/16", "link-local"},       // Link-local (AWS IMDS, Azure IMDS, GCP metadata)
+	{"0.0.0.0/8", "this network"},          // "This network" (defense in depth)
+	{"224.0.0.0/4", "multicast"},           // Multicast (defense in depth)
+	{"240.0.0.0/4", "reserved"},            // Reserved / Class E (defense in depth)
+	{"::1/128", "loopback"},                // IPv6 loopback
+	{"::/128", "unspecified"},              // IPv6 unspecified: reaches the local host like 0.0.0.0
+	{"::/96", "IPv4-compatible"},           // RFC 4291 deprecated IPv4-compatible form, after :: and ::1 so those keep their class
+	{"::ffff:0:0:0/96", "IPv4-translated"}, // SIIT form, which Is4In6 does not unmap
+	{"fc00::/7", "unique local"},           // IPv6 unique local
+	{"fe80::/10", "link-local"},            // IPv6 link-local
+	{"ff00::/8", "multicast"},              // IPv6 multicast (defense in depth)
+	{"64:ff9b:1::/48", "local-use NAT64"},  // RFC 8215: a translator here reaches private IPv4, and nothing public sits in it
+}
+
+// blockedRange is one parsed entry of blockedCIDRs.
+type blockedRange struct {
+	prefix netip.Prefix
+	class  string
 }
 
 // blockedPrefixes is the parsed form of blockedCIDRs, populated at init.
-var blockedPrefixes []netip.Prefix
+var blockedPrefixes []blockedRange
+
+// A NAT64 or 6to4 address carries an IPv4 address, and a translator or relay
+// on the path connects to that address. Each is judged by the IPv4 address it
+// embeds, so 64:ff9b::a9fe:a9fe is refused as 169.254.169.254 while the
+// NAT64 form of a public address still passes.
+var (
+	nat64Prefix  = netip.MustParsePrefix("64:ff9b::/96") // RFC 6052 well-known prefix, IPv4 in the last 32 bits
+	sixToFourNet = netip.MustParsePrefix("2002::/16")    // RFC 3056 6to4, IPv4 in bits 16 to 47
+)
 
 func init() {
-	blockedPrefixes = make([]netip.Prefix, len(blockedCIDRs))
-	for i, cidr := range blockedCIDRs {
-		p, err := netip.ParsePrefix(cidr)
+	blockedPrefixes = make([]blockedRange, len(blockedCIDRs))
+	for i, b := range blockedCIDRs {
+		p, err := netip.ParsePrefix(b.cidr)
 		if err != nil {
-			panic(fmt.Sprintf("ssrf: invalid blocked CIDR %q: %v", cidr, err))
+			panic(fmt.Sprintf("ssrf: invalid blocked CIDR %q: %v", b.cidr, err))
 		}
-		blockedPrefixes[i] = p
+		blockedPrefixes[i] = blockedRange{prefix: p, class: b.class}
 	}
+}
+
+// embeddedIPv4 returns the IPv4 address a NAT64 or 6to4 address carries.
+func embeddedIPv4(addr netip.Addr) (netip.Addr, string, bool) {
+	b := addr.As16()
+	switch {
+	case nat64Prefix.Contains(addr):
+		return netip.AddrFrom4([4]byte{b[12], b[13], b[14], b[15]}), "NAT64", true
+	case sixToFourNet.Contains(addr):
+		return netip.AddrFrom4([4]byte{b[2], b[3], b[4], b[5]}), "6to4", true
+	}
+	return netip.Addr{}, "", false
 }
 
 // Allowlist: permissive overrides for specific internal targets.
@@ -139,8 +176,9 @@ var ResolveFunc = func(ctx context.Context, host string) ([]net.IPAddr, error) {
 // isBlocked checks whether any IP falls within blocked ranges (and is not
 // allowlisted under the given scope). Returns (true, reason) on the first
 // blocked match, or (false, "") if all IPs are publicly routable or
-// allowlisted.
-func isBlocked(scope string, ips []net.IPAddr) (bool, string) {
+// allowlisted. A refusal is logged with the class of the range. The reason
+// leaves the class out, because callers may pass it on to a client.
+func isBlocked(ctx context.Context, scope string, ips []net.IPAddr) (bool, string) {
 	for _, ipa := range ips {
 		addr, ok := netip.AddrFromSlice(ipa.IP)
 		if !ok {
@@ -150,17 +188,34 @@ func isBlocked(scope string, ips []net.IPAddr) (bool, string) {
 		if addr.Is4In6() {
 			addr = addr.Unmap()
 		}
-		// Allowlist takes precedence over blocklist.
-		if isAllowlisted(scope, addr) {
-			continue
-		}
-		for _, pfx := range blockedPrefixes {
-			if pfx.Contains(addr) {
-				return true, fmt.Sprintf("IP %s is in blocked range %s", addr, pfx)
-			}
+		if reason, class, blocked := blockedAddr(scope, addr); blocked {
+			slog.WarnContext(ctx, "ssrf: outbound address refused",
+				"range_class", class, "address", addr.String(), "scope", scope)
+			return true, reason
 		}
 	}
 	return false, ""
+}
+
+// blockedAddr judges one address. The allowlist takes precedence over the
+// blocklist, and a NAT64 or 6to4 address is judged by the IPv4 address it
+// embeds, under the same allowlist.
+func blockedAddr(scope string, addr netip.Addr) (reason, class string, blocked bool) {
+	if isAllowlisted(scope, addr) {
+		return "", "", false
+	}
+	for _, r := range blockedPrefixes {
+		if r.prefix.Contains(addr) {
+			return fmt.Sprintf("IP %s is in blocked range %s", addr, r.prefix), r.class, true
+		}
+	}
+	if v4, kind, ok := embeddedIPv4(addr); ok {
+		if inner, innerClass, blocked := blockedAddr(scope, v4); blocked {
+			return fmt.Sprintf("IP %s embeds a blocked address: %s", addr, inner),
+				innerClass + " in a " + kind + " address", true
+		}
+	}
+	return "", "", false
 }
 
 // URL validation
@@ -187,7 +242,7 @@ func ValidateAddressScoped(ctx context.Context, scope, addr string) error {
 	// Fast path: literal IP.
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		ipAddr := net.IPAddr{IP: net.IP(ip.AsSlice())}
-		if blocked, reason := isBlocked(scope, []net.IPAddr{ipAddr}); blocked {
+		if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{ipAddr}); blocked {
 			return fmt.Errorf("ssrf: %s (literal IP %s)", reason, host)
 		}
 		return nil
@@ -201,7 +256,7 @@ func ValidateAddressScoped(ctx context.Context, scope, addr string) error {
 	if len(ips) == 0 {
 		return fmt.Errorf("ssrf: no IP addresses resolved for %q", host)
 	}
-	if blocked, reason := isBlocked(scope, ips); blocked {
+	if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 		return fmt.Errorf("ssrf: %s (resolved from %q)", reason, host)
 	}
 	return nil
@@ -244,7 +299,7 @@ func ValidateURLScoped(ctx context.Context, scope, rawURL string) error {
 	// Fast path: if host is already a literal IP, validate it directly.
 	if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
 		ipAddr := net.IPAddr{IP: net.IP(ip.AsSlice())}
-		if blocked, reason := isBlocked(scope, []net.IPAddr{ipAddr}); blocked {
+		if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{ipAddr}); blocked {
 			return fmt.Errorf("ssrf: %s (literal IP %s)", reason, host)
 		}
 		return nil
@@ -259,7 +314,7 @@ func ValidateURLScoped(ctx context.Context, scope, rawURL string) error {
 		return fmt.Errorf("ssrf: no IP addresses resolved for %q", host)
 	}
 
-	if blocked, reason := isBlocked(scope, ips); blocked {
+	if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 		return fmt.Errorf("ssrf: %s (resolved from %q)", reason, host)
 	}
 
@@ -294,7 +349,7 @@ func NewSafeTransportScoped(scope string) *http.Transport {
 
 			// Fast path: literal IP.
 			if ip, parseErr := netip.ParseAddr(host); parseErr == nil {
-				if blocked, reason := isBlocked(scope, []net.IPAddr{{IP: net.IP(ip.AsSlice())}}); blocked {
+				if blocked, reason := isBlocked(ctx, scope, []net.IPAddr{{IP: net.IP(ip.AsSlice())}}); blocked {
 					return nil, fmt.Errorf("ssrf dial: %s", reason)
 				}
 				return dialer.DialContext(ctx, network, addr)
@@ -308,7 +363,7 @@ func NewSafeTransportScoped(scope string) *http.Transport {
 			if len(ips) == 0 {
 				return nil, fmt.Errorf("ssrf dial: no IPs for %q", host)
 			}
-			if blocked, reason := isBlocked(scope, ips); blocked {
+			if blocked, reason := isBlocked(ctx, scope, ips); blocked {
 				return nil, fmt.Errorf("ssrf dial: %s", reason)
 			}
 

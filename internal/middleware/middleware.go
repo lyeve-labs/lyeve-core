@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -223,7 +224,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 			}
 			ip := net.ParseIP(ipStr)
 			if ip == nil {
-				http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+				httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 				return
 			}
 			for _, n := range nets {
@@ -232,7 +233,7 @@ func IPAllowlist(cidrs []string) (func(http.Handler) http.Handler, error) {
 					return
 				}
 			}
-			http.Error(w, `{"error":"forbidden"}`, http.StatusForbidden)
+			httpx.ErrorReq(w, r, http.StatusForbidden, "forbidden")
 		})
 	}, nil
 }
@@ -306,8 +307,31 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenantID := ""
+			// Domain routing ran above and left the host's tenant on the core
+			// key, which the credential's tenant replaces below. A sign-in
+			// handler still needs the host's answer, so it is kept apart. A
+			// tenant the resolver picked without the host naming it, such as
+			// the only tenant an install has, is not the host's.
+			hostTenant := core.TenantIDFromCtx(r.Context())
+			if core.IsFallbackTenant(r.Context()) {
+				hostTenant = ""
+			}
 
 			if claims, ok := r.Context().Value(auth.ClaimsKey).(*auth.Claims); ok && claims != nil {
+				// On a multi-tenant install a token naming its tenant in a
+				// spelling the engine never issues is refused here. Scoping a
+				// tenant connection to it would fail too, but a request that
+				// never reads, such as a stream, never scopes one and would
+				// run under that name. A single-tenant install scopes no
+				// connection, so its accounts keep whatever name they carry.
+				if multiTenant && claims.TenantID != "" && !core.IsValidTenantSlug(claims.TenantID) {
+					slog.WarnContext(r.Context(), "refusing token whose tenant is not a canonical slug",
+						"user_id", claims.UserID, "path", r.URL.Path)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusUnauthorized)
+					fmt.Fprintf(w, `{"error":"invalid token tenant"}`)
+					return
+				}
 				// JWT tenant claims: always honored. In single-tenant mode,
 				// still extracted so RequireTenantID has a tenant context.
 				if multiTenant || claims.TenantID != "" {
@@ -458,11 +482,17 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 			// context is new, so an outer frame keeps the one it was given and
 			// would otherwise record the request as belonging to no tenant.
 			core.TenantSlotFrom(r.Context()).Set(tenantID)
+			if isSuperAdmin(r.Context()) {
+				superAdminSlotFrom(r.Context()).Store(true)
+			}
 
 			ctx := context.WithValue(r.Context(), tenantKey{}, tenantID)
 			// Inject via core key so tracing (which cannot import
 			// internal/middleware) can read the tenant.
 			ctx = core.WithTenantID(ctx, tenantID)
+			if hostTenant != "" {
+				ctx = core.WithHostTenantID(ctx, hostTenant)
+			}
 			// Defense-in-depth: normalize raw header to the validated tenant.
 			// Context is canonical. This ensures code reading X-Tenant-ID
 			// sees the resolved value, never a client-supplied one.
@@ -486,6 +516,31 @@ func isSuperAdmin(ctx context.Context) bool {
 		}
 	}
 	return false
+}
+
+type superAdminSlotKey struct{}
+
+// WithSuperAdminSlot returns a context carrying a fresh flag, and the flag.
+// TenantHeader sets it when the caller holds the super_admin role, so a
+// middleware that wrapped the whole chain can read it afterwards, as it reads
+// the tenant slot.
+//
+// The access log reads it. A super admin's request can name any tenant in its
+// path, query or body, and the tenant slot holds the one the super admin acts
+// in, whose admins read every line stamped with it. So the line of such a
+// request carries no tenant, whichever tenant the request names.
+func WithSuperAdminSlot(ctx context.Context) (context.Context, *atomic.Bool) {
+	b := new(atomic.Bool)
+	return context.WithValue(ctx, superAdminSlotKey{}, b), b
+}
+
+// superAdminSlotFrom returns the flag on ctx. With none installed it returns
+// a flag nobody reads, so the caller need not check.
+func superAdminSlotFrom(ctx context.Context) *atomic.Bool {
+	if b, ok := ctx.Value(superAdminSlotKey{}).(*atomic.Bool); ok {
+		return b
+	}
+	return new(atomic.Bool)
 }
 
 // hasCredential reports whether the request carried any credential at all: a

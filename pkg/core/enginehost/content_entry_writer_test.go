@@ -27,7 +27,7 @@ func TestEngineHost_ContentEntryWriter_RegisteredByPlugin(t *testing.T) {
 		t.Fatalf("ContentEntryWriter() before any registration = %v, want nil", got)
 	}
 	w := stubEntryWriter{}
-	owner := core.NewScopedHost(h, "content", core.CapDBWrite|core.CapRoutes)
+	owner := core.NewScopedHost(h, "content", core.CapDBWrite|core.CapRoutes|core.CapContentEntryWriter)
 	consumer := core.NewScopedHost(h, "bulk-import", core.CapRoutes)
 	owner.RegisterContentEntryWriter(w)
 	if got := consumer.ContentEntryWriter(); got != core.ContentEntryWriter(w) {

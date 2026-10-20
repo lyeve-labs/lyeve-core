@@ -56,3 +56,37 @@ func TestDefaultCapabilities_AnEmptyRegistryGrantsNothing(t *testing.T) {
 		t.Errorf("an empty registry: harness granted %#v, want an empty map", caps.Features)
 	}
 }
+
+// HasFeature and Capabilities are the two halves of core.LicenseHost, and the
+// engine answers both from one license. The harness does the same, so a gate
+// written against HasFeature reads as unlicensed wherever the set leaves its
+// name out.
+func TestHost_HasFeatureAnswersFromCapabilities(t *testing.T) {
+	core.ResetPluginRegistry()
+	t.Cleanup(core.ResetPluginRegistry)
+	core.RegisterPlugin("harness-probe", func() core.Plugin { return declaringProbe{} })
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		host core.Host
+		want map[string]bool
+	}{
+		{"default set", NewHost(t, nil), map[string]bool{"harness-probe": true, "harness-probe-export": true, "never-registered": false}},
+		{"narrowed set", NewHost(t, nil, WithCapabilities(core.CapabilitySet{Features: map[string]bool{"harness-probe": true}})), map[string]bool{"harness-probe": true, "harness-probe-export": false}},
+		{"unlicensed", Unlicensed(t), map[string]bool{"harness-probe": false, "harness-probe-export": false}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lh, ok := tc.host.(core.LicenseHost)
+			if !ok {
+				t.Fatal("the harness host does not implement core.LicenseHost")
+			}
+			for feature, want := range tc.want {
+				if got := lh.HasFeature(ctx, feature); got != want {
+					t.Errorf("HasFeature(%q) = %v, want %v", feature, got, want)
+				}
+			}
+		})
+	}
+}

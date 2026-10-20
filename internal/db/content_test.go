@@ -1110,7 +1110,7 @@ func TestContentStore_ListCursor_DialectAwareLimit(t *testing.T) {
 	}
 
 	// Get all items to discover the UUID-sorted order.
-	allItems, err := store.ListCursor(ctx, "cursor_test", "", 100)
+	allItems, err := store.ListCursor(ctx, "cursor_test", "", 100, true)
 	if err != nil {
 		t.Fatalf("ListCursor all: %v", err)
 	}
@@ -1121,7 +1121,7 @@ func TestContentStore_ListCursor_DialectAwareLimit(t *testing.T) {
 	cursorID := allItems[2].ID.String()
 
 	t.Run("no cursor returns first page", func(t *testing.T) {
-		items, err := store.ListCursor(ctx, "cursor_test", "", 3)
+		items, err := store.ListCursor(ctx, "cursor_test", "", 3, true)
 		if err != nil {
 			t.Fatalf("ListCursor with no cursor: %v", err)
 		}
@@ -1139,7 +1139,7 @@ func TestContentStore_ListCursor_DialectAwareLimit(t *testing.T) {
 	})
 
 	t.Run("cursor pagination returns next items", func(t *testing.T) {
-		items, err := store.ListCursor(ctx, "cursor_test", cursorID, 100)
+		items, err := store.ListCursor(ctx, "cursor_test", cursorID, 100, true)
 		if err != nil {
 			t.Fatalf("ListCursor with cursor: %v", err)
 		}
@@ -1155,7 +1155,7 @@ func TestContentStore_ListCursor_DialectAwareLimit(t *testing.T) {
 	})
 
 	t.Run("invalid cursor returns error", func(t *testing.T) {
-		_, err := store.ListCursor(ctx, "cursor_test", "not-a-uuid", 10)
+		_, err := store.ListCursor(ctx, "cursor_test", "not-a-uuid", 10, true)
 		if err == nil {
 			t.Fatal("expected error for invalid cursor")
 		}
@@ -1165,7 +1165,7 @@ func TestContentStore_ListCursor_DialectAwareLimit(t *testing.T) {
 	})
 
 	t.Run("limit 0 defaults to 20", func(t *testing.T) {
-		items, err := store.ListCursor(ctx, "cursor_test", "", 0)
+		items, err := store.ListCursor(ctx, "cursor_test", "", 0, true)
 		if err != nil {
 			t.Fatalf("ListCursor with limit 0: %v", err)
 		}

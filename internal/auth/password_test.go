@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"math"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -35,5 +37,37 @@ func TestDummyBcryptHash_CostMatchesTheCostRealHashesUse(t *testing.T) {
 	}
 	if realCost != cost {
 		t.Errorf("real hash cost = %d, dummy = %d", realCost, cost)
+	}
+}
+
+// An account with no password stores an empty hash or a marker, and a sign-in
+// attempt against it is refused. The refusal costs the bcrypt compare an
+// unknown address gets, or a fast answer tells the caller the account exists.
+//
+// Each refused hash is timed in turn with the unknown address, so a burst of
+// load on the runner reaches both, and each side keeps its fastest run, which
+// load can only slow. A refusal that skips the compare is still a thousand
+// times faster than one compare.
+func TestVerifyPassword_RefusedHashesCostOneBcrypt(t *testing.T) {
+	timed := func(hash string) time.Duration {
+		start := time.Now()
+		_ = VerifyPassword("bcrypt", hash, "not-the-password")
+		return time.Since(start)
+	}
+	for _, hash := range []string{"", OAuthOnlyMarker, ExternalIssuerMarker} {
+		if err := VerifyPassword("bcrypt", hash, "not-the-password"); err == nil {
+			t.Errorf("hash %q verified a password", hash)
+		}
+		if err := VerifyPassword("bcrypt", hash, ""); err == nil {
+			t.Errorf("hash %q verified an empty password", hash)
+		}
+		unknown, refused := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+		for i := 0; i < 7; i++ {
+			unknown = min(unknown, timed(DummyBcryptHash))
+			refused = min(refused, timed(hash))
+		}
+		if float64(refused) < 0.5*float64(unknown) {
+			t.Errorf("hash %q is refused in %v, an unknown address costs %v", hash, refused, unknown)
+		}
 	}
 }

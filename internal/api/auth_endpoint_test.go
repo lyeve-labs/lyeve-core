@@ -603,6 +603,17 @@ func (s *fakeUserStore) GetByEmail(ctx context.Context, email string) (*domain.U
 	return u, nil
 }
 
+func (s *fakeUserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, u := range s.byEmail {
+		if u.TenantID == tenantID && u.ProviderEmail != "" && u.ProviderEmail == address {
+			return u, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
 func (s *fakeUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -672,8 +683,8 @@ func (s *failingMFAStore) GracePeriodHours() int { return 0 }
 func (s *failingMFAStore) RegenerateBackupCodes(ctx context.Context, userID uuid.UUID, n int) ([]string, error) {
 	return nil, nil
 }
-func (s *failingMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error {
-	return nil
+func (s *failingMFAStore) ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error) {
+	return false, errors.New("mfa store unavailable")
 }
 
 // dbErrorUserStore returns an error on every method: used to test DB error
@@ -681,6 +692,9 @@ func (s *failingMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUI
 type dbErrorUserStore struct{}
 
 func (s *dbErrorUserStore) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
+	return nil, errors.New("db unavailable")
+}
+func (s *dbErrorUserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
 	return nil, errors.New("db unavailable")
 }
 func (s *dbErrorUserStore) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
@@ -1243,8 +1257,8 @@ func (s *fakeMFAStore) GracePeriodHours() int {
 func (s *fakeMFAStore) RegenerateBackupCodes(ctx context.Context, userID uuid.UUID, n int) ([]string, error) {
 	return nil, nil
 }
-func (s *fakeMFAStore) UpdateBackupCodes(ctx context.Context, userID uuid.UUID, hashes []string) error {
-	return nil
+func (s *fakeMFAStore) ConsumeBackupCode(ctx context.Context, userID uuid.UUID, codeHash string) (bool, error) {
+	return false, nil
 }
 
 // INTEGRATION: jwtAuth rejects non-session token types (typ enforcement)

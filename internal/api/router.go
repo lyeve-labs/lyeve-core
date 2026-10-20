@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
+	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
@@ -532,6 +532,14 @@ func (o *routerOptions) adminSeats(users *db.UserStore) *db.AdminSeatGuard {
 		func() core.MembershipReader { return o.memberships })
 }
 
+// ceilingURL is where the licensing implementation sends an operator to lift
+// the ceiling named cap, asked of the manager at each refusal so a renewed
+// license answers at once. The engine names no destination of its own, so a
+// build whose licensing offers none refuses with no link.
+func (o *routerOptions) ceilingURL(cap string) string {
+	return licensing.CeilingURL(o.entitlements, cap)
+}
+
 // applyAccessLogging registers the middleware that must observe every request,
 // ahead of everything that can refuse one.
 //
@@ -733,21 +741,6 @@ func respondErrCode(w http.ResponseWriter, r *http.Request, status int, code i18
 	})
 }
 
-// passwordViolationResponse maps a ValidatePassword error to the appropriate
-// i18n code and interpolation parameters.
-func passwordViolationResponse(err error, policy auth.PasswordPolicy) (i18n.Code, map[string]any) {
-	switch {
-	case errors.Is(err, auth.ErrPasswordTooShort):
-		return i18n.CodePasswordTooShort, map[string]any{"min": policy.MinLength}
-	case errors.Is(err, auth.ErrPasswordNoComplexity):
-		return i18n.CodePasswordNeedsComplexity, nil
-	case errors.Is(err, auth.ErrPasswordTooCommon):
-		return i18n.CodePasswordTooCommon, nil
-	default:
-		return i18n.CodePasswordTooShort, nil
-	}
-}
-
 // buildPublicRateLimiter creates a PublicEndpointRateLimiter over the table
 // publicRateLimitTable assembles, or returns nil when that table holds no
 // entry and no global cap.
@@ -835,6 +828,14 @@ func WarnUnmountableRoutes(pluginRoutes []plugin.PluginRoutes) {
 				} else if _, ok := core.ParseScope(rd.Scope); !ok {
 					slog.Warn("plugin route declares an API key scope that is not resource:action: only a key granted everything reaches it",
 						"plugin", pr.Name, "method", rd.Method, "pattern", rd.Pattern, "scope", rd.Scope)
+				}
+			}
+			if rd.Doc != nil {
+				for _, mt := range rd.Doc.ResponseMediaTypes {
+					if _, ok := core.ParseResponseMediaType(mt.MediaType); !ok {
+						slog.Warn("plugin route documents a response media type that is not type/subtype: the API document leaves it out",
+							"plugin", pr.Name, "method", rd.Method, "pattern", rd.Pattern, "media_type", mt.MediaType)
+					}
 				}
 			}
 			if rd.RateLimit != nil && !appliedRateLimit(rd) {
@@ -1207,6 +1208,8 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"PUT /api/admin/users/{id}/state",
 			"PUT /api/admin/users/{id}/password",
 			"DELETE /api/admin/users/{id}",
+			"GET /api/admin/auth/provider-window",
+			"PUT /api/admin/auth/provider-window",
 			"GET /api/admin/openapi.json",
 			"GET /api/admin/openapi/public.json",
 			"GET /api/admin/openapi/admin.json",

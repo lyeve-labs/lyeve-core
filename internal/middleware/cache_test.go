@@ -94,9 +94,20 @@ func TestDefaultDashboardPolicy(t *testing.T) {
 	assert.True(t, DefaultDashboardPolicy.NoTransform)
 }
 
-func TestDefaultSchemaPolicy(t *testing.T) {
+// The schema catalog answers each caller with what it may read, so its
+// responses are private: a shared cache must never store one.
+func TestDefaultSchemaPolicy_IsPrivate(t *testing.T) {
 	assert.Equal(t, 300*time.Second, DefaultSchemaPolicy.MaxAge)
-	assert.True(t, DefaultSchemaPolicy.Public)
+	assert.False(t, DefaultSchemaPolicy.Public)
+
+	h := CacheWithPolicy(DefaultSchemaPolicy)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/schemas", nil))
+	cc := rec.Header().Get("Cache-Control")
+	assert.Contains(t, cc, "private")
+	assert.NotContains(t, cc, "public")
 }
 
 func TestCacheHeaders_2xxResponse(t *testing.T) {
@@ -127,8 +138,10 @@ func TestCacheHeaders_2xxResponse(t *testing.T) {
 	assert.True(t, strings.HasPrefix(etag, `"`))
 	assert.True(t, strings.HasSuffix(etag, `"`))
 
-	// Vary must include Authorization
+	// Vary must name both credentials, because a key and a session each
+	// answer by their own access.
 	assert.Contains(t, resp.Header.Get("Vary"), "Authorization")
+	assert.Contains(t, resp.Header.Get("Vary"), "X-API-Key")
 
 	// Body must be intact
 	var body map[string]string
@@ -271,7 +284,7 @@ func TestCacheHeaders_VaryKeepsEveryHandlerValue(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	assert.Equal(t, []string{"Origin, Accept-Language, Authorization"}, rec.Header().Values("Vary"))
+	assert.Equal(t, []string{"Origin, Accept-Language, Authorization, X-API-Key"}, rec.Header().Values("Vary"))
 }
 
 func TestMergeVary(t *testing.T) {

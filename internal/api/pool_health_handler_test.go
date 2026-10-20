@@ -3,10 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,4 +60,32 @@ func TestPoolHealthHandler_WithProvider(t *testing.T) {
 	assert.True(t, body.Healthy)
 	assert.Equal(t, 5, body.OpenConns)
 	assert.Equal(t, 2, body.InUse)
+}
+
+// A provider that reports a NaN latency hands the handler a snapshot JSON has
+// no number for. Nothing is written before the encoder fails, so the 500 is
+// the engine's error envelope, labeled as the JSON it is.
+func TestPoolHealthHandler_UnencodableSnapshotAnswersTheErrorEnvelope(t *testing.T) {
+	provider := fakePoolHealthProvider{snap: observability.PoolHealthSnapshot{
+		Engine:    "postgres",
+		Healthy:   true,
+		LatencyMs: math.NaN(),
+	}}
+	handler := poolHealthHandler(provider)
+
+	req := httptest.NewRequest(http.MethodGet, "/pool/health", nil)
+	req = req.WithContext(logging.WithRequestID(req.Context(), "req-unencodable-snapshot"))
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var body map[string]string
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body), "body = %q", w.Body.String())
+	assert.Equal(t, map[string]string{
+		"error":      "failed to encode response",
+		"code":       "internal_error",
+		"request_id": "req-unencodable-snapshot",
+	}, body)
 }

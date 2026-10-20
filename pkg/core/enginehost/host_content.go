@@ -17,16 +17,17 @@ import (
 // A schema this tenant has not defined has no generated table to project into.
 // That reaches the caller as core.ErrNotFound rather than the engine's internal
 // sentinel, so a plugin can tell "nothing to mirror into" apart from a write
-// that genuinely failed.
+// that genuinely failed. A value the store refuses, such as a _status no read
+// filter matches, is core.ErrValidation, so the plugin answers it as the
+// caller's mistake and not as an outage the caller would retry.
 func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
 	}
-	err := h.contentStore.UpsertContent(ctx, schemaName, id, data)
-	if errors.Is(err, domain.ErrNotFound) {
-		return fmt.Errorf("%w: schema %q", core.ErrNotFound, schemaName)
+	if err := h.contentStore.UpsertContent(ctx, schemaName, id, data); err != nil {
+		return contentWriterErr(err, schemaName)
 	}
-	return err
+	return nil
 }
 
 // DeleteContent mirrors a content delete into the per-schema table, treating a
@@ -94,20 +95,23 @@ func (h *engineHost) ProjectContentStatus(ctx context.Context, schemaName string
 }
 
 // contentWriterErr translates the store's sentinels into the ones a plugin
-// can import. Anything else is the store's own error, a database failure
-// the caller answers as unavailable.
+// can import. A validation error keeps the store's chain, so a refusal that
+// names its field, such as a *core.RelationTargetError, still reads with
+// errors.As. Anything else is the store's own error, a database failure the
+// caller answers as unavailable.
 func contentWriterErr(err error, schemaName string) error {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		return fmt.Errorf("%w: schema %q", core.ErrNotFound, schemaName)
 	case errors.Is(err, domain.ErrValidation):
-		return fmt.Errorf("%w: %s", core.ErrValidation, err.Error())
+		return fmt.Errorf("%w: %w", core.ErrValidation, err)
 	}
 	return err
 }
 
 // ContentPage reads one page of a schema's generated table for the tenant on
-// ctx, drafts included. Implements core.ContentReader.
+// ctx, drafts included and soft-deleted rows left out. Implements
+// core.ContentReader.
 func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after uuid.UUID, limit int) ([]map[string]any, error) {
 	if h.contentStore == nil {
 		return nil, fmt.Errorf("content reader not wired")
@@ -119,7 +123,7 @@ func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after u
 	if after != uuid.Nil {
 		cursor = after.String()
 	}
-	items, err := h.contentStore.ListCursor(ctx, schemaName, cursor, limit)
+	items, err := h.contentStore.ListCursor(ctx, schemaName, cursor, limit, true)
 	if err != nil {
 		return nil, contentWriterErr(err, schemaName)
 	}

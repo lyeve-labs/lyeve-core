@@ -275,6 +275,11 @@ body (json, newline):
         "in": "cookie",
         "name": "__Host-sys_session",
         "type": "apiKey"
+      },
+      "metricsToken": {
+        "description": "The token the operator set in METRICS_TOKEN, sent as Authorization: Bearer <token>. Only GET /api/admin/metrics reads it.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -705,6 +710,82 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/auth/provider-window": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Days an account created by the tenant's identity provider may still sign in by password, reset or magic link after the provider last signed it in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "days": 30
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Days outside 0 to 365, or not a whole number"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Set the provider window, a whole number of days from 0 to 365. 0 means only through the identity provider",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
     "/api/admin/auth/refresh": {
       "post": {
         "description": "Rotates the refresh token and issues a new access token. Rate limited.",
@@ -730,6 +811,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -743,6 +827,9 @@ body (json, newline):
         "summary": "Report every setting and the layer it comes from",
         "tags": [
           "Admin / Configuration"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       },
       "put": {
@@ -755,6 +842,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           },
           "409": {
             "description": "Every submitted key is pinned by a higher layer"
@@ -774,6 +864,9 @@ body (json, newline):
         "summary": "Store engine settings in the admin layer",
         "tags": [
           "Admin / Configuration"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -863,6 +956,12 @@ body (json, newline):
           },
           "400": {
             "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -876,6 +975,9 @@ body (json, newline):
         "summary": "Erase or anonymize a data subject's data (Art.17 right to erasure)",
         "tags": [
           "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -901,6 +1003,12 @@ body (json, newline):
           },
           "400": {
             "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -914,6 +1022,9 @@ body (json, newline):
         "summary": "Export all data for a data subject (Art.15/20 portable bundle)",
         "tags": [
           "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -923,10 +1034,21 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
           "503": {
             "description": "Database unreachable"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Liveness probe - is the process alive?",
         "tags": [
           "System"
@@ -935,14 +1057,43 @@ body (json, newline):
     },
     "/api/admin/metrics": {
       "get": {
+        "description": "A scraper presents the metrics token and needs no account. A super admin's session reaches the route too. While METRICS_TOKEN is set, any other bearer token is refused, so that session has to come from the cookie.",
         "responses": {
           "200": {
-            "description": "Prometheus text format"
+            "content": {
+              "application/vnd.google.protobuf; proto=io.prometheus.client.MetricFamily; encoding=delimited": {},
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The Prometheus text format, version 0.0.4, or the delimited protobuf format when the Accept header asks for it"
+          },
+          "401": {
+            "description": "No credential, or a bearer token other than the metrics token while one is set"
+          },
+          "403": {
+            "description": "A session without the super_admin role"
           }
         },
+        "security": [
+          {
+            "metricsToken": []
+          },
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Prometheus metrics",
         "tags": [
           "System"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -951,6 +1102,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -964,6 +1121,10 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -972,6 +1133,9 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
           },
           "403": {
             "description": "Not a super admin"
@@ -988,6 +1152,9 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification of the /api/admin routes",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -996,6 +1163,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1009,6 +1182,10 @@ body (json, newline):
         "summary": "OpenAPI 3.1 specification of the content API and every route outside /api/admin",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -1249,6 +1426,12 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
           "503": {
             "description": "Pool unhealthy"
           }
@@ -1264,6 +1447,10 @@ body (json, newline):
         "summary": "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)",
         "tags": [
           "Admin / System"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
@@ -1273,10 +1460,21 @@ body (json, newline):
           "200": {
             "description": "OK"
           },
+          "401": {
+            "description": "Unauthorized"
+          },
           "503": {
             "description": "Not ready"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "summary": "Readiness probe - is the server ready to serve traffic?",
         "tags": [
           "System"
@@ -1302,10 +1500,25 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The bundle: a YAML file to download, or JSON when format is json"
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           },
           "503": {
             "description": "Schema engine unavailable"
@@ -1326,7 +1539,11 @@ body (json, newline):
         "tags": [
           "Admin / Content Types"
         ],
-        "x-admin-grant": "schemas:read"
+        "x-admin-grant": "schemas:read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
       }
     },
     "/api/admin/schemas/import": {
@@ -1360,6 +1577,46 @@ body (json, newline):
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "schemas": [
+                    {
+                      "display_name": "Notes",
+                      "fields": [
+                        {
+                          "field_type": "text",
+                          "name": "title"
+                        }
+                      ],
+                      "name": "notes"
+                    }
+                  ],
+                  "version": 1
+                }
+              }
+            },
+            "application/x-yaml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "application/yaml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "text/yaml": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "A bundle as GET /api/admin/schemas/export writes it, or the definitions of the system the from parameter names, in YAML or JSON.",
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -1370,11 +1627,20 @@ body (json, newline):
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "Forbidden"
+          },
           "409": {
             "description": "References cannot be satisfied; nothing was applied"
           },
+          "413": {
+            "description": "The definitions are larger than the request body limit"
+          },
           "422": {
             "description": "Definitions could not be read"
+          },
+          "503": {
+            "description": "Schema engine unavailable"
           }
         },
         "security": [
@@ -1388,6 +1654,9 @@ body (json, newline):
         "summary": "Import content types from a bundle or another system",
         "tags": [
           "Admin / Content Types"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -1476,6 +1745,12 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1489,6 +1764,9 @@ body (json, newline):
         "summary": "List all users",
         "tags": [
           "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       },
       "post": {
@@ -1512,6 +1790,12 @@ body (json, newline):
         "responses": {
           "201": {
             "description": "Created"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
           }
         },
         "security": [
@@ -1525,6 +1809,9 @@ body (json, newline):
         "summary": "Create a user",
         "tags": [
           "Admin / Users"
+        ],
+        "x-roles": [
+          "super_admin"
         ]
       }
     },
@@ -2086,7 +2373,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
             "description": "Collection name, as listed by GET /api/v1/schemas.",
@@ -2100,7 +2387,82 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "application/x-ndjson"
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "description": "One event. A change sends only its data line, and comment lines are not events. The event that ends the stream also names itself.",
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The record after the change, or as it was before a delete, without the fields a read withholds from the caller.",
+                                "properties": {
+                                  "id": {
+                                    "format": "uuid",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id"
+                                ],
+                                "type": "object"
+                              },
+                              "event": {
+                                "enum": [
+                                  "after_create",
+                                  "after_update",
+                                  "after_delete"
+                                ],
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The collection the record belongs to.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "schema",
+                              "data"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "error": {
+                                "description": "Why the stream stopped, for example that the credential expired or was revoked.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "error"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "enum": [
+                        "error"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The stream, open until the client disconnects"
           },
           "401": {
             "description": "Unauthorized"
@@ -2114,7 +2476,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream records",
+        "summary": "Stream changes to the collection",
         "tags": [
           "Content API / Content"
         ]
@@ -2640,8 +3002,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server liveness probe",
         "tags": [
           "System"
@@ -2653,8 +3023,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server readiness probe",
         "tags": [
           "System"
@@ -2721,6 +3099,13 @@ body (json, newline):
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
         "responses": {
           "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "description": "A robots.txt disallowing every path"
           }
         },
@@ -2768,6 +3153,11 @@ body (json, newline):
         "in": "cookie",
         "name": "__Host-sys_session",
         "type": "apiKey"
+      },
+      "metricsToken": {
+        "description": "The token the operator set in METRICS_TOKEN, sent as Authorization: Bearer <token>. Only GET /api/admin/metrics reads it.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
@@ -3080,7 +3470,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Newline-delimited JSON, one record per line, for exports too large to page.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
             "description": "Collection name, as listed by GET /api/v1/schemas.",
@@ -3094,7 +3484,82 @@ body (json, newline):
         ],
         "responses": {
           "200": {
-            "description": "application/x-ndjson"
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "description": "One event. A change sends only its data line, and comment lines are not events. The event that ends the stream also names itself.",
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "data": {
+                                "description": "The record after the change, or as it was before a delete, without the fields a read withholds from the caller.",
+                                "properties": {
+                                  "id": {
+                                    "format": "uuid",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "id"
+                                ],
+                                "type": "object"
+                              },
+                              "event": {
+                                "enum": [
+                                  "after_create",
+                                  "after_update",
+                                  "after_delete"
+                                ],
+                                "type": "string"
+                              },
+                              "schema": {
+                                "description": "The collection the record belongs to.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "event",
+                              "schema",
+                              "data"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "properties": {
+                              "error": {
+                                "description": "Why the stream stopped, for example that the credential expired or was revoked.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "error"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "enum": [
+                        "error"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The stream, open until the client disconnects"
           },
           "401": {
             "description": "Unauthorized"
@@ -3108,7 +3573,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream records",
+        "summary": "Stream changes to the collection",
         "tags": [
           "Content API / Content"
         ]
@@ -3634,8 +4099,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server liveness probe",
         "tags": [
           "System"
@@ -3647,8 +4120,16 @@ body (json, newline):
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "summary": "API server readiness probe",
         "tags": [
           "System"
@@ -3715,6 +4196,13 @@ body (json, newline):
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
         "responses": {
           "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
             "description": "A robots.txt disallowing every path"
           }
         },
