@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
+
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
 
@@ -172,18 +174,33 @@ const maxMigrationAttempts = 4
 // the affected plugin simply does not start. Backoff is linear and short: the
 // contention lasts as long as the other plugin's transaction, not longer.
 func applyScriptWithRetry(ctx context.Context, db *sql.DB, dialect, tableName string, sc migrationScript) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxMigrationAttempts; attempt++ {
-		err := applyScript(ctx, db, dialect, tableName, sc)
+	return retryMigration(ctx, tableName, sc.version, func() error {
+		return applyScript(ctx, db, dialect, tableName, sc)
+	})
+}
+
+// retryMigration runs apply up to maxMigrationAttempts times while it fails
+// with a transient concurrency error, and returns after the last attempt
+// without waiting again.
+//
+// A MySQL lock wait timeout returns at once. It arrives only after the script
+// waited innodb_lock_wait_timeout, 50 seconds by default, on a lock another
+// session holds, so each retry would stall the boot that long again.
+func retryMigration(ctx context.Context, tableName, version string, apply func() error) error {
+	for attempt := 1; ; attempt++ {
+		err := apply()
 		if err == nil {
 			return nil
 		}
-		if !isRetryableTxError(err) {
+		if !isRetryableTxError(err) || isLockWaitTimeout(err) {
 			return err
 		}
-		lastErr = err
+		if attempt == maxMigrationAttempts {
+			return fmt.Errorf("plugin migrate: %s failed after %d attempts: %w",
+				version, maxMigrationAttempts, err)
+		}
 		slog.Warn("plugin migrate: transient conflict, retrying",
-			"plugin_table", tableName, "version", sc.version,
+			"plugin_table", tableName, "version", version,
 			"attempt", attempt, "err", err)
 		select {
 		case <-ctx.Done():
@@ -191,8 +208,13 @@ func applyScriptWithRetry(ctx context.Context, db *sql.DB, dialect, tableName st
 		case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("plugin migrate: %s failed after %d attempts: %w",
-		sc.version, maxMigrationAttempts, lastErr)
+}
+
+// isLockWaitTimeout reports MySQL error 1205. SQL Server uses the same number
+// for a deadlock victim, which returns at once and stays worth a retry.
+func isLockWaitTimeout(err error) bool {
+	var myErr *mysql.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == 1205
 }
 
 // isRetryableTxError reports whether err is a transient concurrency failure the
