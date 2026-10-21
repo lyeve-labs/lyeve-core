@@ -100,11 +100,12 @@ func TestCSPNonce_ErrorLogging(t *testing.T) {
 	var logBuf bytes.Buffer
 	logHandler := slog.NewJSONHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug})
 
-	logger := slog.New(logHandler)
-	slog.SetDefault(logger)
-	// Restore after the test. Concurrent tests would conflict, and -race on
-	// the suite catches that.
-	defer slog.SetDefault(slog.Default())
+	// The previous default is read before the swap: a deferred call's
+	// argument is read when the defer runs, after the swap. Concurrent tests
+	// would conflict, and -race on the suite catches that.
+	prev := slog.Default()
+	slog.SetDefault(slog.New(logHandler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
 
 	r := chi.NewRouter()
 	r.Use(apimw.CSPNonce())
