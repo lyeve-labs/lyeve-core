@@ -3,7 +3,9 @@ package engine_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
@@ -161,4 +163,158 @@ func probeTakes(ctx context.Context, t *testing.T, conn *sql.Conn, dialect, name
 	}
 	t.Fatalf("unsupported dialect %q", dialect)
 	return false
+}
+
+func TestDistLockCheck_KeepsTheLockWhenTheCallerDeadlinePassed_Postgres(t *testing.T) {
+	testDistLockCheckKeepsTheLockOnDeadline(t, plugintest.Postgres(t))
+}
+func TestDistLockCheck_KeepsTheLockWhenTheCallerDeadlinePassed_MySQL(t *testing.T) {
+	testDistLockCheckKeepsTheLockOnDeadline(t, plugintest.MySQL(t))
+}
+func TestDistLockCheck_KeepsTheLockWhenTheCallerDeadlinePassed_MSSQL(t *testing.T) {
+	testDistLockCheckKeepsTheLockOnDeadline(t, plugintest.MSSQL(t))
+}
+
+// testDistLockCheckKeepsTheLockOnDeadline checks with a context that has
+// already run out. The ping fails for the caller's reason, not the session's,
+// so the session has to stay open: closing it would free the lock on the
+// server while the work it covers is still running.
+func testDistLockCheckKeepsTheLockOnDeadline(t *testing.T, host core.Host) {
+	t.Helper()
+	ctx := context.Background()
+	db := host.RawDB()
+	dialect := host.Dialect()
+
+	probe, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("probe conn: %v", err)
+	}
+	defer probe.Close()
+
+	lock := engine.NewDistLock("check_deadline")
+	got, err := lock.TryAcquire(ctx, db, dialect)
+	if err != nil || !got {
+		t.Fatalf("TryAcquire = %v, %v", got, err)
+	}
+	defer lock.Release()
+
+	expired, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	if lock.Check(expired) {
+		t.Error("Check confirmed the lock without reaching the database")
+	}
+	if !lock.IsHeld() {
+		t.Error("Check dropped the lock because the caller's deadline passed")
+	}
+	if probeTakes(ctx, t, probe, dialect, "lyeve_check_deadline") {
+		t.Fatal("another session took the lock after a check whose deadline had passed")
+	}
+	if !lock.Check(ctx) {
+		t.Error("a check with a live context does not find the lock held")
+	}
+}
+
+func TestDistLockCheck_ReportsTheLockLostWithItsSession_Postgres(t *testing.T) {
+	testDistLockCheckReportsALostSession(t, plugintest.Postgres(t))
+}
+func TestDistLockCheck_ReportsTheLockLostWithItsSession_MySQL(t *testing.T) {
+	testDistLockCheckReportsALostSession(t, plugintest.MySQL(t))
+}
+func TestDistLockCheck_ReportsTheLockLostWithItsSession_MSSQL(t *testing.T) {
+	testDistLockCheckReportsALostSession(t, plugintest.MSSQL(t))
+}
+
+// testDistLockCheckReportsALostSession ends the holding session from another
+// one, the way a dropped connection or a server restart would, and expects
+// Check to report the lock lost.
+func testDistLockCheckReportsALostSession(t *testing.T, host core.Host) {
+	t.Helper()
+	ctx := context.Background()
+	db := host.RawDB()
+	dialect := host.Dialect()
+	const name = "lyeve_check_lost"
+
+	probe, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("probe conn: %v", err)
+	}
+	defer probe.Close()
+
+	lock := engine.NewDistLock("check_lost")
+	got, err := lock.TryAcquire(ctx, db, dialect)
+	if err != nil || !got {
+		t.Fatalf("TryAcquire = %v, %v", got, err)
+	}
+	defer lock.Release()
+
+	holder, ok := lockHolder(ctx, t, probe, dialect, name)
+	if !ok {
+		t.Fatal("no session holds the lock after TryAcquire")
+	}
+	killSession(ctx, t, probe, dialect, holder)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, ok := lockHolder(ctx, t, probe, dialect, name); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the server still holds the lock after its session was killed")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if lock.Check(ctx) {
+		t.Error("Check reports the lock held after its session ended")
+	}
+	if lock.IsHeld() {
+		t.Error("IsHeld is true after Check found the session gone")
+	}
+}
+
+// lockHolder returns the server id of the session holding the named lock.
+func lockHolder(ctx context.Context, t *testing.T, conn *sql.Conn, dialect, name string) (int64, bool) {
+	t.Helper()
+	var id sql.NullInt64
+	var err error
+	switch dialect {
+	case "postgres":
+		// A bigint advisory key keeps its low 32 bits in objid.
+		err = conn.QueryRowContext(ctx, `SELECT pid FROM pg_locks
+			WHERE locktype = 'advisory' AND granted
+			  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND objid::bigint = (hashtext($1)::bigint & 4294967295)`, name).Scan(&id)
+	case "mysql":
+		err = conn.QueryRowContext(ctx, "SELECT IS_USED_LOCK(?)", name).Scan(&id)
+	case "mssql":
+		err = conn.QueryRowContext(ctx, `SELECT TOP 1 request_session_id FROM sys.dm_tran_locks
+			WHERE resource_type = 'APPLICATION' AND request_owner_type = 'SESSION'
+			  AND request_status = 'GRANT' AND resource_database_id = DB_ID()
+			  AND resource_description LIKE '%' + @p1 + '%'`, name).Scan(&id)
+	default:
+		t.Fatalf("unsupported dialect %q", dialect)
+	}
+	if err == sql.ErrNoRows {
+		return 0, false
+	}
+	if err != nil {
+		t.Fatalf("lock holder: %v", err)
+	}
+	return id.Int64, id.Valid
+}
+
+// killSession ends another session on the server.
+func killSession(ctx context.Context, t *testing.T, conn *sql.Conn, dialect string, id int64) {
+	t.Helper()
+	var err error
+	switch dialect {
+	case "postgres":
+		_, err = conn.ExecContext(ctx, "SELECT pg_terminate_backend($1, 5000)", id)
+	case "mysql", "mssql":
+		_, err = conn.ExecContext(ctx, fmt.Sprintf("KILL %d", id))
+	default:
+		t.Fatalf("unsupported dialect %q", dialect)
+	}
+	if err != nil {
+		t.Fatalf("kill session %d: %v", id, err)
+	}
 }
