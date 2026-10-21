@@ -163,3 +163,22 @@ func TestBinaryEquals_TrailingSpacesFollowTheCollation(t *testing.T) {
 		assert.Equal(t, want, n)
 	})
 }
+
+// A change whose own arguments leave no room for one row's key and texts is
+// refused before any statement runs. Before, the batch came out empty or the
+// slice bound went negative, and the loop never ended or panicked.
+func TestChangeByKey_RefusesAChangeThatCannotBindOneRow(t *testing.T) {
+	rows := []compliance.ConfirmedRow[string]{{Key: uuid.NewString()}}
+	for _, args := range []int{compliance.EraseParams - 1, compliance.EraseParams, compliance.EraseParams + 1} {
+		c := compliance.KeyedChange{
+			Change:  "UPDATE t SET note = '' WHERE ",
+			Args:    make([]any, args),
+			Key:     "id",
+			Columns: []string{"note"},
+		}
+		var q core.Querier
+		n, err := compliance.ChangeByKey(context.Background(), q, "postgres", c, rows)
+		require.ErrorIs(t, err, compliance.ErrChangeTooWide, "%d arguments", args)
+		assert.Zero(t, n)
+	}
+}
