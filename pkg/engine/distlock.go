@@ -150,18 +150,29 @@ func (l *DistLock) Release() error {
 // Check reports whether the lock is still held, by pinging the session that
 // holds it. A dead session has already lost the lock on the server, so Check
 // clears the local state and returns false.
+//
+// When ctx has already ended, Check returns false and keeps the session and
+// the lock, so a later Check with time left decides. The ping itself never
+// runs under ctx: the drivers close a session whose ping is canceled, and
+// closing it frees a lock the server still grants while the work it covers is
+// running. checkPingTimeout bounds the ping instead.
 func (l *DistLock) Check(ctx context.Context) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !l.held {
+	if !l.held || ctx.Err() != nil {
 		return false
 	}
-	if l.conn.PingContext(ctx) == nil {
+	pingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), checkPingTimeout)
+	defer cancel()
+	if l.conn.PingContext(pingCtx) == nil {
 		return true
 	}
 	l.dropLocked()
 	return false
 }
+
+// checkPingTimeout bounds the ping Check sends to the lock's session.
+const checkPingTimeout = 5 * time.Second
 
 // dropLocked forgets a lock whose session is gone. The caller holds l.mu.
 func (l *DistLock) dropLocked() {
