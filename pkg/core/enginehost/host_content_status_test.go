@@ -93,3 +93,61 @@ func TestScopedHost_ForwardsProjectContentStatus(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "content writer not wired", "the call reached the engine host")
 }
+
+// A plugin writes through the host from a request or from a job of its own.
+// The after_update names whoever the context authenticated: the owner when an
+// admin token made the call, and nobody when no caller did.
+func TestEngineHost_SetContentStatusNamesTheActor(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	for _, name := range []string{"postgres", "mysql", "mssql"} {
+		t.Run(name, func(t *testing.T) {
+			if !testdb.ShouldTest(name) {
+				t.Skipf("CI_DIALECT != %s", name)
+			}
+			var pool db.DB
+			switch name {
+			case "mysql":
+				pool = testdb.MySQL(t)
+			case "mssql":
+				pool = testdb.MSSQL(t)
+			default:
+				pool = testdb.Postgres(t)
+			}
+			ctx := context.Background()
+			h := NewHost(pool, pool.SQLDB(), nil, hooks.NewRegistry(), "test").(*engineHost)
+			engine := schemaengine.New(h)
+			h.RegisterSchemaEngine(engine)
+			const schema = "actor_posts"
+			def, err := json.Marshal(core.Schema{
+				Name:             schema,
+				WithDraftPublish: true,
+				Fields:           []core.SchemaField{{Name: "title", FieldType: "text"}},
+			})
+			require.NoError(t, err)
+			require.NoError(t, engine.Apply(ctx, schema, def))
+
+			var actors, kinds []string
+			sub := h.Hooks().Subscribe(schema, core.AfterUpdate, func(_ context.Context, e core.Event) error {
+				actors = append(actors, e.ActorID)
+				kinds = append(kinds, e.ActorKind)
+				return nil
+			})
+			defer sub.Unsubscribe()
+
+			id := uuid.New()
+			require.NoError(t, h.UpsertContent(ctx, schema, id, map[string]any{"title": "launch"}))
+
+			require.NoError(t, h.SetContentStatus(ctx, schema, id, core.ContentStatusPublished))
+			owner := uuid.NewString()
+			asToken := context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{
+				UserID: owner, Roles: []string{"admin"}, TokenType: "admin_token", AdminTokenID: uuid.NewString(),
+			})
+			require.NoError(t, h.SetContentStatus(asToken, schema, id, core.ContentStatusArchived))
+
+			assert.Equal(t, []string{"", owner}, actors)
+			assert.Equal(t, []string{"", core.ActorKindAdminToken}, kinds)
+		})
+	}
+}

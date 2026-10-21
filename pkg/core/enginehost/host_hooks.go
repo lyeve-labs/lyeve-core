@@ -23,13 +23,15 @@ func (h *hookBusAdapter) Subscribe(schema string, event core.EventType, handler 
 	// Wrap the public EventHandler into the internal hooks.Hook signature.
 	fn := func(ctx context.Context, e hooks.Event) error {
 		return handler(ctx, core.Event{
-			Type:     core.EventType(e.Type),
-			Schema:   e.Schema,
-			Data:     e.Data,
-			OldData:  e.OldData,
-			TenantID: e.TenantID,
-			RecordID: e.RecordID,
-			Source:   e.Source,
+			Type:      core.EventType(e.Type),
+			Schema:    e.Schema,
+			Data:      e.Data,
+			OldData:   e.OldData,
+			TenantID:  e.TenantID,
+			RecordID:  e.RecordID,
+			Source:    e.Source,
+			ActorID:   e.ActorID,
+			ActorKind: e.ActorKind,
 		})
 	}
 

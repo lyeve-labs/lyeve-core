@@ -22,8 +22,20 @@ const SourceEngine = "engine"
 // the subscriber acts on: the new row for a create or an update, the removed
 // row for a delete. OldData is set only on an update. The id is stamped into
 // Data when the writer did not put it there, so a subscriber can read it from
-// either field.
+// either field. ActorID and ActorKind are the caller the context
+// authenticated, so every writer that publishes from the request's context
+// names it the same way.
 func ContentEvent(ctx context.Context, source string, action EventType, schema, id string, before, after map[string]any) Event {
+	var actor, kind string
+	if claims := GetClaims(ctx); claims != nil && claims.UserID != "" {
+		actor, kind = claims.UserID, ActorKindUser
+		switch {
+		case claims.IsAPIKey:
+			kind = ActorKindAPIKey
+		case claims.AdminTokenID != "":
+			kind = ActorKindAdminToken
+		}
+	}
 	data, old := after, before
 	if action == AfterDelete || action == BeforeDelete {
 		data, old = before, nil
@@ -40,6 +52,8 @@ func ContentEvent(ctx context.Context, source string, action EventType, schema, 
 		TenantID:  TenantIDFromCtx(ctx),
 		Timestamp: time.Now().UTC(),
 		Source:    source,
+		ActorID:   actor,
+		ActorKind: kind,
 	}
 }
 

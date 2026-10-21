@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,4 +84,45 @@ func TestPublishContentEvent_WrapsPublisherError(t *testing.T) {
 	require.Len(t, pub.events, 1)
 	assert.Equal(t, AfterDelete, pub.events[0].Type)
 	assert.Equal(t, "r1", pub.events[0].RecordID)
+}
+
+// The actor is whoever the context authenticated, read from the claims every
+// credential leaves there. A context with no claims is a write nobody made,
+// such as a scheduled job's, and names nobody.
+func TestContentEvent_ActorFromClaims(t *testing.T) {
+	const user = "6f1c2a4e-0d3b-4b8e-9a51-2c7d8e9f0a1b"
+	const key = "a3d5e7f9-1b2c-4d6e-8f0a-1b2c3d4e5f60"
+	cases := []struct {
+		name     string
+		claims   *AuthClaims
+		want     string
+		wantKind string
+	}{
+		{"a session names its user", &AuthClaims{UserID: user, Roles: []string{"editor"}}, user, ActorKindUser},
+		{"an admin token names its owner", &AuthClaims{UserID: user, AdminTokenID: "tok-1", TokenType: "admin_token"}, user, ActorKindAdminToken},
+		{"an API key names the id it authenticates as", &AuthClaims{UserID: key, IsAPIKey: true, APIKeyID: key}, key, ActorKindAPIKey},
+		{"no claims name nobody", nil, "", ""},
+		{"claims without a user id name nobody", &AuthClaims{Roles: []string{"editor"}}, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := WithTenantID(context.Background(), "acme")
+			if tc.claims != nil {
+				ctx = context.WithValue(ctx, ClaimsKey, tc.claims)
+			}
+			ev := ContentEvent(ctx, "engine", AfterUpdate, "posts", "r1", nil, map[string]any{"title": "x"})
+			assert.Equal(t, tc.want, ev.ActorID)
+			assert.Equal(t, tc.wantKind, ev.ActorKind)
+		})
+	}
+}
+
+// Webhooks, message brokers and realtime streams encode an Event or a value
+// that embeds one, so the actor must not reach the JSON form.
+func TestEvent_JSONOmitsActor(t *testing.T) {
+	raw, err := json.Marshal(Event{Type: AfterCreate, Schema: "posts", RecordID: "r1", ActorID: "u1", ActorKind: ActorKindAPIKey})
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "u1")
+	assert.NotContains(t, string(raw), ActorKindAPIKey)
+	assert.NotContains(t, strings.ToLower(string(raw)), "actor")
 }
