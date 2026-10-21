@@ -222,8 +222,9 @@ func hasControlChars(s string) bool {
 //     against a constant hash, producing identical timing and error messages.
 //   - Account lockout: after MaxFailedAttempts consecutive failures from the
 //     same user (tracked by the LockoutChecker), returns HTTP 429.
-//   - MFA fail-closed: if mfaStore.IsEnabled errors, login is denied rather
-//     than issuing an unauthenticated session.
+//   - MFA fail-closed: if mfaStore.IsEnabled errors, login is denied with a
+//     503 rather than issuing an unauthenticated session. The password may
+//     well be right, so the answer is not a credential failure.
 //   - Account state: disabled or expired accounts are rejected before session
 //     issuance.
 //
@@ -462,9 +463,11 @@ func (h *AuthHandler) respondIfSecondFactorRequired(w http.ResponseWriter, r *ht
 		var mfaErr error
 		mfaEnabled, mfaErr = h.mfaStore.IsEnabled(r.Context(), user.ID)
 		if mfaErr != nil {
-			// MFA fail-closed: deny login instead of issuing a session.
+			// MFA fail-closed: deny login instead of issuing a session. The
+			// store failed, not the credentials, so the answer is a 503 the
+			// client retries, as mfa-verify answers the same outage.
 			slog.Warn("mfa check query failed, failing closed: denying login", "err", mfaErr)
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeMFAStoreError, nil)
+			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeMFAStoreError, nil)
 			return risk, true
 		}
 	}

@@ -553,9 +553,18 @@ func TestLogin_MFAFailClosed_Unit(t *testing.T) {
 
 	h.Login(rr, req)
 
-	// Must fail closed: a store error never issues a session.
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d (Unauthorized - MFA store error must fail closed)", rr.Code, http.StatusUnauthorized)
+	// Must fail closed: a store error never issues a session. It is an
+	// outage, not a wrong password, so it answers 503 for the client to retry.
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d: an unreadable MFA store is an outage", rr.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rr.Body.String(), "AUTH_MFA_STORE_ERROR") {
+		t.Errorf("body = %q, want the MFA store error code", rr.Body.String())
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == security.SessionCookieNameInsecure && c.Value != "" {
+			t.Error("a session cookie was set while the MFA store could not be read")
+		}
 	}
 }
 
@@ -1732,8 +1741,8 @@ func TestToken_MFAStoreErrorRefusesTheToken(t *testing.T) {
 	h := NewAuthHandler(tokenTestUsers(t), &failingMFAStore{}, nil, "secret", 3600, false)
 	rr := tokenRequest(t, h)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d: an unreadable factor store must fail closed", rr.Code, http.StatusUnauthorized)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: an unreadable factor store must fail closed as an outage", rr.Code, http.StatusServiceUnavailable)
 	}
 	if _, ok := decodeAuthResponse(t, rr)["token"]; ok {
 		t.Fatal("a token was issued while the factor store could not be read")
