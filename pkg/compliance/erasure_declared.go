@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
 )
 
 // SubjectEraserDeclarer is a plugin that holds data subjects' rows. The
@@ -75,7 +76,16 @@ func (e *DeclaredEraser) EraserName() string { return e.name }
 // EraseSubject erases the subject where the set's tables are whole, and
 // reports nothing erased where the plugin never ran.
 func (e *DeclaredEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
-	state, err := e.set.Check(ctx, e.host.Querier(ctx), e.host.Dialect())
+	// On SQL Server the catalog read takes shared locks that a schema change
+	// running at the same time can deadlock with, and the server may choose
+	// the read as the victim. It runs on the pool, outside any transaction,
+	// and changes nothing, so it is read again.
+	var state core.TableSetState
+	err := sqlx.RetryOnTxConflict(ctx, e.name+" erasure catalog read", func() error {
+		var err error
+		state, err = e.set.Check(ctx, e.host.Querier(ctx), e.host.Dialect())
+		return err
+	})
 	if err != nil {
 		return 0, fmt.Errorf("%s erasure: %w", e.name, err)
 	}
