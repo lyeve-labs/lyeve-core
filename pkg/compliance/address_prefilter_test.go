@@ -69,6 +69,19 @@ func TestAddressTextForms_PrefilterSelectsEveryPayloadThatNamesTheAddress(t *tes
 			},
 			others: []string{"sent to aa&b@x.example"},
 		},
+		{
+			address: "bob@x.example",
+			named: []string{
+				"https://crm.example/?to=bob%40x.example",
+				mustJSON(t, map[string]any{"url": "https://crm.example/?to=Bob%40X.Example"}),
+				`<a href="mailto:bob&#64;x.example">Bob</a>`,
+			},
+			others: []string{
+				"write to alice%2Bbob@x.example",
+				"https://crm.example/?to=alice%2Bbob%40x.example",
+				"write to alice&#43;bob&#64;x.example",
+			},
+		},
 	}
 
 	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
