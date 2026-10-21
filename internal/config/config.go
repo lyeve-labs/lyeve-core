@@ -115,11 +115,6 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, fmt.Errorf("DATABASE_URL must be set")
 	}
 
-	// Warn when SSL is disabled: production deployments must encrypt connections.
-	if strings.Contains(dbURL, "sslmode=disable") {
-		fmt.Fprintf(os.Stderr, "WARNING: DATABASE_URL contains sslmode=disable - database connections are unencrypted. Ensure sslmode=require or sslmode=verify-full in production.\n")
-	}
-
 	// A stateless engine signs no session and stores nothing encrypted, so it
 	// needs neither secret. One that is set is still checked for strength.
 	jwtSecret := lookup("JWT_SECRET")
@@ -482,9 +477,6 @@ func LoadFrom(path string) (*Config, error) {
 	}
 
 	replicaURL := lookup("DATABASE_REPLICA_URL")
-	if strings.Contains(replicaURL, "sslmode=disable") {
-		fmt.Fprintf(os.Stderr, "WARNING: DATABASE_REPLICA_URL contains sslmode=disable - replica connections are unencrypted. Ensure sslmode=require or sslmode=verify-full in production.\n")
-	}
 	replicaMaxConns := int64(30)
 	if v := lookup("DATABASE_REPLICA_MAX_CONNS"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 32)
