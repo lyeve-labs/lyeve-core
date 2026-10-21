@@ -1156,6 +1156,9 @@ type readOnlyQuerier struct {
 	inner Querier
 }
 
+// SysDatabase passes the inner querier's answer through, for the catalog read.
+func (r readOnlyQuerier) SysDatabase() string { return sysDatabaseOf(r.inner) }
+
 func (r readOnlyQuerier) QueryRow(ctx context.Context, sQL string, args ...any) (Row, error) {
 	return r.inner.QueryRow(ctx, sQL, args...)
 }

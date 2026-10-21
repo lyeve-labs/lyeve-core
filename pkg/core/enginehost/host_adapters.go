@@ -69,6 +69,9 @@ func (t *pgxTx) Exec(ctx context.Context, sql string, args ...any) (core.Command
 	return core.CommandTag{RowsAffected: n}, nil
 }
 
+// SysDatabase names the database engine tables are qualified with.
+func (t *pgxTx) SysDatabase() string { return t.sysDB }
+
 // Begin creates a savepoint-backed nested transaction. *sql.Tx has no native
 // nested transaction support, so explicit savepoints simulate the behavior.
 func (t *pgxTx) Begin(ctx context.Context) (core.Tx, error) {
@@ -122,6 +125,9 @@ func (s *savepointTx) Exec(ctx context.Context, sql string, args ...any) (core.C
 	n, _ := tag.RowsAffected()
 	return core.CommandTag{RowsAffected: n}, nil
 }
+
+// SysDatabase names the database engine tables are qualified with.
+func (s *savepointTx) SysDatabase() string { return s.sysDB }
 
 func (s *savepointTx) Begin(ctx context.Context) (core.Tx, error) {
 	name := nextSavepoint()

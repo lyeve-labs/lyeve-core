@@ -176,6 +176,10 @@ func (q *poolQuerier) Exec(ctx context.Context, sql string, args ...any) (core.C
 	return core.CommandTag{RowsAffected: n}, nil
 }
 
+// SysDatabase names the database the pool qualifies engine tables with, for
+// the catalog read on a connection that switched to a tenant's database.
+func (q *poolQuerier) SysDatabase() string { return poolDatabaseName(q.pool) }
+
 func (q *poolQuerier) Begin(ctx context.Context) (core.Tx, error) {
 	tx, err := q.pool.Begin(ctx)
 	if err != nil {
