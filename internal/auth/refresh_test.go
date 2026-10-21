@@ -277,18 +277,13 @@ func TestRefreshTokenStore_Rotate_CASCrossReplicaRace(t *testing.T) {
 	done.Wait()
 
 	successes := 0
-	failures := 0
 	if e1 == nil {
 		successes++
 		require.NotNil(t, r1, "successful rotation must return a result")
-	} else {
-		failures++
 	}
 	if e2 == nil {
 		successes++
 		require.NotNil(t, r2, "successful rotation must return a result")
-	} else {
-		failures++
 	}
 
 	// One replica rotates. The other either lost the CAS write, which it
@@ -304,7 +299,6 @@ func TestRefreshTokenStore_Rotate_CASCrossReplicaRace(t *testing.T) {
 	if successes == 2 {
 		assert.Equal(t, r1.RefreshToken, r2.RefreshToken, "two replicas issued two different successors")
 	}
-	_ = failures
 
 	// Neither outcome revokes the family, so the winner's token rotates.
 	winner := r1
