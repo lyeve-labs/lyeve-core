@@ -100,7 +100,7 @@ func MaxBodySizeFor(maxBytes int64, overrides map[string]int64) func(http.Handle
 				return
 			}
 			if r.ContentLength > limit {
-				tooLarge(w, r, limit)
+				httpx.BodyTooLarge(w, r, limit)
 				return
 			}
 			if r.Body != nil {
@@ -126,21 +126,6 @@ func BodyLimitKey(method, path string) string {
 	return strings.ToUpper(method) + " " + routeKeyPath(path)
 }
 
-// tooLarge answers a refused body in the envelope every other response uses.
-//
-// An oversized upload is one of the commonest refusals an API issues, so the
-// client has to be able to parse the answer and find its request id, which a
-// text/plain body would not give it.
-//
-// Connection: close because the caller is mid-send: without it the server tries
-// to drain a body it has already refused, which for a large upload means
-// reading the whole thing to say it was too big.
-func tooLarge(w http.ResponseWriter, r *http.Request, maxBytes int64) {
-	w.Header().Set("Connection", "close")
-	httpx.ErrorReq(w, r, http.StatusRequestEntityTooLarge,
-		fmt.Sprintf("Request body exceeds the %d byte limit.", maxBytes))
-}
-
 // ContentLengthLimit enforces a per-route-group body-size limit of maxBytes,
 // returning HTTP 413. Soft guard for JSON routes (e.g. 1 MiB) under the
 // global MaxBodySize hard limit (e.g. 10 MiB for uploads). Never mounted on
@@ -154,7 +139,7 @@ func ContentLengthLimit(maxBytes int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.ContentLength > maxBytes {
-				tooLarge(w, r, maxBytes)
+				httpx.BodyTooLarge(w, r, maxBytes)
 				return
 			}
 			// Cap bytes read so chunked bodies (Content-Length -1/0) can't bypass the header check.
