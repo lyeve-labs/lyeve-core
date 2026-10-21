@@ -83,6 +83,11 @@ type engineHost struct {
 	// accounts' own roles only, and SignSessionToken signs the row's roles.
 	seatMembers atomic.Pointer[membershipBox]
 
+	// Wired by SetMFAChallengeCompleter (the admin router, when it builds the
+	// sign-in handlers). Atomic because a router rebuild replaces it while
+	// plugins serve requests. Until then a plugin cannot complete a challenge.
+	mfaChallenges atomic.Pointer[mfaChallengeBox]
+
 	// Wired by RegisterEmailSender (the registering plugin's Start). Nil-safe:
 	// EmailSender() returns nil when no plugin registered one.
 	emailSender core.EmailSender

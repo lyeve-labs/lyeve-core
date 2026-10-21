@@ -186,6 +186,14 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	authHandler.WithSetupToken(setupToken)
 	authHandler.WithMemberships(o.memberships)
+	// A plugin that verifies a second factor of its own completes the
+	// challenge through this handler, so both read one record of used
+	// challenges.
+	if reg, ok := o.scalingHost.(interface {
+		SetMFAChallengeCompleter(core.MFAChallengeCompleter)
+	}); ok {
+		reg.SetMFAChallengeCompleter(authHandler)
+	}
 	// The document describes what this router mounts, so it is built from the
 	// same values the mounts are.
 	specOptions := openAPIOptions{

@@ -438,6 +438,34 @@ func (h *ScopedHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 	return "", ErrCapDenied
 }
 
+// MFAChallengeAccount forwards to inner if it implements
+// MFAChallengeCompleter. Denied without CapSessionSign, like the completion
+// it leads to.
+func (h *ScopedHost) MFAChallengeAccount(ctx context.Context, challengeToken string) (MFAChallengeAccount, error) {
+	if !h.has(CapSessionSign) {
+		h.warnDenied("MFAChallengeAccount", "", CapSessionSign)
+		return MFAChallengeAccount{}, ErrCapDenied
+	}
+	if c, ok := h.inner.(MFAChallengeCompleter); ok {
+		return c.MFAChallengeAccount(ctx, challengeToken)
+	}
+	return MFAChallengeAccount{}, ErrCapDenied
+}
+
+// CompleteMFAChallenge forwards to inner if it implements
+// MFAChallengeCompleter. Denied without CapSessionSign, because the session
+// it signs acts as the account the challenge names.
+func (h *ScopedHost) CompleteMFAChallenge(ctx context.Context, challengeToken string) (string, error) {
+	if !h.has(CapSessionSign) {
+		h.warnDenied("CompleteMFAChallenge", "", CapSessionSign)
+		return "", ErrCapDenied
+	}
+	if c, ok := h.inner.(MFAChallengeCompleter); ok {
+		return c.CompleteMFAChallenge(ctx, challengeToken)
+	}
+	return "", ErrCapDenied
+}
+
 // CachedFetch forwards to inner if it implements QueryCacheProvider.
 func (h *ScopedHost) CachedFetch(ctx context.Context, pluginName, tenantID, dialect, sql string, args []any, ttl time.Duration, dest any, fn CacheFetcher) (bool, error) {
 	if p, ok := h.inner.(QueryCacheProvider); ok {
