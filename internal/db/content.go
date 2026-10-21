@@ -181,6 +181,17 @@ func (s *ContentStore) FlushCaches(ctx context.Context) {
 	}
 }
 
+// FlushWritten drops every cached item and list after a write the store did
+// not make, such as a batch a plugin inserted with its own SQL, and tells the
+// other replicas as the store's own writes do. The written ids are unknown,
+// so every cached item goes along with the lists.
+func (s *ContentStore) FlushWritten(ctx context.Context, schemaName string) {
+	if s.onInvalidate != nil && (s.itemCache != nil || s.listCache != nil) {
+		s.onInvalidate(ctx, schemaName)
+	}
+	s.FlushCaches(ctx)
+}
+
 // Insert creates a new row in the collection table, tagged with the request's
 // tenant. Only keys matching defined (non-system) field names are written,
 // with _status on a schema with draft and publish. Unknown keys are ignored.
