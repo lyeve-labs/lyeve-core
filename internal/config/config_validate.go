@@ -167,15 +167,25 @@ func (c *Config) ProductionWarnings() []string {
 		warns = append(warns, "LYEVE_CONSOLE_URL is unset, so nothing can send a person to the console: password reset and magic-link sign-in refuse to start, and device sign-in refuses every request, until it names the console's public URL")
 	}
 	if !c.Stateless() && (c.DatabaseDriver == "" || c.DatabaseDriver == "postgres") {
-		switch mode := sslMode(c.DatabaseURL); mode {
-		case "require", "verify-ca", "verify-full":
-		case "":
-			warns = append(warns, "DATABASE_URL sets no sslmode, so the driver may connect without TLS - set sslmode=require or sslmode=verify-full unless the database is on a private network")
-		default:
-			warns = append(warns, "DATABASE_URL sets sslmode="+mode+", so the connection can run without TLS - set sslmode=require or sslmode=verify-full unless the database is on a private network")
+		warns = appendPlaintextWarning(warns, "DATABASE_URL", c.DatabaseURL)
+		if c.DatabaseReplicaURL != "" {
+			warns = appendPlaintextWarning(warns, "DATABASE_REPLICA_URL", c.DatabaseReplicaURL)
 		}
 	}
 	return warns
+}
+
+// appendPlaintextWarning appends the warning for a PostgreSQL URL whose
+// sslmode lets the connection run without TLS.
+func appendPlaintextWarning(warns []string, name, url string) []string {
+	switch mode := sslMode(url); mode {
+	case "require", "verify-ca", "verify-full":
+		return warns
+	case "":
+		return append(warns, name+" sets no sslmode, so the driver may connect without TLS - set sslmode=require or sslmode=verify-full unless the database is on a private network")
+	default:
+		return append(warns, name+" sets sslmode="+mode+", so the connection can run without TLS - set sslmode=require or sslmode=verify-full unless the database is on a private network")
+	}
 }
 
 // sslMode returns the sslmode a PostgreSQL URL or keyword DSN names, lower
