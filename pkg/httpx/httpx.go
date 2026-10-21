@@ -141,6 +141,20 @@ func ErrorReq(w http.ResponseWriter, r *http.Request, status int, msg string) {
 	})
 }
 
+// BodyTooLarge answers a request body refused for exceeding maxBytes with 413
+// in the envelope every other response uses. An oversized upload is one of the
+// commonest refusals an API issues, so the client has to be able to parse the
+// answer and find its request id, which a text/plain body would not give it.
+//
+// Connection: close because the caller is mid-send: without it the server
+// tries to drain a body it has already refused, which for a large upload means
+// reading the whole thing to say it was too big.
+func BodyTooLarge(w http.ResponseWriter, r *http.Request, maxBytes int64) {
+	w.Header().Set("Connection", "close")
+	ErrorReq(w, r, http.StatusRequestEntityTooLarge,
+		fmt.Sprintf("Request body exceeds the %d byte limit.", maxBytes))
+}
+
 // ErrorCode writes the localized error envelope {"error", "code",
 // "request_id"}: the catalog's message for code in the caller's locale with
 // params interpolated, the code itself for a client to branch on, and the
