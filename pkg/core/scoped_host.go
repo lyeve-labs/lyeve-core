@@ -1361,9 +1361,15 @@ func (h *ScopedHost) ProviderWindowAdmitsAccount(ctx context.Context, tenantID s
 	return ProviderWindowAdmits(seenAt, ProviderWindowDefaultDays, time.Now()), nil
 }
 
-// TenantAccounts forwards to inner if it implements TenantAccountProvider.
-// Nil when the host keeps no accounts.
+// TenantAccounts forwards to inner if it implements TenantAccountProvider,
+// for a plugin holding CapDBWrite. The store creates an account with any
+// roles in any tenant, so a plugin that may not write the database gets nil,
+// as it does from a host that keeps no accounts.
 func (h *ScopedHost) TenantAccounts() TenantAccountStore {
+	if !h.has(CapDBWrite) {
+		h.warnDenied("TenantAccounts", "", CapDBWrite)
+		return nil
+	}
 	if p, ok := h.inner.(TenantAccountProvider); ok {
 		return p.TenantAccounts()
 	}
