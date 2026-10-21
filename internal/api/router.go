@@ -1185,7 +1185,8 @@ func normalizeRoutePattern(pattern string) string {
 // core engine registers directly under the given router prefix ("/api/admin" or
 // "/api/v1"). This mirrors the r.Get/r.Post/... calls in NewAdminRouter and
 // NewAPIRouter and MUST be kept in sync with them. A router test walks the
-// admin router and fails on any route missing here. It backs the guardrail in
+// admin router and fails on any route missing here, and on any route listed
+// here that the router does not serve. It backs the guardrail in
 // mountPluginRoutes that warns when a plugin re-declares an engine-owned
 // route, and the admin grant registry, which refuses a plugin grant on one.
 // The pprof handlers answer every method and are left out: their paths are
@@ -1231,10 +1232,6 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"GET /api/admin/auth/memberships",
 			"GET /api/admin/schemas/export",
 			"POST /api/admin/schemas/import",
-			"GET /api/admin/users/{id}/memberships",
-			"PUT /api/admin/users/{id}/memberships",
-			"DELETE /api/admin/users/{id}/memberships/{tenant}",
-			"GET /api/admin/tenant-members/{tenant}",
 			"GET /api/admin/config",
 			"GET /api/admin/api-key-scopes",
 			"PUT /api/admin/config",
