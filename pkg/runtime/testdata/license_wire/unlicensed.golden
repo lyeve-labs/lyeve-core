@@ -962,6 +962,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
           }
         },
         "security": [
@@ -1009,6 +1012,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
           }
         },
         "security": [
