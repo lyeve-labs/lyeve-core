@@ -67,33 +67,38 @@ func TestAddressTextForms_PlainThenEscapedOnceAndTwice(t *testing.T) {
 		address string
 		want    []string
 	}{
-		{"ann@x.example", []string{"ann@x.example"}},
-		{" ann@x.example ", []string{"ann@x.example"}},
-		{"Ann@X.Example", []string{"Ann@X.Example"}},
-		{"a&b@x.example", []string{"a&b@x.example", `a\u0026b@x.example`, `a\\u0026b@x.example`}},
-		{`"a b"@x.example`, []string{`"a b"@x.example`, `\"a b\"@x.example`, `\\\"a b\\\"@x.example`}},
+		{"ann@x.example", []string{"ann@x.example", "ann%40x.example", "ann&#64;x.example"}},
+		{" ann@x.example ", []string{"ann@x.example", "ann%40x.example", "ann&#64;x.example"}},
+		{"Ann@X.Example", []string{"Ann@X.Example", "Ann%40X.Example", "Ann&#64;X.Example"}},
+		{"a&b@x.example", []string{"a&b@x.example", `a\u0026b@x.example`, `a\\u0026b@x.example`, "a&b%40x.example", "a&b&#64;x.example"}},
+		{`"a b"@x.example`, []string{`"a b"@x.example`, `\"a b\"@x.example`, `\\\"a b\\\"@x.example`, `"a b"%40x.example`, `"a b"&#64;x.example`}},
 		{"jos\u00e9@x.example", []string{
 			"jos\u00e9@x.example", "jose\u0301@x.example",
 			`jos\u00e9@x.example`, `jos\\u00e9@x.example`, `jose\u0301@x.example`, `jose\\u0301@x.example`,
+			"jos\u00e9%40x.example", "jos\u00e9&#64;x.example",
 		}},
 		{"Jos\u00e9@X.Example", []string{
 			"Jos\u00e9@X.Example", "jose\u0301@x.example",
 			`jos\u00e9@x.example`, `jos\\u00e9@x.example`, `jose\u0301@x.example`, `jose\\u0301@x.example`,
+			"Jos\u00e9%40X.Example", "Jos\u00e9&#64;X.Example",
 		}},
 		{"jos\u00e9&b@x.example", []string{
 			"jos\u00e9&b@x.example", "jose\u0301&b@x.example",
 			"jos\u00e9\\u0026b@x.example", "jos\u00e9\\\\u0026b@x.example",
 			"jose\u0301\\u0026b@x.example", "jose\u0301\\\\u0026b@x.example",
 			`jos\u00e9&b@x.example`, `jos\\u00e9&b@x.example`, `jose\u0301&b@x.example`, `jose\\u0301&b@x.example`,
+			"jos\u00e9&b%40x.example", "jos\u00e9&b&#64;x.example",
 		}},
 		{"stra\u00dfe@x.example", []string{
 			"stra\u00dfe@x.example", "stra\u1e9ee@x.example", `stra\u00dfe@x.example`, `stra\\u00dfe@x.example`,
+			"stra\u00dfe%40x.example", "stra\u00dfe&#64;x.example",
 		}},
 		{"STRA\u1e9eE@X.EXAMPLE", []string{
 			"STRA\u1e9eE@X.EXAMPLE", "stra\u00dfe@x.example", "stra\u1e9ee@x.example",
 			`stra\u00dfe@x.example`, `stra\\u00dfe@x.example`,
+			"STRA\u1e9eE%40X.EXAMPLE", "STRA\u1e9eE&#64;X.EXAMPLE",
 		}},
-		{"\U00010330@x.example", []string{"\U00010330@x.example", `\ud800\udf30@x.example`, `\\ud800\\udf30@x.example`}},
+		{"\U00010330@x.example", []string{"\U00010330@x.example", `\ud800\udf30@x.example`, `\\ud800\\udf30@x.example`, "\U00010330%40x.example", "\U00010330&#64;x.example"}},
 	} {
 		assert.Equal(t, tc.want, compliance.AddressTextForms(tc.address), tc.address)
 	}
@@ -133,6 +138,13 @@ func TestNamesAddress_WholeAddressOnly(t *testing.T) {
 		{`mailto:Ann%20%3Cann@x.example%3E`, true},
 		{`%22ann@x.example%22`, true},
 		{`%20ann@x.example`, true},
+		{`https://crm.example/?to=ann%40x.example`, true},
+		{`{"url":"https://crm.example/?to=Ann%40X.Example"}`, true},
+		{`mailto:ann%2540x.example`, true},
+		{`50% off, write to ann%40x.example`, true},
+		{`<a href="mailto:ann&#64;x.example">ann&#64;x.example</a>`, true},
+		{`%3Cann@x.example%3E`, true},
+		{`&lt;ann@x.example&gt;`, true},
 		{`ติดต่อann@x.example`, true},
 		{`ຕິດຕໍ່ann@x.example`, true},
 		{`ទាក់ទងann@x.example`, true},
@@ -144,6 +156,14 @@ func TestNamesAddress_WholeAddressOnly(t *testing.T) {
 		{`{"to":"ann@x.example.org"}`, false},
 		{`{"to":"jo.ann@x.example"}`, false},
 		{`{"to":"jo+ann@x.example"}`, false},
+		{`jo%2Bann@x.example`, false},
+		{`jo%2Dann@x.example`, false},
+		{`jo%5Fann@x.example`, false},
+		{`jo%2Eann@x.example`, false},
+		{`jo%c3%a9ann@x.example`, false},
+		{`jo%2Bann%40x.example`, false},
+		{`jo&#43;ann@x.example`, false},
+		{`jo&#43;ann&#64;x.example`, false},
 		{`{"to":"ann@x.example-mail.org"}`, false},
 		{`{"to":"ánn@x.example"}`, false},
 		{`{"to":"éann@x.example"}`, false},
