@@ -497,16 +497,34 @@ var mssqlShared struct {
 	ready    readyQueue
 }
 
+// mssqlStartupWait bounds how long the shared SQL Server container may take
+// to finish recovery. azure-sql-edge needs more than a minute on a loaded
+// host, and the module's own wait gave it one minute, which failed every
+// SQL Server test of a run at once.
+const mssqlStartupWait = 4 * time.Minute
+
+// mssqlContainerOptions are the options the shared SQL Server container
+// starts with. The wait replaces the module's, with the same two conditions,
+// and each one carries the longer timeout because a condition with none
+// falls back to a minute of its own.
+func mssqlContainerOptions() []testcontainers.ContainerCustomizer {
+	return []testcontainers.ContainerCustomizer{
+		tcmssql.WithAcceptEULA(),
+		tcmssql.WithPassword("Str0ng@Passw0rd"),
+		testcontainers.WithWaitStrategyAndDeadline(mssqlStartupWait,
+			wait.ForListeningPort("1433/tcp").WithStartupTimeout(mssqlStartupWait),
+			wait.ForLog("Recovery is complete.").WithStartupTimeout(mssqlStartupWait),
+		),
+	}
+}
+
 func ensureMSSQL(t *testing.T) {
 	t.Helper()
 	testdialect.Require(t, "mssql")
 	mssqlShared.once.Do(func() {
 		ctx := context.Background()
 		mssqlShared.ctr, mssqlShared.err = tcmssql.Run(ctx,
-			containerImage("MSSQL", testdialect.MSSQLImage),
-			tcmssql.WithAcceptEULA(),
-			tcmssql.WithPassword("Str0ng@Passw0rd"),
-		)
+			containerImage("MSSQL", testdialect.MSSQLImage), mssqlContainerOptions()...)
 		if mssqlShared.err != nil {
 			return
 		}
