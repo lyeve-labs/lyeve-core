@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -36,6 +38,25 @@ func (h *engineHost) FlushContentCache(ctx context.Context, schemaName string) {
 	if h.contentStore != nil {
 		h.contentStore.FlushWritten(ctx, schemaName)
 	}
+}
+
+// UpdateContent writes data to an existing row of the per-schema table and
+// never inserts one. Implements core.ContentUpdater.
+//
+// The store's update matches the row by id and tenant, and skips a
+// soft-deleted row, so a row that is gone matches nothing. That miss reaches
+// the caller as core.ErrNotFound, the answer a read of the row would give.
+func (h *engineHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	if h.contentStore == nil {
+		return fmt.Errorf("content writer not wired")
+	}
+	if _, err := h.contentStore.Update(ctx, schemaName, id, data, time.Time{}); err != nil {
+		if errors.Is(err, db.ErrContentConflict) {
+			return fmt.Errorf("%w: %s row %s", core.ErrNotFound, schemaName, id)
+		}
+		return contentWriterErr(err, schemaName)
+	}
+	return nil
 }
 
 // DeleteContent mirrors a content delete into the per-schema table, treating a
@@ -151,6 +172,7 @@ func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after u
 
 var (
 	_ core.ContentWriter          = (*engineHost)(nil)
+	_ core.ContentUpdater         = (*engineHost)(nil)
 	_ core.ContentStatusProjector = (*engineHost)(nil)
 	_ core.ContentReader          = (*engineHost)(nil)
 )

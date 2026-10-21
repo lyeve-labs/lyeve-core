@@ -132,6 +132,18 @@ type ContentCacheFlusher interface {
 	FlushContentCache(ctx context.Context, schemaName string)
 }
 
+// ContentUpdater writes to an existing content row and never creates one, for
+// a caller that read a row and then writes it. UpdateContent applies data to
+// the row id holds for the caller's tenant. A row that is missing or
+// soft-deleted is ErrNotFound and nothing is written, so a delete that lands
+// between the read and the write is reported instead of being undone or
+// written into. A schema the tenant never defined is ErrNotFound, and a value
+// the store refuses is ErrValidation, as for ContentWriter. A host that can
+// write content implements it.
+type ContentUpdater interface {
+	UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error
+}
+
 // ContentReader pages through a schema's generated content table, every row
 // the tenant on ctx holds and every status, ordered by id. A soft-deleted row
 // is not read, since it is gone for every other reader too. It is for

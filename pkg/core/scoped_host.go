@@ -310,6 +310,16 @@ func (h *ScopedHost) UpsertContent(ctx context.Context, schemaName string, id uu
 	return cw.UpsertContent(ctx, schemaName, id, data)
 }
 
+// UpdateContent forwards an update-only content write to the inner host.
+// Implements ContentUpdater.
+func (h *ScopedHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	cu, ok := h.inner.(ContentUpdater)
+	if !ok {
+		return fmt.Errorf("content updater not available")
+	}
+	return cu.UpdateContent(ctx, schemaName, id, data)
+}
+
 // DeleteContent forwards content deletes to the inner host. Implements
 // ContentWriter.
 func (h *ScopedHost) DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error {
@@ -361,6 +371,7 @@ func (h *ScopedHost) FlushContentCache(ctx context.Context, schemaName string) {
 
 var (
 	_ ContentWriter          = (*ScopedHost)(nil)
+	_ ContentUpdater         = (*ScopedHost)(nil)
 	_ ContentStatusProjector = (*ScopedHost)(nil)
 	_ ContentReader          = (*ScopedHost)(nil)
 	_ ContentCacheFlusher    = (*ScopedHost)(nil)
