@@ -121,17 +121,28 @@ func (s TableSet) Check(ctx context.Context, q Querier, dialect string) (TableSe
 // catalogSchema is the predicate that holds a catalog read to the schema an
 // unqualified name resolves to on the connection. On MySQL information_schema
 // spans every database on the server, so the read is held to the one the
-// connection is using.
+// connection is using. PostgreSQL reads its own catalog instead, through
+// pgTables and pgColumns.
 func catalogSchema(dialect string) string {
-	switch dialect {
-	case "mysql":
+	if dialect == "mysql" {
 		return "table_schema = DATABASE()"
-	case "mssql":
-		return "table_schema = SCHEMA_NAME()"
-	default:
-		return "table_schema = current_schema()"
 	}
+	return "table_schema = SCHEMA_NAME()"
 }
+
+// pgTables and pgColumns read the PostgreSQL catalog for the relation each
+// unqualified name resolves to. A tenant-scoped connection searches the
+// tenant's schema and then public, so current_schema() names the tenant's
+// schema while an unqualified sys_* table resolves to public, and a read held
+// to current_schema() reported the engine's tables absent. A relation is
+// visible when it is the first one of its name on the search path, which is
+// the one an unqualified statement reaches.
+const (
+	pgTables = `SELECT c.relname FROM pg_catalog.pg_class c
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND pg_catalog.pg_table_is_visible(c.oid) AND LOWER(c.relname) IN (%s)`
+	pgColumns = `SELECT c.relname, a.attname FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND pg_catalog.pg_table_is_visible(c.oid) AND a.attnum > 0 AND NOT a.attisdropped AND LOWER(c.relname) IN (%s)`
+)
 
 // catalogHint is the table hint a catalog read takes. On SQL Server a catalog
 // read takes locks that row versioning does not cover, so it waits on a table
@@ -157,8 +168,12 @@ func presentTables(ctx context.Context, q Querier, dialect string, tables []stri
 		args[i] = strings.ToLower(t)
 		marks[i] = fmt.Sprintf("$%d", i+1)
 	}
-	rows, err := q.Query(ctx, `SELECT table_name FROM information_schema.tables`+catalogHint(dialect)+`
-WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
+	query := fmt.Sprintf(pgTables, strings.Join(marks, ", "))
+	if dialect == "mysql" || dialect == "mssql" {
+		query = `SELECT table_name FROM information_schema.tables` + catalogHint(dialect) + `
+WHERE ` + catalogSchema(dialect) + ` AND LOWER(table_name) IN (` + strings.Join(marks, ", ") + `)`
+	}
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -189,8 +204,12 @@ func presentColumns(ctx context.Context, q Querier, dialect string, columns []ta
 			marks = append(marks, fmt.Sprintf("$%d", len(args)))
 		}
 	}
-	rows, err := q.Query(ctx, `SELECT table_name, column_name FROM information_schema.columns`+catalogHint(dialect)+`
-WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
+	query := fmt.Sprintf(pgColumns, strings.Join(marks, ", "))
+	if dialect == "mysql" || dialect == "mssql" {
+		query = `SELECT table_name, column_name FROM information_schema.columns` + catalogHint(dialect) + `
+WHERE ` + catalogSchema(dialect) + ` AND LOWER(table_name) IN (` + strings.Join(marks, ", ") + `)`
+	}
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list columns: %w", err)
 	}
