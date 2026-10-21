@@ -3,7 +3,7 @@ module github.com/lyeve-labs/lyeve-core
 // No toolchain line: go mod tidy removes one that equals the go directive. If
 // the floor and the toolchain ever need to differ, say here which constraint
 // forced it.
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/andybalholm/brotli v1.2.3
