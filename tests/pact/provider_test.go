@@ -42,9 +42,6 @@ func TestProviderVerification(t *testing.T) {
 	pactDir := pactFilesDirectory()
 
 	pactURLs := findPactFiles(t, pactDir)
-	if len(pactURLs) == 0 {
-
-	}
 
 	t.Logf("Provider: %s | Base URL: %s | Pact files: %d", providerName, baseURL, len(pactURLs))
 

@@ -619,24 +619,6 @@ func countTrackingVersions(t *testing.T, ctx context.Context, db *sql.DB, tableN
 	return count
 }
 
-// trackingTableExists returns true if the given table exists.
-func trackingTableExists(t *testing.T, ctx context.Context, db *sql.DB, dialect, tableName string) bool {
-	t.Helper()
-	var query string
-	switch dialect {
-	case "postgres":
-		query = "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)"
-	case "mysql":
-		query = "SELECT COUNT(*) > 0 FROM information_schema.tables WHERE table_name = ? AND table_schema = DATABASE()"
-	case "mssql":
-		query = "SELECT COUNT(*) FROM sys.tables WHERE name = @p1"
-	}
-	var exists bool
-	err := db.QueryRowContext(ctx, query, tableName).Scan(&exists)
-	require.NoError(t, err)
-	return exists
-}
-
 // The main roundtrip test
 
 // TestPluginMigrationRoundtrip verifies that for every plugin with migrations:
@@ -661,12 +643,10 @@ func TestPluginMigrationRoundtrip(t *testing.T) {
 	dialects := rtDialects(t)
 
 	for _, d := range dialects {
-		d := d // capture
 		t.Run(d.name, func(t *testing.T) {
 			t.Parallel()
 
 			for _, p := range plugins {
-				p := p // capture
 				t.Run(p.name, func(t *testing.T) {
 					ctx := context.Background()
 
@@ -816,7 +796,6 @@ func TestPluginMigrationRollbackPartial(t *testing.T) {
 	tableName := "rt_partial_widgets_migrations"
 
 	for _, d := range rtDialects(t) {
-		d := d
 		t.Run(d.name, func(t *testing.T) {
 			t.Parallel()
 			fresh := d.fresh(t)

@@ -4,7 +4,6 @@
 package pact
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -76,10 +75,4 @@ func stateOK(setup bool, s models.ProviderState) (models.ProviderStateResponse, 
 		}, nil
 	}
 	return nil, nil
-}
-
-const apiBase = "/api/admin"
-
-func route(base, path string) string {
-	return fmt.Sprintf("%s%s", base, path)
 }
