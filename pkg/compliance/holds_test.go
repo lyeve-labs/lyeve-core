@@ -144,3 +144,40 @@ func TestRunSubjectErasure_HonorsHolds(t *testing.T) {
 		t.Errorf("erasers ran %d times on a held subject, want 0", eraser.calls)
 	}
 }
+
+// A plugin's own erasure route asks through CheckSubjectHolds, so it answers a
+// checker that cannot answer as the engine's route does, under either setting.
+func TestCheckSubjectHolds_FailedCheckFollowsTheSetting(t *testing.T) {
+	t.Cleanup(compliance.ResetHoldChecker)
+	down := errors.New("retention store is down")
+	for _, tc := range []struct {
+		name, setting string
+		wantErr       error
+	}{
+		{"unset refuses", "", compliance.ErrHoldCheckUnavailable},
+		{"refuse refuses", "refuse", compliance.ErrHoldCheckUnavailable},
+		{"proceed reports no holds", "proceed", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compliance.ResetHoldChecker()
+			compliance.RegisterHoldChecker(&fakeHoldChecker{err: down})
+			t.Setenv("LYEVE_GDPR_HOLD_CHECK", tc.setting)
+
+			holds, err := compliance.CheckSubjectHolds(context.Background(), "subject@example.com")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if len(holds) != 0 {
+				t.Fatalf("holds = %v, want none", holds)
+			}
+		})
+	}
+
+	compliance.ResetHoldChecker()
+	held := []compliance.HoldRef{{ID: "h-3", Reason: "litigation"}}
+	compliance.RegisterHoldChecker(&fakeHoldChecker{holds: held})
+	holds, err := compliance.CheckSubjectHolds(context.Background(), "subject@example.com")
+	if err != nil || len(holds) != 1 || holds[0].ID != "h-3" {
+		t.Fatalf("holds = %v, err = %v, want the checker's hold", holds, err)
+	}
+}
