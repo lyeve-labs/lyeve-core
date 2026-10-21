@@ -261,7 +261,14 @@ func Migrate(dsn, migrationsRoot string, seed VersionSeed) (int, error) {
 		}
 	}
 
-	m, err := migrate.New("file://"+abs, withMigrationsTable(migrateDSN))
+	// golang-migrate opens a session of its own, so on MySQL it gets the
+	// settings every engine pool carries (UTC, changed-row counts), with the
+	// scheme put back that its driver reads.
+	migratorURL := migrateDSN
+	if engine == "mysql" {
+		migratorURL = "mysql://" + driverDSN(engine, migrateDSN)
+	}
+	m, err := migrate.New("file://"+abs, withMigrationsTable(migratorURL))
 	if err != nil {
 		return 0, fmt.Errorf("create migrator (%s): %w", engine, err)
 	}
