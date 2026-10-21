@@ -448,8 +448,8 @@ func TestLogin_EnumerationResistance_Unit(t *testing.T) {
 
 // Unknown-email and known-email+wrong-password paths must be
 // indistinguishable in timing (both run bcrypt). Runs each path many
-// times, computes the median, and asserts the difference is within
-// tolerance.
+// times, computes the median CPU time, and asserts the difference is within
+// tolerance. CPU time holds on a busy host, where wall-clock time stretches.
 func TestLogin_EnumerationTiming_Unit(t *testing.T) {
 	t.Parallel()
 
@@ -477,9 +477,7 @@ func TestLogin_EnumerationTiming_Unit(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			start := time.Now()
-			h.Login(rr, req)
-			durs[i] = time.Since(start)
+			durs[i] = signInCost(t, func() { h.Login(rr, req) })
 
 			if rr.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", email, rr.Code, http.StatusUnauthorized)
@@ -1461,9 +1459,7 @@ func TestToken_EnumerationTiming_Unit(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			start := time.Now()
-			h.Token(rr, req)
-			durs[i] = time.Since(start)
+			durs[i] = signInCost(t, func() { h.Token(rr, req) })
 
 			if rr.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", email, rr.Code, http.StatusUnauthorized)
