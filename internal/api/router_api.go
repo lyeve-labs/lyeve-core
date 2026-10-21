@@ -116,12 +116,6 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	authHandler := NewAuthHandler(userStore, o.mfaStore, pool, cfg.JWTSecret, cfg.JWTExpirySecs, secureCook)
 	authHandler.WithSharedLockoutBackend(o.lockoutBackend)
 	authHandler.WithMemberships(o.memberships)
-	authHandler.WithPasswordPolicy(auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-	})
 	// Wire per-tenant DEK encryption. Prefer a KeyStore injected by the runtime
 	// (KEK resolved through the secret-custody chain). Otherwise fall back to
 	// building one from ENCRYPTION_KEY.
