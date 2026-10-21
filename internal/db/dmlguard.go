@@ -1,11 +1,19 @@
 // Package db DMLGuardConnector wraps a driver.Connector and intercepts Prepare/Exec to
-// reject INSERT, UPDATE, DELETE, TRUNCATE, MERGE, and REPLACE. SELECT, DDL,
-// and transaction control pass through. Mutations must go through
-// host.Querier(ctx) or host.AdminQuerier(ctx).
+// reject a statement that opens with INSERT, UPDATE, DELETE, TRUNCATE, MERGE or
+// REPLACE. SELECT, DDL and transaction control pass through. Mutations go
+// through host.Querier(ctx) or host.AdminQuerier(ctx).
+//
+// The guard catches a plugin's own mistake: an unscoped write sent to RawDB
+// by accident. It is not a sandbox, and SQL written outside the engine must
+// never reach it. It reads only how each statement opens, so it passes a
+// write that starts with a WITH clause, a write run inside a procedure, EXEC
+// or DO block, a function that writes, and on SQL Server a second statement
+// with no semicolon before it. DDL passes by design, DROP TABLE included. A
+// plugin allowed RawDB is also allowed MigrationDB, which has no guard.
 //
 // NewDMLGuardDB opens a tiny-pool (max 2 conns) *sql.DB with the guard wired
-// into every connection. Use for PluginMigrate (DDL). Runtime queries use the
-// primary pool via Querier/AdminQuerier.
+// into every connection, served by RawDB. PluginMigrate runs on MigrationDB,
+// and runtime queries use the primary pool through Querier and AdminQuerier.
 package db
 
 import (

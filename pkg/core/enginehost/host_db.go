@@ -44,9 +44,9 @@ func (h *engineHost) RawDB() *sql.DB {
 func (h *engineHost) MigrationDB() *sql.DB { return h.rawDB }
 
 // WithDMLGuardedDB wires a DML-guarded *sql.DB to be served by RawDB().
-// The guarded DB rejects INSERT/UPDATE/DELETE/TRUNCATE/MERGE/REPLACE
-// while allowing SELECT and DDL (PluginMigrate). The real pool is
-// still served by MigrationDB() and AdminQuerier().
+// The guarded DB rejects a statement that opens with
+// INSERT/UPDATE/DELETE/TRUNCATE/MERGE/REPLACE and allows SELECT and DDL. The
+// real pool is still served by MigrationDB() and AdminQuerier().
 func (h *engineHost) WithDMLGuardedDB(db *sql.DB) { h.guardedDB = db }
 
 // WithLockDB wires the pool every DistLock this host issues holds its
