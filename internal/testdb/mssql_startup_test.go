@@ -3,7 +3,6 @@ package testdb
 import (
 	"context"
 	"errors"
-	"reflect"
 	"testing"
 	"time"
 
@@ -30,17 +29,35 @@ func TestMSSQLContainer_WaitsLongEnoughForALoadedHost(t *testing.T) {
 	require.ErrorIs(t, err, stop)
 	require.NotNil(t, waiting)
 
-	// The combined wait holds its bound in an unexported deadline, and each
-	// condition in it keeps a timeout of its own.
+	// Each condition keeps a timeout of its own.
 	all, ok := waiting.(*wait.MultiStrategy)
 	require.True(t, ok, "%T", waiting)
-	deadline := reflect.ValueOf(all).Elem().FieldByName("deadline")
-	require.False(t, deadline.IsNil(), "the combined wait has no deadline")
-	require.GreaterOrEqual(t, time.Duration(deadline.Elem().Int()), 3*time.Minute, "the combined wait")
 	for _, inner := range all.Strategies {
 		timed, ok := inner.(wait.StrategyTimeout)
 		require.True(t, ok, "%T sets no timeout", inner)
 		require.NotNil(t, timed.Timeout(), "%T falls back to a one-minute default", inner)
 		require.GreaterOrEqual(t, *timed.Timeout(), 3*time.Minute, "%T", inner)
 	}
+
+	// The combined wait bounds the context every condition runs under. A
+	// probe in place of the conditions reads that bound.
+	var probe deadlineProbe
+	all.Strategies = []wait.Strategy{&probe}
+	require.NoError(t, all.WaitUntilReady(context.Background(), nil))
+	require.True(t, probe.bounded, "the combined wait has no deadline")
+	require.GreaterOrEqual(t, probe.left, 3*time.Minute, "the combined wait")
+}
+
+// deadlineProbe is a wait condition that is met at once and records how long
+// the context it ran under had left.
+type deadlineProbe struct {
+	bounded bool
+	left    time.Duration
+}
+
+func (p *deadlineProbe) WaitUntilReady(ctx context.Context, _ wait.StrategyTarget) error {
+	var deadline time.Time
+	deadline, p.bounded = ctx.Deadline()
+	p.left = time.Until(deadline)
+	return nil
 }
