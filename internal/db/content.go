@@ -618,6 +618,11 @@ func (s *ContentStore) updateRow(ctx context.Context, sc *domain.Schema, schemaN
 		args = append(args, expectedUpdatedAt)
 		where = fmt.Sprintf("WHERE id = $%d AND updated_at = $%d AND tenant_id = $%d", len(args)-2, len(args), len(args)-1)
 	}
+	// A soft-deleted row is gone for every reader, so an update matches it no
+	// more than it matches a removed row.
+	if sc.WithSoftDelete {
+		where += " AND deleted_at IS NULL"
+	}
 
 	if s.pool.Engine() == "postgres" {
 		row, qErr := s.pool.QueryRow(ctx,
