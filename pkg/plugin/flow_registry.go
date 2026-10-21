@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -269,8 +270,10 @@ func (a *Activator) collectFlowContribution(name string, p core.Plugin) (nodes [
 func (a *Activator) safeFlowNodes(name string, p core.FlowNodeProvider) (nodes []core.FlowNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			stack := debug.Stack()
 			a.logger.Error("plugin FlowNodes() panicked",
-				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(debug.Stack()))
+				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(stack))
+			panicreport.Report(panicreport.Panic{Goroutine: "plugin/" + name + "/FlowNodes", Value: r, Stack: stack})
 			nodes, err = nil, fmt.Errorf("FlowNodes panicked: %v", r)
 		}
 	}()
@@ -280,8 +283,10 @@ func (a *Activator) safeFlowNodes(name string, p core.FlowNodeProvider) (nodes [
 func (a *Activator) safeFlowTriggers(name string, p core.FlowTriggerProvider) (triggers []core.FlowTrigger, err error) {
 	defer func() {
 		if r := recover(); r != nil {
+			stack := debug.Stack()
 			a.logger.Error("plugin FlowTriggers() panicked",
-				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(debug.Stack()))
+				"plugin", name, "panic", fmt.Sprintf("%v", r), "stack", string(stack))
+			panicreport.Report(panicreport.Panic{Goroutine: "plugin/" + name + "/FlowTriggers", Value: r, Stack: stack})
 			triggers, err = nil, fmt.Errorf("FlowTriggers panicked: %v", r)
 		}
 	}()

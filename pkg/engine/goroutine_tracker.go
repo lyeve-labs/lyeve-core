@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 )
 
 // TrackerConfig configures the goroutine lifecycle tracker.
@@ -142,6 +145,7 @@ func (t *GoroutineTracker) spawn(name string, fn TrackedFunc, longLived bool) in
 			if r := recover(); r != nil {
 				slog.Error("tracked goroutine panicked",
 					"id", id, "owner", owner, "name", name, "panic", fmt.Sprintf("%v", r))
+				panicreport.Report(panicreport.Panic{Goroutine: owner + "/" + name, Value: r, Stack: debug.Stack()})
 			}
 			t.mu.Lock()
 			delete(t.entries, id)

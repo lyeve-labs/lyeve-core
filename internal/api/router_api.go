@@ -42,6 +42,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
 	applyCustomRoutes(r, o.customRoutes)
 	r.Use(middleware.Recoverer)
+	r.Use(reportPanics)
 	r.Use(apimw.AllowedHosts(cfg.AllowedHosts))
 	r.Use(apimw.HTTPSRedirect(cfg.SecureCookie))
 	// Content-Type enforcement: rejects mutation requests (POST/PUT/PATCH)

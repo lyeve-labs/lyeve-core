@@ -87,6 +87,7 @@ func NewStatelessRouter(cfg *config.Config, mode StatelessMode, opts ...RouterOp
 	// so a relay's inbound URL is the same in either mode.
 	applyCustomRoutes(r, o.customRoutes)
 	r.Use(middleware.Recoverer)
+	r.Use(reportPanics)
 	r.Use(apimw.AllowedHosts(cfg.AllowedHosts))
 	r.Use(apimw.HTTPSRedirect(cfg.SecureCookie))
 	r.Use(apimw.RequireJSONContentType(declaredMediaTypes(r, o.declaredRouteSets())))

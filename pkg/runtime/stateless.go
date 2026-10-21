@@ -16,6 +16,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/core/enginehost"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
@@ -99,6 +100,9 @@ func runStateless(ctx context.Context, cfg *config.Config, opts Options, blog *b
 	if setter, ok := hostBase.(interface{ WithFlowRegistry(core.FlowRegistry) }); ok {
 		setter.WithFlowRegistry(activator.FlowRegistry())
 	}
+	// Every panic the engine recovers goes to the running plugins that hold
+	// the panic reporter role, from the first request on.
+	panicreport.Set(reportPanicsTo(activator))
 	if setter, ok := hostBase.(interface {
 		WithTenantRegions(core.TenantRegionResolverProvider)
 	}); ok {
