@@ -107,7 +107,8 @@ type LicenseHost interface {
 // record's id, so the mirrored row and the source record stay aligned.
 type ContentWriter interface {
 	// UpsertContent writes a content row under an explicit id, updating an
-	// existing row or inserting a missing one.
+	// existing row or inserting a missing one. A soft-deleted row under the
+	// id is ErrConflict, and the row stays deleted.
 	UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error
 	// DeleteContent removes a content row by id, scoped to the caller's tenant.
 	DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error

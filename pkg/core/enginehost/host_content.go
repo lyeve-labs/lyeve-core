@@ -21,7 +21,8 @@ import (
 // sentinel, so a plugin can tell "nothing to mirror into" apart from a write
 // that genuinely failed. A value the store refuses, such as a _status no read
 // filter matches, is core.ErrValidation, so the plugin answers it as the
-// caller's mistake and not as an outage the caller would retry.
+// caller's mistake and not as an outage the caller would retry. A soft-deleted
+// row under the id is core.ErrConflict, and the row stays deleted.
 func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
@@ -134,6 +135,8 @@ func contentWriterErr(err error, schemaName string) error {
 		return fmt.Errorf("%w: schema %q", core.ErrNotFound, schemaName)
 	case errors.Is(err, domain.ErrValidation):
 		return fmt.Errorf("%w: %w", core.ErrValidation, err)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%w: %w", core.ErrConflict, err)
 	}
 	return err
 }
