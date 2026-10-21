@@ -3,6 +3,7 @@ package compliance
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,10 @@ import (
 // EraseParams is how many parameters one clear binds at most, under the 2100
 // SQL Server accepts.
 const EraseParams = 2000
+
+// ErrChangeTooWide is the refusal of a change whose arguments leave no room
+// under EraseParams for one row's key and texts.
+var ErrChangeTooWide = errors.New("change binds too many arguments for one row")
 
 // ConfirmedRow is a row a read selected and Go confirmed: its key and its
 // texts exactly as read, NULL kept apart from empty.
@@ -77,7 +82,9 @@ type KeyedChange struct {
 	Change string
 	// Args bind the placeholders Change holds.
 	Args []any
-	// Key is the key column.
+	// Key is the key column. It names one row in the whole table, such as
+	// its primary key, because the change adds no tenant clause of its own. A
+	// caller scoped to one tenant puts that clause in Change.
 	Key string
 	// KeyCast is the type each key is cast to on SQL Server, or empty. The
 	// driver sends a Go string as NVARCHAR, which outranks a CHAR column, so
@@ -94,9 +101,13 @@ type KeyedChange struct {
 // after c.Args. A text compares under a binary collation, because a
 // case-insensitive or accent-insensitive one would pass an edit Go never
 // confirmed. The change waits for the read to close, because both run on the
-// one connection a request holds.
+// one connection a request holds. A change whose c.Args leave no room for one
+// row is refused with ErrChangeTooWide before any statement runs.
 func ChangeByKey[K string | uuid.UUID](ctx context.Context, q core.Querier, dialect string, c KeyedChange, rows []ConfirmedRow[K]) (int64, error) {
 	per := (EraseParams - len(c.Args)) / (1 + len(c.Columns))
+	if per < 1 {
+		return 0, ErrChangeTooWide
+	}
 	var total int64
 	for len(rows) > 0 {
 		batch := rows[:min(len(rows), per)]
