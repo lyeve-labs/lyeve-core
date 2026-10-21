@@ -17,6 +17,11 @@
 # lint-go-release covers.
 ROOT_GO_FILES = $$(find . -path ./cmd/lyeve -prune -o -name '*.go' -print)
 
+# The default lint run reads no file behind a build tag, so a second run reads
+# the integration, pact and dev files. Those tags together leave out the !dev
+# files, which the first run reads.
+LINT_GO_TAGS = integration,pact,dev
+
 lint-go: ## Check gofmt, vet and golangci-lint on the root module
 	@unformatted=$$(gofmt -l $(ROOT_GO_FILES)); \
 	if [ -n "$$unformatted" ]; then \
@@ -26,6 +31,7 @@ lint-go: ## Check gofmt, vet and golangci-lint on the root module
 	@command -v golangci-lint >/dev/null || (echo "$(YELLOW)golangci-lint not found - install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0$(RESET)" && exit 1)
 	go vet ./...
 	golangci-lint run ./...
+	golangci-lint run --build-tags $(LINT_GO_TAGS) ./...
 
 # cmd/lyeve is a module of its own, so no pattern in lint-go expands into it,
 # and a green lint-go says nothing about it.

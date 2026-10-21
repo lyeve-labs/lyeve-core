@@ -44,7 +44,7 @@ func WatchHotReload(ctx context.Context, activator Activator, cfg Config) error 
 
 	logger := slog.Default().With("component", "dev/hot-reload")
 
-	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return fmt.Errorf("create tmp dir %s: %w", tmpDir, err)
 	}
 
