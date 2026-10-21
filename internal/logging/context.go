@@ -101,25 +101,16 @@ func EnrichAttrs(ctx context.Context) []slog.Attr {
 	return attrs
 }
 
-// ContextAbout returns the context to log a line about tenant on. A line
-// about the context's own tenant keeps it. A line about any other tenant gets
-// WithoutTenant, because the handler stamps the context's tenant on every
-// record and that tenant's admins read every record carrying it.
+// ContextAbout is core.LogContextAbout, the one rule for which tenant a line
+// about tenant is filed under.
 func ContextAbout(ctx context.Context, tenant string) context.Context {
-	if tenant == core.TenantIDFromCtx(ctx) {
-		return ctx
-	}
-	return WithoutTenant(ctx)
+	return core.LogContextAbout(ctx, tenant)
 }
 
-// WithoutTenant returns ctx with no tenant, for a line about tenants other
-// than the one the request acts in. The handler then stamps no tenant_id, so
-// only an operator reading the whole log sees the line, and the level is the
-// install's rather than one a tenant admin raised. The request id and trace
-// stay, so the line still correlates with its request. Log calls only: a
-// query on this context loses its tenant scope.
+// WithoutTenant is core.LogContextWithoutTenant. Log calls only: a query on
+// this context loses its tenant scope.
 func WithoutTenant(ctx context.Context) context.Context {
-	return core.WithTenantID(ctx, "")
+	return core.LogContextWithoutTenant(ctx)
 }
 
 // TraceID extracts the trace ID from context for correlation.
