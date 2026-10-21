@@ -18,6 +18,9 @@ type TenantPurgeHandler func(ctx context.Context, q Querier, slug string) error
 var (
 	purgeHandlersMu sync.Mutex
 	purgeHandlers   []TenantPurgeHandler
+	// everyDelete holds, at each handler's index, whether it runs on every
+	// tenant delete.
+	everyDelete []bool
 )
 
 // RegisterTenantPurgeHandler registers a handler that is called during tenant
@@ -29,9 +32,42 @@ var (
 //
 // Safe for concurrent use.
 func RegisterTenantPurgeHandler(fn TenantPurgeHandler) {
+	registerTenantPurgeHandler(fn, false)
+}
+
+// RegisterTenantPurgeHandlerOnEveryDelete registers a handler whose work
+// reaches past the rows of a table: it flushes a buffer before its delete, or
+// registers an outcome that clears state outside the database. A tenant
+// delete may skip the handlers when it has proven the tenant holds no stored
+// row, and that proof says nothing about a buffer or an external index, so a
+// handler registered here runs on every delete, the skipped ones included.
+// It also runs with every other handler, in registration order.
+//
+// Safe for concurrent use.
+func RegisterTenantPurgeHandlerOnEveryDelete(fn TenantPurgeHandler) {
+	registerTenantPurgeHandler(fn, true)
+}
+
+func registerTenantPurgeHandler(fn TenantPurgeHandler, every bool) {
 	purgeHandlersMu.Lock()
 	purgeHandlers = append(purgeHandlers, fn)
+	everyDelete = append(everyDelete, every)
 	purgeHandlersMu.Unlock()
+}
+
+// TenantPurgeHandlersOnEveryDelete returns a copy of the handlers registered
+// through RegisterTenantPurgeHandlerOnEveryDelete, in registration order. A
+// tenant delete that skips the other handlers runs these.
+func TenantPurgeHandlersOnEveryDelete() []TenantPurgeHandler {
+	purgeHandlersMu.Lock()
+	defer purgeHandlersMu.Unlock()
+	var out []TenantPurgeHandler
+	for i, fn := range purgeHandlers {
+		if everyDelete[i] {
+			out = append(out, fn)
+		}
+	}
+	return out
 }
 
 // TenantPurgeHandlers returns a copy of all registered purge handlers.
@@ -155,6 +191,7 @@ func ResetCoveredTables() {
 func ResetTenantPurgeHandlers() {
 	purgeHandlersMu.Lock()
 	purgeHandlers = nil
+	everyDelete = nil
 	purgeHandlersMu.Unlock()
 }
 
