@@ -237,6 +237,8 @@ func capName(c Capability) string {
 		return "CapUserProvisioner"
 	case CapSessionSign:
 		return "CapSessionSign"
+	case CapSessionKey:
+		return "CapSessionKey"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -904,9 +906,14 @@ func (h *ScopedHost) AcquireTenantConn(ctx context.Context, tenantID string) (co
 }
 
 // Secret forwards to inner if CapConfigSecret is held and inner
-// implements SecretsProvider.
+// implements SecretsProvider. The session signing secret also needs
+// CapSessionKey.
 func (h *ScopedHost) Secret(key string) (string, bool) {
 	if !h.has(CapConfigSecret) {
+		return "", false
+	}
+	if isSessionKey(key) && !h.has(CapSessionKey) {
+		h.warnDenied("Secret", key, CapSessionKey)
 		return "", false
 	}
 	if p, ok := h.inner.(SecretsProvider); ok {
@@ -916,15 +923,38 @@ func (h *ScopedHost) Secret(key string) (string, bool) {
 }
 
 // Secrets forwards to inner if CapConfigSecret is held and inner
-// implements SecretsProvider.
+// implements SecretsProvider. The session signing secrets also need
+// CapSessionKey.
 func (h *ScopedHost) Secrets(key string) ([]string, bool) {
 	if !h.has(CapConfigSecret) {
+		return nil, false
+	}
+	if isSessionKey(key) && !h.has(CapSessionKey) {
+		h.warnDenied("Secrets", key, CapSessionKey)
 		return nil, false
 	}
 	if p, ok := h.inner.(SecretsProvider); ok {
 		return p.Secrets(key)
 	}
 	return nil, false
+}
+
+// resolvedKeyName is key in the lower-case form of the environment variable
+// the engine resolves it to. The engine's host answers a key it has no field
+// for from the configuration resolver, which trims it, folds case and reads
+// '.', '-' and ' ' as '_'. A check on a key compares this form, or another
+// spelling of the same variable reaches its value around the check.
+func resolvedKeyName(key string) string {
+	return keySeparators.Replace(strings.ToLower(strings.TrimSpace(key)))
+}
+
+var keySeparators = strings.NewReplacer(".", "_", "-", "_", " ", "_")
+
+// isSessionKey reports whether key names the session signing secret, in any
+// spelling that resolves to it.
+func isSessionKey(key string) bool {
+	name := resolvedKeyName(key)
+	return name == "jwt_secret" || name == "jwt_secrets"
 }
 
 // ScopedConfig
@@ -1016,12 +1046,12 @@ var secretSuffixes = []string{"_secret", "_key", "_password", "_pass", "_token"}
 // IsSecretKey reports whether key carries credential material and must never be
 // served through Config. Reachable only through SecretsProvider.
 //
-// The comparison is case-folded because the unknown-key path resolves a config
-// key from the environment under its upper-cased name, so a plugin can name the
-// same variable either way, and neither spelling may escape the map or the
-// suffix rule.
+// The comparison reads the key the way the unknown-key path resolves it from
+// the environment: case-folded, trimmed, and with '.', '-' and ' ' read as
+// '_'. A plugin can name the same variable in any of those spellings, and none
+// may escape the map or the suffix rule.
 func IsSecretKey(key string) bool {
-	lower := strings.ToLower(key)
+	lower := resolvedKeyName(key)
 	if SecretKeys[lower] {
 		return true
 	}

@@ -76,7 +76,8 @@ type MigrationTree struct {
 // granted caps before delegating to the real engine host. The grant is the
 // host capability policy's entry for the plugin narrowed by its declaration,
 // or the declaration alone when the policy has no entry. A declaration does
-// not narrow the role capabilities in CapRoles, nor CapSessionSign.
+// not narrow the role capabilities in CapRoles, nor CapSessionSign and
+// CapSessionKey.
 //
 // CapDBWrite implies CapDBRead.
 // A plugin that registers via RegisterPlugin declares nothing, so it gets the
@@ -158,12 +159,20 @@ const (
 	// otherwise take sign-in from the plugin that serves it.
 	CapSessionSign // sign a session for an account (SignSessionToken)
 
+	// CapSessionKey grants jwt_secret and jwt_secrets through Secret and
+	// Secrets, beside CapConfigSecret. The secret signs and verifies sessions
+	// on an install that signs with HMAC, so a plugin holding it can sign a
+	// session for any account in any tenant. Like CapSessionSign it comes from
+	// the policy entry alone, because the plugins that read the secret
+	// declared their reach before it had a capability of its own.
+	CapSessionKey // read the session signing secret (jwt_secret, jwt_secrets)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead | CapRoles | CapSessionSign
+		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey
 
 	// CapRoles is every capability that does nothing but appoint a plugin to
 	// a host role. A declaration narrows what a plugin reaches and never
