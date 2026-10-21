@@ -224,6 +224,10 @@ func TestStampProviderSeen_MySQLRoundTripsUnderAnyLocation(t *testing.T) {
 		t.Skip("CI_DIALECT != mysql")
 	}
 	base, dsn := testdb.MySQLWithDSN(t)
+	// The harness keeps preparing databases in the background, and each
+	// migration reads the clock, so the swap of time.Local below waits until
+	// none is being prepared and holds them off until the test ends.
+	testdb.HoldPreparation(t)
 	saved := time.Local
 	time.Local = time.FixedZone("UTC+9", 9*3600)
 	t.Cleanup(func() { time.Local = saved })
