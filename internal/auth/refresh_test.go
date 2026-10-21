@@ -291,17 +291,20 @@ func TestRefreshTokenStore_Rotate_CASCrossReplicaRace(t *testing.T) {
 		failures++
 	}
 
-	assert.Equal(t, 1, successes, "exactly one replica must succeed")
-	assert.Equal(t, 1, failures, "exactly one replica must fail")
-
-	// The loser either lost the CAS write or read the winner's record. Both
-	// are a second trade of one token a moment apart, answered retryably.
+	// One replica rotates. The other either lost the CAS write, which it
+	// answers retryably, or read the winner's record, and then it gets the
+	// winner's successor as a retry would. Either way one token is current.
+	require.GreaterOrEqual(t, successes, 1, "one replica must succeed")
 	if e1 != nil {
 		assert.ErrorIs(t, e1, auth.ErrTokenRotated, "losing replica")
 	}
 	if e2 != nil {
 		assert.ErrorIs(t, e2, auth.ErrTokenRotated, "losing replica")
 	}
+	if successes == 2 {
+		assert.Equal(t, r1.RefreshToken, r2.RefreshToken, "two replicas issued two different successors")
+	}
+	_ = failures
 
 	// Neither outcome revokes the family, so the winner's token rotates.
 	winner := r1

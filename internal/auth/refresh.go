@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -32,10 +34,11 @@ import (
 // The token rotated away in the last rotationRetryWindow is not read as
 // replay. A lost answer or a second console replica trading the same token
 // sends exactly that, and revoking would sign the person out for a theft that
-// never happened. It answers ErrTokenRotated and hands out no token, so a
-// stolen copy gains nothing. Any older token, or this one after the window, is
-// replay as before. The window runs from IssuedAt, so the stored record keeps
-// the shape every release reads.
+// never happened. The first such retry gets the successor the rotation issued
+// once more, because the answer that carried it may never have arrived. Every
+// later one answers ErrTokenRotated and hands out no token. Any older token,
+// or this one after the window, is replay as before. The window runs from
+// IssuedAt, so the stored record keeps the shape every release reads.
 //
 // Keys, all under the configured keyspace (e.g. "cms") and TTL'd to the
 // token lifetime so the backend self-cleans:
@@ -140,6 +143,12 @@ type familyRecord struct {
 	IssuedAt     time.Time `json:"issued_at"`
 	ExpiresAt    time.Time `json:"expires_at"`
 	Revoked      bool      `json:"revoked"`
+	// Successor is the token the last rotation issued, sealed under a key
+	// derived from the token it replaced, which the record never holds. The
+	// first retry of that token inside rotationRetryWindow opens it and gets
+	// the same successor, and the field is then cleared. A reader of the
+	// backend learns nothing from it.
+	Successor string `json:"successor,omitempty"`
 }
 
 // RefreshTokenStore manages refresh token families over a core.CacheBackend.
@@ -320,6 +329,10 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 		rec.CurrentHash = newHash
 		rec.Gen++
 		rec.IssuedAt = time.Now()
+		rec.Successor, err = sealSuccessor(oldToken, newToken)
+		if err != nil {
+			return nil, fmt.Errorf("refresh token rotate: %w", err)
+		}
 
 		newBytes, err := json.Marshal(rec)
 		if err != nil {
@@ -348,7 +361,7 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 	}
 
 	if n := len(rec.UsedHashes); n > 0 && rec.UsedHashes[n-1] == oldHash && time.Since(rec.IssuedAt) < rotationRetryWindow {
-		return nil, ErrTokenRotated
+		return s.reissueSuccessor(ctx, familyID, rec, oldToken, oldHash, ttl)
 	}
 
 	// Old token is in the used set: reuse detected. Revoke the whole family.
@@ -365,6 +378,92 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 
 	// No match anywhere -> invalid token.
 	return nil, ErrTokenInvalid
+}
+
+// reissueSuccessor answers the first retry of the token the last rotation
+// replaced with the successor that rotation issued, and clears it so no later
+// retry gets it. The caller holds the family lock and has checked the token
+// is the one replaced inside the retry window. Without a successor to hand
+// out, the retry answers ErrTokenRotated.
+func (s *RefreshTokenStore) reissueSuccessor(ctx context.Context, familyID string, rec *familyRecord, oldToken, oldHash string, ttl time.Duration) (*RotateResult, error) {
+	successor, ok := openSuccessor(oldToken, rec.Successor)
+	if !ok {
+		return nil, ErrTokenRotated
+	}
+	oldBytes, err := json.Marshal(rec)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token rotate: %w", err)
+	}
+	rec.Successor = ""
+	newBytes, err := json.Marshal(rec)
+	if err != nil {
+		return nil, fmt.Errorf("refresh token rotate: %w", err)
+	}
+	if err := s.casSave(ctx, familyID, oldBytes, newBytes, storageTTL(ttl)); err != nil {
+		if errors.Is(err, ErrCASFailed) {
+			return nil, ErrTokenRotated
+		}
+		return nil, fmt.Errorf("refresh token rotate: %w", err)
+	}
+	return &RotateResult{
+		RefreshToken: successor,
+		FamilyID:     familyID,
+		UserID:       rec.UserID,
+		TenantID:     rec.TenantID,
+		TokenVersion: rec.TokenVersion,
+		ExpiresAt:    rec.ExpiresAt,
+		oldHash:      oldHash,
+		newHash:      rec.CurrentHash,
+		oldIssuedAt:  rec.IssuedAt,
+	}, nil
+}
+
+// successorKey is the key a successor is sealed under. It is derived from
+// the whole token the rotation replaced, under a label of its own, so the
+// token's hash in the record does not yield it.
+func successorKey(oldToken string) []byte {
+	k := sha256.Sum256([]byte("lyeve refresh successor\x00" + oldToken))
+	return k[:]
+}
+
+// sealSuccessor seals successor with AES-256-GCM under a key derived from
+// oldToken, for the record to keep.
+func sealSuccessor(oldToken, successor string) (string, error) {
+	block, err := aes.NewCipher(successorKey(oldToken))
+	if err != nil {
+		return "", fmt.Errorf("seal successor: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("seal successor: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", fmt.Errorf("seal successor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(gcm.Seal(nonce, nonce, []byte(successor), nil)), nil
+}
+
+// openSuccessor opens a successor sealed by sealSuccessor. It reports false
+// for an empty or unreadable value, which a retry answers as ErrTokenRotated.
+func openSuccessor(oldToken, sealed string) (string, bool) {
+	raw, err := base64.RawURLEncoding.DecodeString(sealed)
+	if sealed == "" || err != nil {
+		return "", false
+	}
+	block, err := aes.NewCipher(successorKey(oldToken))
+	if err != nil {
+		return "", false
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil || len(raw) < gcm.NonceSize() {
+		return "", false
+	}
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
+	if err != nil {
+		return "", false
+	}
+	return string(plain), true
 }
 
 // Unrotate makes the token res replaced current again, when the new token
@@ -391,6 +490,7 @@ func (s *RefreshTokenStore) Unrotate(ctx context.Context, res *RotateResult, ttl
 	rec.UsedHashes = rec.UsedHashes[:n-1]
 	rec.Gen--
 	rec.IssuedAt = res.oldIssuedAt
+	rec.Successor = ""
 	newBytes, err := json.Marshal(rec)
 	if err != nil {
 		return fmt.Errorf("refresh token unrotate: %w", err)
