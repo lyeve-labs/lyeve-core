@@ -14,6 +14,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -206,7 +207,9 @@ func (s schemaFor) PluginSchema(name string) map[string]any { return s[name] }
 func TestPluginConfigSave_RefusesAnOperatorOnlyKey(t *testing.T) {
 	withResolver(t, nil)
 	store := configStore(t)
-	schemas := schemaFor{"example": {"type": "object"}}
+	schemas := schemaFor{"example": {"type": "object", "properties": map[string]any{
+		"example_retention_days": map[string]any{"type": "integer"},
+	}}}
 
 	put := func(body string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
@@ -232,6 +235,37 @@ func TestPluginConfigSave_RefusesAnOperatorOnlyKey(t *testing.T) {
 	}
 
 	// Ordinary plugin settings still save.
+	rec = put(`{"example_retention_days":30}`)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+// Every plugin's stored keys are merged into one configuration, so a key
+// saved under a plugin that does not declare it would set another plugin's
+// setting. The route refuses it and names it, and saves nothing.
+func TestPluginConfigSave_RefusesAKeyThePluginDoesNotDeclare(t *testing.T) {
+	withResolver(t, nil)
+	store := configStore(t)
+	schemas := schemaFor{"example": {"type": "object", "properties": map[string]any{
+		"example_retention_days": map[string]any{"type": "integer"},
+	}}}
+
+	put := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPut, "/api/admin/plugins/example/config", strings.NewReader(body))
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("name", "example")
+		req = req.WithContext(context.WithValue(core.WithTenantID(req.Context(), "default"), chi.RouteCtxKey, rctx))
+		pluginConfigSaveHandler(store, schemas, nil).ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := put(`{"example_retention_days":30,"smtp_port":2525,"smtp_host":"10.0.0.5"}`)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "smtp_host, smtp_port")
+
+	_, err := store.Get(core.WithTenantID(context.Background(), "default"), "example")
+	require.ErrorIs(t, err, domain.ErrNotFound, "a refused save stored the body")
+
 	rec = put(`{"example_retention_days":30}`)
 	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
