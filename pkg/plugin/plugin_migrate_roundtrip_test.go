@@ -236,7 +236,7 @@ func rtEnsureMSSQL(t *testing.T) {
 		ctx := context.Background()
 		var err error
 		rtMSSQL.ctr, err = tcmssql.Run(ctx,
-			"mcr.microsoft.com/azure-sql-edge:latest",
+			testdialect.MSSQLImage,
 			tcmssql.WithAcceptEULA(),
 			tcmssql.WithPassword("Str0ng@Passw0rd"),
 		)

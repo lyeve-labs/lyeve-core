@@ -36,7 +36,7 @@ func TestMSSQL_ConnectAndMigrate(t *testing.T) {
 
 	// Start Azure SQL Edge container.
 	container, err := tcmssql.Run(ctx,
-		"mcr.microsoft.com/azure-sql-edge:latest",
+		testdialect.MSSQLImage,
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Strong@Passw0rd"),
 		// The module waits 60 seconds for the port and the recovery log
@@ -101,7 +101,7 @@ func TestMSSQL_DialectRewrite(t *testing.T) {
 	ctx := context.Background()
 
 	container, err := tcmssql.Run(ctx,
-		"mcr.microsoft.com/azure-sql-edge:latest",
+		testdialect.MSSQLImage,
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Strong@Passw0rd"),
 	)

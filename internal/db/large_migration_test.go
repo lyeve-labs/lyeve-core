@@ -674,7 +674,7 @@ func TestLargeMigration_LockDetection_MSSQL(t *testing.T) {
 	rows := largeDatasetRows()
 
 	ctr, err := tcmssql.Run(ctx,
-		"mcr.microsoft.com/azure-sql-edge:latest",
+		testdialect.MSSQLImage,
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng@Passw0rd"),
 	)
@@ -789,7 +789,7 @@ func TestLargeMigration_ConcurrentAccess_MSSQL(t *testing.T) {
 	}
 
 	ctr, err := tcmssql.Run(ctx,
-		"mcr.microsoft.com/azure-sql-edge:latest",
+		testdialect.MSSQLImage,
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng@Passw0rd"),
 	)
@@ -1033,7 +1033,7 @@ func TestLargeMigration_DurationComparison(t *testing.T) {
 		testdialect.Require(t, "mssql")
 		ctx := context.Background()
 		ctr, err := tcmssql.Run(ctx,
-			"mcr.microsoft.com/azure-sql-edge:latest",
+			testdialect.MSSQLImage,
 			tcmssql.WithAcceptEULA(),
 			tcmssql.WithPassword("Str0ng@Passw0rd"),
 		)

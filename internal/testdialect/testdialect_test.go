@@ -1,6 +1,12 @@
 package testdialect
 
-import "testing"
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestEnabled_FollowsCIDialect(t *testing.T) {
 	cases := []struct {
@@ -47,5 +53,38 @@ func TestRequire_SkipsADialectTheRunDoesNotCover(t *testing.T) {
 	})
 	if !reached {
 		t.Fatal("Require skipped the dialect the run covers")
+	}
+}
+
+// Every test that starts SQL Server names the pinned image, so no file names
+// the image by a tag that can move.
+func TestMSSQLImage_IsTheOnlyReferenceToTheImage(t *testing.T) {
+	if !strings.Contains(MSSQLImage, "@sha256:") {
+		t.Fatalf("MSSQLImage %q is not pinned by digest", MSSQLImage)
+	}
+	tagged := "azure-sql-edge" + ":"
+	err := filepath.WalkDir("../..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		// The lint suite under tools quotes image names as fixtures of the
+		// code it refuses, and starts no server.
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == ".git" || path == filepath.Join("..", "..", "tools")) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), tagged) {
+			t.Errorf("%s names the SQL Server image by tag. Use testdialect.MSSQLImage", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
