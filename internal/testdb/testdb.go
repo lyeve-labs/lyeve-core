@@ -503,7 +503,7 @@ func ensureMSSQL(t *testing.T) {
 	mssqlShared.once.Do(func() {
 		ctx := context.Background()
 		mssqlShared.ctr, mssqlShared.err = tcmssql.Run(ctx,
-			containerImage("MSSQL", "mcr.microsoft.com/azure-sql-edge:latest"),
+			containerImage("MSSQL", testdialect.MSSQLImage),
 			tcmssql.WithAcceptEULA(),
 			tcmssql.WithPassword("Str0ng@Passw0rd"),
 		)

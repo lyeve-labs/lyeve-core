@@ -17,6 +17,12 @@ import (
 	"testing"
 )
 
+// MSSQLImage is the SQL Server image every test starts, pinned by the digest
+// of its multi-arch index. A moved tag changed startup time and the recovery
+// line the tests wait on with no change here, so the pin moves only by an
+// edit to this line.
+const MSSQLImage = "mcr.microsoft.com/azure-sql-edge@sha256:902628a8be89e35dfb7895ca31d602974c7bafde4d583a0d0873844feb1c42cf"
+
 // Enabled reports whether this run covers the named dialect.
 func Enabled(name string) bool {
 	d := os.Getenv("CI_DIALECT")
