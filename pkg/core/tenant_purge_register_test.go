@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -275,5 +276,59 @@ func TestRegisterTenantPurge_PartlyPresentColumnsRefuse(t *testing.T) {
 		assert.Contains(t, err.Error(), unkeyed+".tenant_id")
 		assert.NotContains(t, err.Error(), keyed+".tenant_id")
 		assert.False(t, called)
+	})
+}
+
+// A tenant delete holds the tenant's row while its purges read the catalog,
+// and a schema change elsewhere can hold an uncommitted table in the catalog
+// while it waits on that row. On SQL Server a catalog read waits on that
+// table, so the two wait on each other, and the deadlock victim is the whole
+// delete. The read has to leave the delete nothing to wait on.
+func TestRegisterTenantPurge_CatalogReadDoesNotWaitOnUncommittedDDL(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		q := host.Querier(ctx)
+		tenants := createTable(t, q, "purge_tenants_", `id VARCHAR(36) PRIMARY KEY, label VARCHAR(64)`)
+		_, err := q.Exec(ctx, `INSERT INTO `+tenants+` (id, label) VALUES ('acme', 'a')`)
+		require.NoError(t, err)
+		purged := createTable(t, q, "purge_rows_", `id VARCHAR(36) PRIMARY KEY, tenant_id VARCHAR(255) NOT NULL`)
+		h := registeredPurge(t, host.Dialect(), core.TenantPurge{
+			Tables:  []string{purged},
+			Columns: []string{purged + ".tenant_id"},
+			Handler: func(ctx context.Context, q core.Querier, slug string) error {
+				_, err := q.Exec(ctx, `DELETE FROM `+purged+` WHERE tenant_id = $1`, slug)
+				return err
+			},
+		})
+
+		del, err := q.Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = del.Rollback(context.Background()) }()
+		_, err = del.Exec(ctx, `UPDATE `+tenants+` SET label = 'deleting' WHERE id = 'acme'`)
+		require.NoError(t, err)
+
+		ddl, err := q.Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = ddl.Rollback(context.Background()) }()
+		created := "purge_ddl_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:10]
+		_, err = ddl.Exec(ctx, `CREATE TABLE `+created+` (id VARCHAR(36) PRIMARY KEY)`)
+		require.NoError(t, err)
+		t.Cleanup(func() { _, _ = q.Exec(context.Background(), `DROP TABLE `+created) })
+		ddlDone := make(chan error, 1)
+		go func() {
+			_, err := ddl.Exec(ctx, `UPDATE `+tenants+` SET label = 'renamed' WHERE id = 'acme'`)
+			if err == nil {
+				err = ddl.Commit(ctx)
+			}
+			ddlDone <- err
+		}()
+
+		// Whichever of the two waits first, the schema change ends up waiting
+		// on the tenant's row, and a purge that waits on the uncommitted table
+		// closes the cycle.
+		require.NoError(t, h(ctx, del, "acme"), "the purge inside the delete")
+		require.NoError(t, del.Commit(ctx))
+		require.NoError(t, <-ddlDone, "the schema change, once the delete commits")
 	})
 }

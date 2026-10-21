@@ -133,6 +133,21 @@ func catalogSchema(dialect string) string {
 	}
 }
 
+// catalogHint is the table hint a catalog read takes. On SQL Server a catalog
+// read takes locks that row versioning does not cover, so it waits on a table
+// another transaction created and has not committed. A tenant delete reads
+// the catalog while it holds the tenant's rows, and a schema change that then
+// waits on one of those rows closes a cycle the server breaks by failing one
+// of the two, often the delete. The read asks only whether tables a migration
+// created long before exist, which no uncommitted change decides, so on SQL
+// Server it reads without those locks.
+func catalogHint(dialect string) string {
+	if dialect == "mssql" {
+		return " WITH (NOLOCK)"
+	}
+	return ""
+}
+
 // presentTables reports which of tables exist in the schema an unqualified
 // name resolves to on q.
 func presentTables(ctx context.Context, q Querier, dialect string, tables []string) (map[string]bool, error) {
@@ -142,7 +157,7 @@ func presentTables(ctx context.Context, q Querier, dialect string, tables []stri
 		args[i] = strings.ToLower(t)
 		marks[i] = fmt.Sprintf("$%d", i+1)
 	}
-	rows, err := q.Query(ctx, `SELECT table_name FROM information_schema.tables
+	rows, err := q.Query(ctx, `SELECT table_name FROM information_schema.tables`+catalogHint(dialect)+`
 WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
@@ -174,7 +189,7 @@ func presentColumns(ctx context.Context, q Querier, dialect string, columns []ta
 			marks = append(marks, fmt.Sprintf("$%d", len(args)))
 		}
 	}
-	rows, err := q.Query(ctx, `SELECT table_name, column_name FROM information_schema.columns
+	rows, err := q.Query(ctx, `SELECT table_name, column_name FROM information_schema.columns`+catalogHint(dialect)+`
 WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list columns: %w", err)
