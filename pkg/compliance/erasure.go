@@ -45,9 +45,9 @@ import (
 // starts. The coordinator fans out erasure requests to every registered
 // eraser independently.
 //
-// The identifier is plugin-defined: an email address, user ID (UUID string),
-// IP address, or any other key that identifies the data subject's records
-// within the plugin's stores.
+// The identifier is an email address, an account id (a UUID string) or an IP
+// address, the three keys the engine's erase route accepts. Each eraser
+// matches the ones its stores keep and returns (0, nil) for the others.
 type SubjectEraser interface {
 	// EraseSubject deletes or fully anonymizes all PII for the given
 	// identifier in this plugin's stores. Returns the number of rows

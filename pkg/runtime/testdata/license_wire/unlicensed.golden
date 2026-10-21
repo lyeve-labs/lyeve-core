@@ -941,8 +941,7 @@ body (json, newline):
             "application/json": {
               "schema": {
                 "example": {
-                  "identifier": "user@example.com",
-                  "identifier_type": "email"
+                  "identifier": "user@example.com"
                 },
                 "type": "object"
               }
@@ -991,8 +990,7 @@ body (json, newline):
             "application/json": {
               "schema": {
                 "example": {
-                  "identifier": "user@example.com",
-                  "identifier_type": "email"
+                  "identifier": "user@example.com"
                 },
                 "type": "object"
               }
