@@ -367,89 +367,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Device risk assessment (before MFA check: risk may escalate)
 	fp := collectFingerprint(r)
-	var risk *security.RiskAssessment
-	enforceMFA := false
-	if h.deviceRiskAssessor != nil {
-		var raErr error
-		risk, raErr = h.deviceRiskAssessor.Assess(r.Context(), user.ID, fp)
-		if raErr != nil {
-			slog.Warn("risk assessment failed, failing closed: enforcing MFA", "err", raErr)
-			if !h.riskBasedMFADisabled {
-				enforceMFA = true
-			}
-		} else if risk != nil && risk.RequireMFA && !h.riskBasedMFADisabled {
-			enforceMFA = true
-		}
-		if risk != nil && risk.RequireAlert {
-			slog.Warn("suspicious login detected",
-				"user_id", user.ID,
-				"subject_ref", compliance.SubjectRef(user.Email),
-				"ip", fp.IP,
-				"score", risk.Score,
-				"reason", risk.Reason,
-			)
-		}
-	}
-
-	mfaEnabled := false
-	if h.mfaStore != nil {
-		var mfaErr error
-		mfaEnabled, mfaErr = h.mfaStore.IsEnabled(r.Context(), user.ID)
-		if mfaErr != nil {
-			// MFA fail-closed: deny login instead of issuing a session.
-			slog.Warn("mfa check query failed, failing closed: denying login", "err", mfaErr)
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeMFAStoreError, nil)
-			return
-		}
-	}
-
-	// Risk escalation can only escalate to a factor the user actually holds.
-	// A challenge issued to an account with nothing enrolled is unsatisfiable:
-	// mfa-verify answers MFA_NOT_CONFIGURED for every code, and every
-	// enrollment route needs the session the challenge is withholding. A new
-	// device can score over the escalation threshold, and escalating to a
-	// factor the account does not hold is not a control, so record the risk
-	// and let the session through. Accounts that did enroll are still
-	// challenged below via mfaEnabled.
-	if enforceMFA && !mfaEnabled {
-		score := 0
-		if risk != nil {
-			score = risk.Score
-		}
-		slog.Warn("risk escalation wanted MFA but the account has none enrolled, allowing login",
-			"user_id", user.ID, "subject_ref", compliance.SubjectRef(user.Email), "ip", fp.IP, "score", score)
-		enforceMFA = false
-	}
-
-	// Enforce MFA when risk assessment demands it OR user has MFA enabled
-	if enforceMFA || mfaEnabled {
-		// Issue challenge token: even if the user didn't opt into MFA, risk escalation forces it.
-		challengeToken, err := auth.SignChallenge(h.jwtSecret, user.ID, user.SignInEmail(), actingRoles, actingTenant)
-		if err != nil {
-			respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeChallengeFailed, nil)
-			return
-		}
-		resp := map[string]any{
-			"mfa_required":    true,
-			"challenge_token": challengeToken,
-		}
-
-		// Advertise available MFA methods.
-		methods := []string{"totp"}
-		if h.mfaStore != nil {
-			hasWA, err := h.mfaStore.HasWebAuthn(r.Context(), user.ID)
-			if err == nil && hasWA {
-				methods = append(methods, "webauthn")
-			}
-		}
-		resp["mfa_methods"] = methods
-
-		if risk != nil {
-			resp["risk"] = risk
-		}
-		respond(w, http.StatusOK, resp)
+	risk, answered := h.respondIfSecondFactorRequired(w, r, user, fp, actingRoles, actingTenant)
+	if answered {
 		return
 	}
 
@@ -502,6 +422,101 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.setSessionCookie(w, token)
 	h.setCSRFCookie(w, csrfToken)
 	respond(w, http.StatusOK, resp)
+}
+
+// respondIfSecondFactorRequired runs the second-factor decision every password
+// sign-in shares, after the password, the account state and the acting tenant
+// have passed. An account with a factor enrolled, or one that risk scoring
+// escalates, gets a challenge token in place of a session, and a factor store
+// that cannot be read refuses the sign-in. When it answers the request it
+// returns true, and the caller issues nothing. Otherwise it returns the risk
+// assessment, which the caller records with the login.
+func (h *AuthHandler) respondIfSecondFactorRequired(w http.ResponseWriter, r *http.Request, user *domain.User, fp security.DeviceFingerprint, actingRoles []string, actingTenant string) (*security.RiskAssessment, bool) {
+	// Device risk assessment (before MFA check: risk may escalate)
+	var risk *security.RiskAssessment
+	enforceMFA := false
+	if h.deviceRiskAssessor != nil {
+		var raErr error
+		risk, raErr = h.deviceRiskAssessor.Assess(r.Context(), user.ID, fp)
+		if raErr != nil {
+			slog.Warn("risk assessment failed, failing closed: enforcing MFA", "err", raErr)
+			if !h.riskBasedMFADisabled {
+				enforceMFA = true
+			}
+		} else if risk != nil && risk.RequireMFA && !h.riskBasedMFADisabled {
+			enforceMFA = true
+		}
+		if risk != nil && risk.RequireAlert {
+			slog.Warn("suspicious login detected",
+				"user_id", user.ID,
+				"subject_ref", compliance.SubjectRef(user.Email),
+				"ip", fp.IP,
+				"score", risk.Score,
+				"reason", risk.Reason,
+			)
+		}
+	}
+
+	mfaEnabled := false
+	if h.mfaStore != nil {
+		var mfaErr error
+		mfaEnabled, mfaErr = h.mfaStore.IsEnabled(r.Context(), user.ID)
+		if mfaErr != nil {
+			// MFA fail-closed: deny login instead of issuing a session.
+			slog.Warn("mfa check query failed, failing closed: denying login", "err", mfaErr)
+			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeMFAStoreError, nil)
+			return risk, true
+		}
+	}
+
+	// Risk escalation can only escalate to a factor the user actually holds.
+	// A challenge issued to an account with nothing enrolled is unsatisfiable:
+	// mfa-verify answers MFA_NOT_CONFIGURED for every code, and every
+	// enrollment route needs the session the challenge is withholding. A new
+	// device can score over the escalation threshold, and escalating to a
+	// factor the account does not hold is not a control, so record the risk
+	// and let the session through. Accounts that did enroll are still
+	// challenged below via mfaEnabled.
+	if enforceMFA && !mfaEnabled {
+		score := 0
+		if risk != nil {
+			score = risk.Score
+		}
+		slog.Warn("risk escalation wanted MFA but the account has none enrolled, allowing login",
+			"user_id", user.ID, "subject_ref", compliance.SubjectRef(user.Email), "ip", fp.IP, "score", score)
+		enforceMFA = false
+	}
+
+	// Enforce MFA when risk assessment demands it OR user has MFA enabled
+	if enforceMFA || mfaEnabled {
+		// Issue challenge token: even if the user didn't opt into MFA, risk escalation forces it.
+		challengeToken, err := auth.SignChallenge(h.jwtSecret, user.ID, user.SignInEmail(), actingRoles, actingTenant)
+		if err != nil {
+			respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeChallengeFailed, nil)
+			return risk, true
+		}
+		resp := map[string]any{
+			"mfa_required":    true,
+			"challenge_token": challengeToken,
+		}
+
+		// Advertise available MFA methods.
+		methods := []string{"totp"}
+		if h.mfaStore != nil {
+			hasWA, err := h.mfaStore.HasWebAuthn(r.Context(), user.ID)
+			if err == nil && hasWA {
+				methods = append(methods, "webauthn")
+			}
+		}
+		resp["mfa_methods"] = methods
+
+		if risk != nil {
+			resp["risk"] = risk
+		}
+		respond(w, http.StatusOK, resp)
+		return risk, true
+	}
+	return risk, false
 }
 
 // mfaDefaultTenantKeyID is the key id a TOTP secret is sealed under when the

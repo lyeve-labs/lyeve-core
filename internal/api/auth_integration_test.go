@@ -562,6 +562,56 @@ func TestAuthIntegration_Token_Success(t *testing.T) {
 	}
 }
 
+// TOKEN ENDPOINT: an enrolled account is challenged (Postgres)
+
+// The content API's token route answers an account with TOTP enrolled the
+// way the console's sign-in does: a challenge and no token, which a current
+// code then trades for a session at mfa-verify.
+func TestAuthIntegration_Token_MFAEnrolledAccountIsChallenged(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+
+	pool := testdb.Postgres(t)
+	secret := "test-secret-at-least-32-bytes-long!!"
+
+	u := seedUser(t, pool, "token-mfa@example.com", "correct-password", []string{"super_admin"})
+	plainSecret := seedMFA(t, pool, u.ID, secret)
+
+	users := db.NewUserStore(pool)
+	h := NewAuthHandler(users, &simpleMFAStore{pool: pool, secret: secret}, pool, secret, 3600, false)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(makeLoginBody("token-mfa@example.com", "correct-password")))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Token(rr, req)
+
+	resp := decodeAuthResponse(t, rr)
+	if resp["token"] != nil {
+		t.Fatalf("the token route issued a session on a password alone: %v", resp)
+	}
+	challengeToken, _ := resp["challenge_token"].(string)
+	if mfa, _ := resp["mfa_required"].(bool); !mfa || challengeToken == "" {
+		t.Fatalf("expected a challenge, got status %d and %v", rr.Code, resp)
+	}
+
+	code, err := totp.GenerateCode(plainSecret, time.Now())
+	if err != nil {
+		t.Fatalf("generate TOTP code: %v", err)
+	}
+	verifyBody, _ := json.Marshal(map[string]string{"challenge_token": challengeToken, "code": code})
+	req2 := httptest.NewRequest(http.MethodPost, "/api/admin/auth/mfa-verify", strings.NewReader(string(verifyBody)))
+	req2.Header.Set("Content-Type", "application/json")
+	rr2 := httptest.NewRecorder()
+	h.MFAVerify(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("mfa-verify status = %d, want %d; body=%q", rr2.Code, http.StatusOK, rr2.Body.String())
+	}
+	if tok, _ := decodeAuthResponse(t, rr2)["token"].(string); tok == "" {
+		t.Fatal("a current code did not complete the challenge with a session")
+	}
+}
+
 // Minimal MFAStore backed by real DB
 
 type simpleMFAStore struct {
