@@ -878,6 +878,12 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	if refreshBackend != nil {
 		refreshBackend = auth.NewFlushProtectedBackend(refreshBackend)
 	}
+	// Replicas that share the families need compare-and-set to let one of
+	// them win a rotation. Without it two replicas could both rotate one
+	// token, so the engine refuses to start rather than run that way.
+	if err := auth.CheckSharedBackend(refreshBackend, refreshBackendDistributed); err != nil {
+		return fmt.Errorf("refresh token store: %w, and replicas share it: register a cache backend that supports compare-and-set", err)
+	}
 	// Lockout and brute-force state
 	// MFA lockouts and login blocks are counted in memory by the plugins that
 	// own them, which means they are lifted by a restart and counted per
