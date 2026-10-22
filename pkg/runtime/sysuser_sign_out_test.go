@@ -32,12 +32,14 @@ func TestSysUserEraser_EndSessionsSignsOutAndKeepsTheAccount(t *testing.T) {
 
 		require.NoError(t, eraser.EndSessions(ctx, id.String()))
 
-		row, err := q.QueryRow(ctx, `SELECT token_version, email, password_hash FROM sys_users WHERE id = $1`, id)
+		row, err := q.QueryRow(ctx, `SELECT token_version, disabled, email, password_hash FROM sys_users WHERE id = $1`, id)
 		require.NoError(t, err)
 		var tv int
+		var disabled bool
 		var gotEmail, hash string
-		require.NoError(t, row.Scan(&tv, &gotEmail, &hash))
+		require.NoError(t, row.Scan(&tv, &disabled, &gotEmail, &hash))
 		assert.Equal(t, 2, tv, "every access token issued before is rejected")
+		assert.True(t, disabled, "every sign-in refuses the account")
 		assert.Equal(t, []string{id.String()}, wrapped.revoked, "the refresh tokens are revoked")
 		assert.Equal(t, email, gotEmail, "the account keeps its address until it is erased")
 		assert.Equal(t, "hashed", hash)
