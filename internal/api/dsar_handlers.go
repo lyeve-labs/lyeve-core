@@ -240,6 +240,9 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		// remedy.
 		status = http.StatusServiceUnavailable
 		refusal = "the subject could not be signed out; erasure was not attempted"
+	case errors.Is(err, compliance.ErrSubjectAddressesUnresolved):
+		status = http.StatusServiceUnavailable
+		refusal = "the subject's addresses could not be read; erasure was not attempted"
 	case err != nil:
 		status = http.StatusMultiStatus
 	}
