@@ -17,7 +17,7 @@
 #
 # Generated 2026-10-18T14:06:43Z from origin default branches.
 
-lyeve-libs = 5ef5e6641542e4f5d92fef4517b856a285ddf191
+lyeve-libs = ad4e2e7543d54590f655f000b758f912cc4f5849
 lyeve-plugin-ab-testing = ddde64829919092e5520948f68f26d946445a463
 lyeve-plugin-ai = 0d519e00278c0282082663f56e54944f58718f7d
 lyeve-plugin-analytics = 0611b3b9de4e72c50771cbf2189685577aca0630
