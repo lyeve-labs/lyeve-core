@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin can register a tenant purge step that runs on every tenant delete, including a delete that skips the rest of the purge because the tenant holds no stored rows. A step that drains a buffer or clears state kept outside the database uses it, so that work is no longer lost when the tenant's tables are already empty.
 - Plugins can clear a data subject's text through the engine's own erasure helper, which changes only rows whose key and text still match what was read and confirmed, so a row edited between the read and the clear keeps its edit. It splits a large clear into statements under the parameter limit of every supported database.
 - A plugin that subscribes to content events learns who made the change: the user behind a session, the owner of an admin token, or the id an API key authenticates as, with the kind of credential. A write with no signed-in caller, such as a scheduled job, names nobody. Webhook, broker and realtime payloads keep their shape.
+- A plugin that deletes one kind of data in bulk can ask which legal holds in the tenant cover that kind of data as a whole, such as a hold on the whole tenant, on a resource type or on a time window. A hold provider that does not answer the question reports nothing held. One that cannot answer reports the hold status as unavailable, even where the install lets an erasure proceed past a failed check.
 
 ### Changed
 
