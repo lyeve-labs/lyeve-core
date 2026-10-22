@@ -372,3 +372,51 @@ func toString(v any) string {
 	s, _ := v.(string)
 	return s
 }
+
+// signOutFailingAccount is an account eraser whose sign-out fails.
+type signOutFailingAccount struct{}
+
+func (signOutFailingAccount) ErasesAccount()     {}
+func (signOutFailingAccount) EraserName() string { return "account" }
+func (signOutFailingAccount) EndSessions(context.Context, string) error {
+	return errors.New("connection refused: 127.0.0.1:5432")
+}
+func (signOutFailingAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
+
+// A failed sign-out runs no eraser, so the answer must not say the account
+// is locked.
+func TestDSARHandler_Erase_SignOutFailedSaysNothingRan(t *testing.T) {
+	compliance.RegisterSubjectEraser(signOutFailingAccount{})
+	compliance.RegisterSubjectEraser(&testEraser{affected: 3})
+	defer compliance.ResetSubjectErasers()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "user@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Erase(rr, req)
+
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	errorsList, _ := resp["errors"].([]any)
+	assertIncompleteErasure(t, resp, errorsList)
+	if failed, _ := resp["failed"].([]any); len(failed) != 2 {
+		t.Errorf("failed = %v, want both erasers named", resp["failed"])
+	}
+	if resp["total_rows"] != float64(0) {
+		t.Errorf("total_rows = %v, want 0: no eraser runs", resp["total_rows"])
+	}
+	for _, e := range errorsList {
+		s, _ := e.(string)
+		if strings.Contains(s, "locked") {
+			t.Errorf("the answer says the account is locked after a failed sign-out: %q", s)
+		}
+		if strings.Contains(s, "127.0.0.1") {
+			t.Errorf("raw driver error text leaked into response: %q", s)
+		}
+	}
+}

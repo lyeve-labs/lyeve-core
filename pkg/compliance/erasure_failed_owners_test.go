@@ -95,8 +95,11 @@ func TestRunSubjectErasure_NamesEveryOwnerThatFailedOrNeverRan(t *testing.T) {
 }
 
 // signingOutAccount is the account eraser, recording its sign-out and its
-// erasure in order.
-type signingOutAccount struct{ order *[]string }
+// erasure in order. Its sign-out fails with signOutErr when it is set.
+type signingOutAccount struct {
+	order      *[]string
+	signOutErr error
+}
 
 func (a *signingOutAccount) ErasesAccount() {}
 
@@ -104,7 +107,7 @@ func (a *signingOutAccount) EraserName() string { return "account" }
 
 func (a *signingOutAccount) EndSessions(context.Context, string) error {
 	*a.order = append(*a.order, "sign-out")
-	return nil
+	return a.signOutErr
 }
 
 func (a *signingOutAccount) EraseSubject(context.Context, string) (int64, error) {
@@ -156,4 +159,21 @@ func TestRunSubjectErasure_SignsOutFirstAndErasesTheAccountLast(t *testing.T) {
 			"the subject is signed out and the others still run, and the account is not erased")
 		assert.Equal(t, []string{"email", "account"}, res.Failed, "the account is named as not run")
 	})
+}
+
+// A failed sign-out was only logged, and the erasers ran with the subject
+// still signed in, while the answer said the account was locked. The run now
+// stops and names every eraser as not run.
+func TestRunSubjectErasure_StopsWhenTheSignOutFails(t *testing.T) {
+	var order []string
+	reg := &SubjectEraserRegistry{}
+	reg.Register(&signingOutAccount{order: &order, signOutErr: errors.New("db down")})
+	reg.Register(&orderedEraser{name: "email", order: &order})
+	reg.Register(&orderedEraser{name: "media", order: &order})
+
+	res, err := runSubjectErasureOn(context.Background(), reg, "someone@example.test")
+	require.ErrorIs(t, err, ErrSubjectNotSignedOut)
+	assert.Equal(t, []string{"sign-out"}, order, "no eraser runs while the subject is signed in")
+	assert.ElementsMatch(t, []string{"account", "email", "media"}, res.Failed)
+	assert.Zero(t, res.Rows)
 }
