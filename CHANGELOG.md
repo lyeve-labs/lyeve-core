@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.0] - 2026-10-26
+
+### Security
+
+- Requires Go 1.27.3, which distrusts compromised intermediate certificates in crypto/x509 certificate verification (GO-2026-6809).
+- The content API's token route no longer turns a correct password into a session for an account with a second factor enrolled. It answers with the same challenge as the console's sign-in, which a current code completes at the verification route, and accounts without a second factor receive their token as before.
+- A second factor a plugin verifies itself, such as a passkey, now completes a password sign-in through the engine's own record of spent challenges. One challenge gives one session whichever factor completes it, and the session acts in the tenant the password step acted in, with the roles the account holds there now. Before, a passkey could sign only for the account's home tenant, so a member who signed in on another tenant's domain landed at home with home roles.
+- A plugin allowed to read secret configuration no longer reads the session signing secret as well. That secret now needs a capability of its own, granted only to the plugins that verify sessions with it or open values sealed under it, and a secret name written with dots, hyphens or spaces is checked in the form the engine resolves it.
+- The engine's own heap and allocation profile routes now honor the setting that refuses heap profile exports, which before held only for the profiler's routes. A heap export that is allowed is logged with the account that took it.
+- A plugin reaches the engine's account store, which creates an account with any roles in any tenant, only when it holds the database write grant. Before, every plugin could reach it. Every plugin that uses the store already holds the grant.
+- The data subject export and erase routes refuse, with a 422, an identifier that is not an email address, an account id or an IP address. Before, a bare word such as a first name was accepted, and erasure redacted that word in the records of anyone whose text held it.
+- Subject export and erasure find an address written into a URL or an HTML page with its at sign encoded, which they missed before. An encoded plus, hyphen or underscore just before an address now reads as part of a longer address, so one person's request no longer reaches text about someone whose address ends the same way.
+- The route that saves a plugin's settings refuses, with a 422 that names it, a key the plugin does not declare. Before, it stored any key, and because every plugin's saved settings are merged into one configuration, a key saved under one plugin could set another plugin's setting, such as a mail relay host.
+
+### Added
+
+- A plugin that reads a request body itself can answer a body past the limit with the engine's own 413 response.
+- A plugin can register a tenant purge step that runs on every tenant delete, including a delete that skips the rest of the purge because the tenant holds no stored rows. A step that drains a buffer or clears state kept outside the database uses it, so that work is no longer lost when the tenant's tables are already empty.
+- Plugins can clear a data subject's text through the engine's own erasure helper, which changes only rows whose key and text still match what was read and confirmed, so a row edited between the read and the clear keeps its edit. It splits a large clear into statements under the parameter limit of every supported database.
+
+### Changed
+
+- Plugins can hash a password with the engine's configured hasher and read its length limit, so a password a plugin sets is stored the way creating a user stores it, under bcrypt or argon2id alike.
+- A plugin that writes content rows with its own statements, such as a batch import, can now tell the engine to drop its cached content lists and rows, and the other replicas hear of it too. Before, a list read just before such a write kept serving the old rows until its cache entry expired.
+- Plugins can ask the legal-hold check the way the engine's erasure does, including the install's setting for a check that cannot answer, so a plugin's own erasure route answers a failed check as the engine's route does.
+- A panic the engine recovers, in a request, a background task, a scheduled job, a flow run or a call into a plugin, is now handed to every running plugin that takes on the panic reporting role, with the tenant, the route or task name, the value and the stack. The request still answers 500 and the panic is still logged.
+- Plugins can apply the engine's rule for which tenant a log line about another tenant is filed under, and the plugin test kit can capture log lines through the engine's own handler, with the tenant and level it would apply.
+
+### Fixed
+
+- A session survives a refresh whose answer is lost on the way back. Trading the same refresh token again within a few seconds returns the same new token instead of a conflict, and a further retry in that window answers a conflict rather than signing the user out.
+- A refresh that loses a race to a concurrent refresh answers a conflict on every cache backend a plugin provides, as it already did on the built-in one, instead of a service error.
+- A password sign-in whose second-factor check cannot be read answers that the service is unavailable instead of rejecting the password, and it still issues no session.
+- A refresh token store over a cache backend without compare-and-set no longer reports a rotation as won without checking it. The engine refuses to start when replicas share such a backend, and every backend that ships today supports it.
+- The migrate command that marks one migration as applied takes the bookkeeping table to mark, so a version that ships in two of a plugin's migration sets can be marked. Without it the refusal names the option, and the boot failure for a plugin with more than one set prints the full command.
+- A console log line no longer repeats the request id, trace fields, tenant or plugin. The value a line names itself wins, and the tenant and plugin always come from the request.
+- Booting with an unencrypted database address or with Redis unreachable no longer writes plain text lines between the engine's JSON log lines. The production warnings now also name an unencrypted replica address, and Redis connection failures are logged as structured warnings.
+- On SQL Server, a data subject erasure that runs while tables are being created or changed no longer fails when the server picks its catalog read as a deadlock victim.
+- A plugin migration blocked on a lock another database session holds fails at once instead of being tried four times, which stalled a boot for about three minutes. A deadlock is still retried, and the last failed try returns without waiting again.
+- Boot no longer warns that a tenancy plugin's membership routes are unreachable, and a plugin can be granted access to them again. The engine had listed the four routes as its own while never serving them.
+- On SQL Server, deleting a tenant while another transaction creates a table no longer fails with a service error. The check each cleanup step makes for its own tables no longer waits on uncommitted table changes, so the delete is not chosen as a deadlock victim.
+- On MySQL, migrations run in a session with the same settings as every other engine connection: in UTC, and counting changed rows rather than matched ones.
+- Checking a cluster lock with a context that has run out no longer frees the lock. Before, the check closed the lock's database session, and another replica could take the lock while the first was still working under it.
+- On PostgreSQL, the check for the engine's own tables finds them on a connection scoped to a tenant, whose search path names the tenant's schema first. Before, it reported them missing and the purge, erasure and audit steps that rely on it fell back to their defaults.
+- Updating a content row through the content API no longer writes into a row that was soft deleted. Plugins also gain a content write that only updates an existing row and answers not found for a missing or deleted one.
+- The database handle that refuses data changes, given to plugins for reads and schema work, now reads every statement of a query that holds several separated by semicolons, and refuses the query when any of them opens with a command that changes data. Before, it read only the first statement, so a read followed by a delete in one call ran the delete. The handle catches a plugin's own mistakes and is not a sandbox for SQL written elsewhere.
+- The description of the setting that opens the shared address space to outbound requests says the email plugin honors it. An SMTP relay or API provider host in that range is accepted without an entry in the email plugin's own list of allowed private networks. Before, it said the email plugin ignored the setting.
+
 ## [0.55.0] - 2026-10-20
 
 ### Security
