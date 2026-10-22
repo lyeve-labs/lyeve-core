@@ -66,6 +66,6 @@ lyeve-plugin-search = 308cb29dcc3a37ff785c67bec8bef1d8db379241
 lyeve-plugin-storage = 23d7f12580b17da9462e92ae51edecc83ddd9b12
 lyeve-plugin-synthetic-monitoring = 4da4ae8b833c506ebda415d30c014df2b4f08996
 lyeve-plugin-telemetry = fa989fb9283514aeae80d60ccdcf05cad6894b51
-lyeve-plugin-usage = fa01883de82d2588c53d938932ceab2dcdfa159b
+lyeve-plugin-usage = 773f8248551e39611797a06f3f06eeb11505333a
 lyeve-plugin-waf = 222027130c6cc23e99c82ba89e75116abf900b76
 lyeve-plugin-webhook = 1a4271f372fdd7f595e55605da1c3182e88c3ded
