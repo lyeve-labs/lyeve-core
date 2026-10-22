@@ -25,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Plugins can clear a data subject's text through the engine's own erasure helper, which changes only rows whose key and text still match what was read and confirmed, so a row edited between the read and the clear keeps its edit. It splits a large clear into statements under the parameter limit of every supported database.
 - A plugin that subscribes to content events learns who made the change: the user behind a session, the owner of an admin token, or the id an API key authenticates as, with the kind of credential. A write with no signed-in caller, such as a scheduled job, names nobody. Webhook, broker and realtime payloads keep their shape.
 - A plugin that deletes one kind of data in bulk can ask which legal holds in the tenant cover that kind of data as a whole, such as a hold on the whole tenant, on a resource type or on a time window. A hold provider that does not answer the question reports nothing held. One that cannot answer reports the hold status as unavailable, even where the install lets an erasure proceed past a failed check.
+- Through the plugin releases this engine pins: content history is opt-in and stores each version as a commit naming its field values, so a save that changes one field stores that field alone. Each tenant chooses which content types keep history, how long versions are kept and whether an activity log records who changed which entry. The server's configuration sets the defaults and can fix a setting for every tenant. A fresh install starts with history off, and a tenant that already holds content keeps history on.
+- Through the plugin releases this engine pins: a super admin reads the content activity log across tenants, and reads it in full with PII masking on, as on the audit log.
 
 ### Changed
 
@@ -55,6 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The description of the setting that opens the shared address space to outbound requests says the email plugin honors it. An SMTP relay or API provider host in that range is accepted without an entry in the email plugin's own list of allowed private networks. Before, it said the email plugin ignored the setting.
 - Through the plugin releases this engine pins: on MySQL, a data export with no field filter no longer fails while writing its file, or writes bytes from another entry into an entry's body or meta. The bulk import's lists of a job's rows and rejected rows no longer show another row's data either.
 - Through the plugin releases this engine pins: on SQL Server, a write whose request quota check ran out of time no longer fails with 503. The check stops without closing the connection the write holds, and the write goes through uncounted.
+- Through the plugin releases this engine pins: a legal hold whose resource id is a UUID typed in upper case now holds what it names on PostgreSQL, and a privacy erasure honors a hold set in any tenant. While a legal hold covers a tenant's content as a whole, content history retention deletes nothing in that tenant.
+- Through the plugin releases this engine pins: deleting a content record removes its stored versions, which a delete used to leave listed.
 
 ## [0.55.0] - 2026-10-20
 
