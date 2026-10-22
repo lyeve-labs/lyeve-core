@@ -80,7 +80,27 @@ type Event struct {
 	InstanceID string         `json:"instance_id,omitempty"`
 	Timestamp  time.Time      `json:"timestamp"`
 	Source     string         `json:"source,omitempty"` // optional origin annotation
+	// ActorID is the id the request behind the event authenticated as, and
+	// empty when no caller was authenticated, such as a scheduled job or a
+	// system write. A session and an admin token give the user's id, and an
+	// API key gives the id the key authenticates as. The tag keeps it out of
+	// every payload that encodes an Event.
+	ActorID string `json:"-"`
+	// ActorKind names the credential ActorID came from: ActorKindUser,
+	// ActorKindAdminToken or ActorKindAPIKey, and empty when ActorID is.
+	ActorKind string `json:"-"`
 }
+
+// The kinds of caller an Event's ActorKind names.
+const (
+	// ActorKindUser is a signed-in session. ActorID is the user's id.
+	ActorKindUser = "user"
+	// ActorKindAdminToken is an admin token. ActorID is the token owner's id.
+	ActorKindAdminToken = "admin_token"
+	// ActorKindAPIKey is an API key. ActorID is the id the key authenticates
+	// as, not a user's.
+	ActorKindAPIKey = "api_key"
+)
 
 // SourcePlugin is the canonical Source value for plugin-published events.
 const SourcePlugin = "plugin"
