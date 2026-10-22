@@ -163,6 +163,9 @@ func TestDSARHandler_Erase_Success(t *testing.T) {
 	if _, ok := result["total_rows"]; !ok {
 		t.Error("expected total_rows in response")
 	}
+	if result["complete"] != true {
+		t.Errorf("complete = %v, want true", result["complete"])
+	}
 
 	if len(audit.calls) != 1 {
 		t.Fatalf("expected 1 audit call, got %d", len(audit.calls))
@@ -221,8 +224,8 @@ func TestDSARHandler_Erase_ErrorsSanitized(t *testing.T) {
 
 	handler.Erase(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	var resp map[string]any
@@ -238,26 +241,40 @@ func TestDSARHandler_Erase_ErrorsSanitized(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected errors to be an array, got %T", errorsRaw)
 	}
-	if len(errorsList) != 1 {
-		t.Fatalf("expected 1 error, got %d", len(errorsList))
-	}
-
-	errStr, ok := errorsList[0].(string)
-	if !ok {
-		t.Fatalf("expected error to be string, got %T", errorsList[0])
-	}
-
-	// Must be the static sanitized message, not the raw driver error.
-	if errStr != "one or more erasers failed" {
-		t.Errorf("error sanitization failed: got %q, want %q", errStr, "one or more erasers failed")
-	}
-	if strings.Contains(errStr, "SQLSTATE") || strings.Contains(errStr, "sys_users") {
-		t.Errorf("raw driver error text leaked into response: %q", errStr)
+	assertIncompleteErasure(t, resp, errorsList)
+	for _, e := range errorsList {
+		errStr, _ := e.(string)
+		if strings.Contains(errStr, "SQLSTATE") || strings.Contains(errStr, "sys_users") {
+			t.Errorf("raw driver error text leaked into response: %q", errStr)
+		}
 	}
 }
 
-// Multiple failing erasers with different error texts all collapse
-// to a single sanitized message.
+// assertIncompleteErasure checks that a partial erasure says so: not
+// complete, the eraser named, the account not erased, and how to finish.
+func assertIncompleteErasure(t *testing.T, resp map[string]any, errorsList []any) {
+	t.Helper()
+	if resp["complete"] != false {
+		t.Errorf("complete = %v, want false", resp["complete"])
+	}
+	failed, _ := resp["failed"].([]any)
+	if len(failed) == 0 {
+		t.Errorf("failed names no eraser: %v", resp)
+	}
+	var joined strings.Builder
+	for _, e := range errorsList {
+		s, _ := e.(string)
+		joined.WriteString(s + "\n")
+	}
+	for _, want := range []string{"not finished: ", "the account was not erased", "repeat the request"} {
+		if !strings.Contains(joined.String(), want) {
+			t.Errorf("errors do not say %q: %v", want, errorsList)
+		}
+	}
+}
+
+// Multiple failing erasers are each named, and none of their error text
+// reaches the response.
 func TestDSARHandler_Erase_MultipleFailuresSanitized(t *testing.T) {
 	compliance.RegisterSubjectEraser(&testEraser{
 		affected: 0,
@@ -278,8 +295,8 @@ func TestDSARHandler_Erase_MultipleFailuresSanitized(t *testing.T) {
 
 	handler.Erase(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	var resp map[string]any
@@ -296,12 +313,12 @@ func TestDSARHandler_Erase_MultipleFailuresSanitized(t *testing.T) {
 		t.Fatalf("expected errors to be an array, got %T", errorsRaw)
 	}
 
-	if len(errorsList) != 1 {
-		t.Fatalf("expected 1 error entry, got %d: %v", len(errorsList), errorsList)
-	}
-	errStr, _ := errorsList[0].(string)
-	if errStr != "one or more erasers failed" {
-		t.Errorf("error sanitization failed: got %q, want %q", errStr, "one or more erasers failed")
+	assertIncompleteErasure(t, resp, errorsList)
+	for _, e := range errorsList {
+		errStr, _ := e.(string)
+		if strings.Contains(errStr, "127.0.0.1") || strings.Contains(errStr, "sys_example") {
+			t.Errorf("raw driver error text leaked into response: %q", errStr)
+		}
 	}
 }
 
