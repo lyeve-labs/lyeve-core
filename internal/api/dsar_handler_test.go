@@ -383,9 +383,10 @@ func (signOutFailingAccount) EndSessions(context.Context, string) error {
 }
 func (signOutFailingAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
 
-// A failed sign-out runs no eraser, so the answer must not say the account
-// is locked.
-func TestDSARHandler_Erase_SignOutFailedSaysNothingRan(t *testing.T) {
+// A failed sign-out is a database failure with nothing erased. It answered
+// 207, which reads as a partial erasure. It is now the retryable 503 the
+// hold-check refusal answers.
+func TestDSARHandler_Erase_SignOutFailedIsRetryable(t *testing.T) {
 	compliance.RegisterSubjectEraser(signOutFailingAccount{})
 	compliance.RegisterSubjectEraser(&testEraser{affected: 3})
 	defer compliance.ResetSubjectErasers()
@@ -395,28 +396,14 @@ func TestDSARHandler_Erase_SignOutFailedSaysNothingRan(t *testing.T) {
 	rr := httptest.NewRecorder()
 	NewDSARHandler(nil, nil, nil).Erase(rr, req)
 
-	if rr.Code != http.StatusMultiStatus {
-		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rr.Code, rr.Body.String())
 	}
-	var resp map[string]any
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to unmarshal response: %v", err)
+	body := rr.Body.String()
+	if !strings.Contains(body, "not attempted") {
+		t.Errorf("the answer does not say the erasure was not attempted: %s", body)
 	}
-	errorsList, _ := resp["errors"].([]any)
-	assertIncompleteErasure(t, resp, errorsList)
-	if failed, _ := resp["failed"].([]any); len(failed) != 2 {
-		t.Errorf("failed = %v, want both erasers named", resp["failed"])
-	}
-	if resp["total_rows"] != float64(0) {
-		t.Errorf("total_rows = %v, want 0: no eraser runs", resp["total_rows"])
-	}
-	for _, e := range errorsList {
-		s, _ := e.(string)
-		if strings.Contains(s, "locked") {
-			t.Errorf("the answer says the account is locked after a failed sign-out: %q", s)
-		}
-		if strings.Contains(s, "127.0.0.1") {
-			t.Errorf("raw driver error text leaked into response: %q", s)
-		}
+	if strings.Contains(body, "127.0.0.1") {
+		t.Errorf("raw driver error text leaked into response: %s", body)
 	}
 }
