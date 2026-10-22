@@ -51,6 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Updating a content row through the content API no longer writes into a row that was soft deleted. Plugins also gain a content write that only updates an existing row and answers not found for a missing or deleted one.
 - The database handle that refuses data changes, given to plugins for reads and schema work, now reads every statement of a query that holds several separated by semicolons, and refuses the query when any of them opens with a command that changes data. Before, it read only the first statement, so a read followed by a delete in one call ran the delete. The handle catches a plugin's own mistakes and is not a sandbox for SQL written elsewhere.
 - The description of the setting that opens the shared address space to outbound requests says the email plugin honors it. An SMTP relay or API provider host in that range is accepted without an entry in the email plugin's own list of allowed private networks. Before, it said the email plugin ignored the setting.
+- Through the plugin releases this engine pins: on MySQL, a data export with no field filter no longer fails while writing its file, or writes bytes from another entry into an entry's body or meta. The bulk import's lists of a job's rows and rejected rows no longer show another row's data either.
 
 ## [0.55.0] - 2026-10-20
 
