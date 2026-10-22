@@ -229,31 +229,36 @@ func (e *sysUserEraser) revokeRefreshTokens(ctx context.Context, ids []uuid.UUID
 }
 
 // EndSessions signs the subject out of every unerased account that belongs
-// to identifier, and erases nothing. token_version is bumped so every access
-// token issued before is rejected, and the refresh tokens are revoked. The
-// erasure calls it before any eraser runs. The account keeps its address
-// until EraseSubject runs, which is once every other eraser has succeeded.
+// to identifier and locks it, and erases nothing. The account is disabled,
+// which every sign-in refuses, and token_version is bumped in the same
+// statement so every access token issued before is rejected. The refresh
+// tokens are revoked after. The erasure calls it before any eraser runs, so
+// the subject cannot sign back in and write new rows behind an eraser that
+// has already run. The account keeps its address until EraseSubject runs,
+// which is once every other eraser has succeeded, and stays locked while an
+// eraser keeps failing.
 func (e *sysUserEraser) EndSessions(ctx context.Context, identifier string) error {
 	if strings.TrimSpace(identifier) == "" {
 		return nil
 	}
 	q := e.host.Querier(ctx)
-	utcFn, idCast, boolFalse := "NOW()", "id::text", "false"
+	utcFn, idCast, boolTrue, boolFalse := "NOW()", "id::text", "true", "false"
 	switch e.host.Dialect() {
 	case "mysql":
-		utcFn, idCast, boolFalse = "NOW(6)", "id", "0"
+		utcFn, idCast, boolTrue, boolFalse = "NOW(6)", "id", "1", "0"
 	case "mssql":
-		utcFn, idCast, boolFalse = "SYSUTCDATETIME()", "CAST(id AS NVARCHAR(36))", "0"
+		utcFn, idCast, boolTrue, boolFalse = "SYSUTCDATETIME()", "CAST(id AS NVARCHAR(36))", "1", "0"
 	}
 	ids, err := e.resolveSubjectIDs(ctx, q, idCast, boolFalse, identifier)
 	if err != nil {
 		return err
 	}
 	update := fmt.Sprintf(`UPDATE sys_users
-	 SET token_version = token_version + 1,
+	 SET disabled = %s,
+	     token_version = token_version + 1,
 	     sessions_revoked_at = %s,
 	     updated_at = %s
-	 WHERE anonymized = %s AND id IN `, utcFn, utcFn, boolFalse)
+	 WHERE anonymized = %s AND id IN `, boolTrue, utcFn, utcFn, boolFalse)
 	if _, err := execByIDs(ctx, q, update, ids); err != nil {
 		return fmt.Errorf("sys_users sign-out: %w", err)
 	}
@@ -270,7 +275,8 @@ func (e *sysUserEraser) EndSessions(ctx context.Context, identifier string) erro
 // refresh store recorded at issue time.
 //
 // The id half keeps the identifier as supplied, because folding a cast id is
-// not this function's business.
+// not this function's business. A disabled account is still found: the
+// erasure's own sign-out disables it before the account eraser runs.
 func (e *sysUserEraser) resolveSubjectIDs(ctx context.Context, q core.Querier, idCast, boolFalse, identifier string) ([]uuid.UUID, error) {
 	rows, err := q.Query(ctx, fmt.Sprintf(
 		`SELECT %s, email, provider_email, CASE WHEN %s = $4 THEN 1 ELSE 0 END FROM sys_users
