@@ -210,6 +210,13 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 			"legal hold status is unavailable; erasure was not attempted")
 		return
 	}
+	// A sign-out that failed is a database failure with nothing erased, so
+	// it is refused the same way, and repeating the request is the remedy.
+	if errors.Is(err, compliance.ErrSubjectNotSignedOut) {
+		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
+			"the subject could not be signed out; erasure was not attempted")
+		return
+	}
 
 	resp := EraseResponse{
 		Identifier: body.Identifier,
@@ -226,13 +233,9 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		// log.
 		status = http.StatusMultiStatus
 		resp.Failed = result.Failed
-		account := "the account was not erased: it is signed out and locked until every other part has erased"
-		if errors.Is(err, compliance.ErrSubjectNotSignedOut) {
-			account = "the account was not erased: it could not be signed out, so no part ran"
-		}
 		resp.Errors = []string{
 			"not finished: " + strings.Join(result.Failed, ", "),
-			account,
+			"the account was not erased: it is signed out and locked until every other part has erased",
 			"repeat the request to finish the erasure",
 		}
 	}

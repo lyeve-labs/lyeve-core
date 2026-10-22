@@ -392,7 +392,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			"200": openAPIResponse{Description: "Erased. complete is false when a legal hold kept data", Content: eraseBody},
 			"207": openAPIResponse{Description: "Partly erased: the account was not erased, failed names the owners left, and repeating the request finishes it", Content: eraseBody},
 			"400": err400, "401": err401, "403": err403, "422": notASubject422,
-			"503": map[string]any{"description": "Legal hold status is unavailable, so nothing was erased"},
+			"503": map[string]any{"description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"},
 		}}, super...),
 	}
 

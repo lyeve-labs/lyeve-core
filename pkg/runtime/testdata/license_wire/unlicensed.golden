@@ -1061,7 +1061,7 @@ body (json, newline):
             "description": "The identifier is not an email address, an account id or an IP address"
           },
           "503": {
-            "description": "Legal hold status is unavailable, so nothing was erased"
+            "description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"
           }
         },
         "security": [
