@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -19,12 +21,40 @@ import (
 // sentinel, so a plugin can tell "nothing to mirror into" apart from a write
 // that genuinely failed. A value the store refuses, such as a _status no read
 // filter matches, is core.ErrValidation, so the plugin answers it as the
-// caller's mistake and not as an outage the caller would retry.
+// caller's mistake and not as an outage the caller would retry. A soft-deleted
+// row under the id is core.ErrConflict, and the row stays deleted.
 func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
 	}
 	if err := h.contentStore.UpsertContent(ctx, schemaName, id, data); err != nil {
+		return contentWriterErr(err, schemaName)
+	}
+	return nil
+}
+
+// FlushContentCache drops the content read caches after a plugin wrote a
+// content table with its own SQL. Implements core.ContentCacheFlusher.
+func (h *engineHost) FlushContentCache(ctx context.Context, schemaName string) {
+	if h.contentStore != nil {
+		h.contentStore.FlushWritten(ctx, schemaName)
+	}
+}
+
+// UpdateContent writes data to an existing row of the per-schema table and
+// never inserts one. Implements core.ContentUpdater.
+//
+// The store's update matches the row by id and tenant, and skips a
+// soft-deleted row, so a row that is gone matches nothing. That miss reaches
+// the caller as core.ErrNotFound, the answer a read of the row would give.
+func (h *engineHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	if h.contentStore == nil {
+		return fmt.Errorf("content writer not wired")
+	}
+	if _, err := h.contentStore.Update(ctx, schemaName, id, data, time.Time{}); err != nil {
+		if errors.Is(err, db.ErrContentConflict) {
+			return fmt.Errorf("%w: %s row %s", core.ErrNotFound, schemaName, id)
+		}
 		return contentWriterErr(err, schemaName)
 	}
 	return nil
@@ -105,6 +135,8 @@ func contentWriterErr(err error, schemaName string) error {
 		return fmt.Errorf("%w: schema %q", core.ErrNotFound, schemaName)
 	case errors.Is(err, domain.ErrValidation):
 		return fmt.Errorf("%w: %w", core.ErrValidation, err)
+	case errors.Is(err, domain.ErrConflict):
+		return fmt.Errorf("%w: %w", core.ErrConflict, err)
 	}
 	return err
 }
@@ -143,6 +175,7 @@ func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after u
 
 var (
 	_ core.ContentWriter          = (*engineHost)(nil)
+	_ core.ContentUpdater         = (*engineHost)(nil)
 	_ core.ContentStatusProjector = (*engineHost)(nil)
 	_ core.ContentReader          = (*engineHost)(nil)
 )

@@ -45,9 +45,9 @@ import (
 // starts. The coordinator fans out erasure requests to every registered
 // eraser independently.
 //
-// The identifier is plugin-defined: an email address, user ID (UUID string),
-// IP address, or any other key that identifies the data subject's records
-// within the plugin's stores.
+// The identifier is an email address, an account id (a UUID string) or an IP
+// address, the three keys the engine's erase route accepts. Each eraser
+// matches the ones its stores keep and returns (0, nil) for the others.
 type SubjectEraser interface {
 	// EraseSubject deletes or fully anonymizes all PII for the given
 	// identifier in this plugin's stores. Returns the number of rows
@@ -187,7 +187,7 @@ func RunSubjectErasure(ctx context.Context, identifier string) (int64, error) {
 // returns zero rows and names the holds, so the requester is told their
 // request is deferred rather than quietly given a success that erased nothing.
 func RunSubjectErasureWithHolds(ctx context.Context, identifier string) (ErasureResult, error) {
-	holds, err := subjectHolds(ctx, identifier)
+	holds, err := CheckSubjectHolds(ctx, identifier)
 	if err != nil {
 		return ErasureResult{}, err
 	}
@@ -202,12 +202,16 @@ func RunSubjectErasureWithHolds(ctx context.Context, identifier string) (Erasure
 	return ErasureResult{Rows: rows}, err
 }
 
-// subjectHolds asks the registered checker which holds cover the subject.
+// CheckSubjectHolds asks the registered checker which holds cover the
+// subject, and applies LYEVE_GDPR_HOLD_CHECK when the checker cannot answer:
+// ErrHoldCheckUnavailable by default, no holds when the install set proceed.
+// Every erasure path asks through it, so a plugin's own erasure route answers
+// a failed check as the engine's does.
 //
 // No registered checker means no hold can exist: the erasure proceeds. That
 // is the only case where an absent answer is a safe answer, and it is why
 // this does not collapse into one fail-open or fail-closed policy.
-func subjectHolds(ctx context.Context, identifier string) ([]HoldRef, error) {
+func CheckSubjectHolds(ctx context.Context, identifier string) ([]HoldRef, error) {
 	checker := RegisteredHoldChecker()
 	if checker == nil {
 		return nil, nil

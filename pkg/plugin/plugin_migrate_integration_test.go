@@ -169,7 +169,7 @@ func migrateTestMSSQL(t *testing.T) *sql.DB {
 	testdialect.Require(t, "mssql")
 	ctx := context.Background()
 	ctr, err := tcmssql.Run(ctx,
-		"mcr.microsoft.com/azure-sql-edge:latest",
+		testdialect.MSSQLImage,
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng@Passw0rd"),
 	)

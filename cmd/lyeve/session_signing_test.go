@@ -47,3 +47,44 @@ func TestCapPolicy_OnlySignInPluginsSignSessions(t *testing.T) {
 		}
 	}
 }
+
+// keyHost serves the session signing secret to whoever asks, the way the
+// engine's host does behind the scoped host.
+type keyHost struct{ core.Host }
+
+func (keyHost) Secret(key string) (string, bool) {
+	if key == "jwt_secret" {
+		return "signing-secret", true
+	}
+	return "", false
+}
+
+func (keyHost) Secrets(key string) ([]string, bool) {
+	if key == "jwt_secrets" {
+		return []string{"signing-secret"}, true
+	}
+	return nil, false
+}
+
+// The session signing secret reaches only the plugins that verify a session
+// with it or open a value sealed under it. Holding CapConfigSecret is not
+// enough, because the secret signs a session for any account on an install
+// that signs with HMAC.
+func TestCapPolicy_OnlySessionKeyReadersGetTheSigningSecret(t *testing.T) {
+	plugin.SetCapPolicy(capPolicy)
+	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
+
+	readers := map[string]bool{
+		"ai": true, "captcha": true, "email": true, "grpc": true, "magic-link": true, "mfa": true,
+		"multitenant": true, "oauth": true, "saml": true, "storage": true, "telemetry": true, "webhook": true,
+	}
+	inner := keyHost{mockhost.New(t).Host()}
+	for _, name := range core.RegisteredPlugins() {
+		sh := core.NewScopedHost(inner, name, plugin.CapPolicy(name))
+		_, one := sh.Secret("jwt_secret")
+		_, list := sh.Secrets("jwt_secrets")
+		if one != readers[name] || list != readers[name] {
+			t.Errorf("%s: jwt_secret served = %v, jwt_secrets served = %v, want %v", name, one, list, readers[name])
+		}
+	}
+}

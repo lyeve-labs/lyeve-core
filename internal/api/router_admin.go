@@ -42,6 +42,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		apimw.StripUntrustedProxyHeaders(o.trustedProxies),
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
 	r.Use(middleware.Recoverer)
+	r.Use(reportPanics)
 	r.Use(apimw.AllowedHosts(cfg.AllowedHosts))
 	r.Use(apimw.HTTPSRedirect(cfg.SecureCookie))
 	// Content-Type enforcement: rejects mutation requests (POST/PUT/PATCH)
@@ -185,6 +186,14 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	authHandler.WithSetupToken(setupToken)
 	authHandler.WithMemberships(o.memberships)
+	// A plugin that verifies a second factor of its own completes the
+	// challenge through this handler, so both read one record of used
+	// challenges.
+	if reg, ok := o.scalingHost.(interface {
+		SetMFAChallengeCompleter(core.MFAChallengeCompleter)
+	}); ok {
+		reg.SetMFAChallengeCompleter(authHandler)
+	}
 	// The document describes what this router mounts, so it is built from the
 	// same values the mounts are.
 	specOptions := openAPIOptions{
@@ -475,9 +484,9 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/profile", pprof.Profile)
 		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/trace", pprof.Trace)
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/heap", pprof.Handler("heap"))
+		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/heap", memoryProfileGuard("heap", pprof.Handler("heap")))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/allocs", pprof.Handler("allocs"))
+		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/allocs", memoryProfileGuard("allocs", pprof.Handler("allocs")))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/block", pprof.Handler("block"))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))

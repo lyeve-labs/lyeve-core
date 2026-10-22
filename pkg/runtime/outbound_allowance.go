@@ -16,8 +16,9 @@ const sharedAddressSpace = "100.64.0.0/10"
 // request that goes through pkg/ssrf when the operator set
 // LYEVE_OUTBOUND_ALLOW_CGNAT, as an install that reaches its own services over
 // Tailscale does. The allowance is global, so each plugin's guard and the
-// address a NAT64 or 6to4 form embeds see it. The email plugin checks its
-// providers against its own list and SMTP_ALLOWED_PRIVATE_NETWORKS instead.
+// address a NAT64 or 6to4 form embeds see it. The email plugin asks the same
+// guard about a relay or API host its own list refuses, so a provider in the
+// range needs no entry in SMTP_ALLOWED_PRIVATE_NETWORKS.
 func applyOutboundAllowance(cfg *config.Config, logger *slog.Logger) error {
 	if !cfg.OutboundAllowCGNAT {
 		return nil
@@ -26,7 +27,6 @@ func applyOutboundAllowance(cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("outbound allowance: %w", err)
 	}
 	logger.Info("the outbound guard admits the shared address space",
-		"range", sharedAddressSpace, "setting", "LYEVE_OUTBOUND_ALLOW_CGNAT",
-		"email", "not covered, it reads SMTP_ALLOWED_PRIVATE_NETWORKS")
+		"range", sharedAddressSpace, "setting", "LYEVE_OUTBOUND_ALLOW_CGNAT")
 	return nil
 }

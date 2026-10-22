@@ -75,7 +75,7 @@ func captureReadFailed(w http.ResponseWriter, r *http.Request, read int, err err
 	)
 	var limit *http.MaxBytesError
 	if errors.As(err, &limit) {
-		tooLarge(w, r, limit.Limit)
+		httpx.BodyTooLarge(w, r, limit.Limit)
 		return
 	}
 	httpx.ErrorReq(w, r, http.StatusBadRequest, "request body could not be read")

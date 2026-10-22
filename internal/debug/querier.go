@@ -103,6 +103,14 @@ func (q *Querier) runExplain(ctx context.Context, sqlQuery string) string {
 	return result
 }
 
+// SysDatabase passes the inner querier's answer through, for the catalog read.
+func (q *Querier) SysDatabase() string {
+	if n, ok := q.inner.(interface{ SysDatabase() string }); ok {
+		return n.SysDatabase()
+	}
+	return ""
+}
+
 // QueryRow wraps inner QueryRow with debug timing.
 func (q *Querier) QueryRow(ctx context.Context, sql string, args ...any) (core.Row, error) {
 	start := time.Now()

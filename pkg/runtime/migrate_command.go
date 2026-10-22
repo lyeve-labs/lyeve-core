@@ -21,7 +21,7 @@ func Migrate(args []string) {
 	}
 }
 
-const migrateUsage = "usage: lyeve migrate mark-applied --plugin <name> --version <version>"
+const migrateUsage = "usage: lyeve migrate mark-applied --plugin <name> --version <version> [--table <bookkeeping table>]"
 
 // MigrateCommand runs "lyeve migrate", the operator's repair for a plugin's
 // migration bookkeeping, and returns the exit status. Marking a version
@@ -38,6 +38,7 @@ func MigrateCommand(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	name := flags.String("plugin", "", "the plugin whose migration to mark")
 	version := flags.String("version", "", "the migration version to mark applied, as the boot failure names it")
+	table := flags.String("table", "", "the bookkeeping table of the tree to mark, as the boot failure names it, for a plugin with more than one tree")
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -59,11 +60,11 @@ func MigrateCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	defer func() { _ = pool.Close() }()
 
-	table, err := plugin.MarkPluginMigrationApplied(ctx, pool.SQLDB(), pool.Engine(), *name, *version)
+	marked, err := plugin.MarkPluginMigrationApplied(ctx, pool.SQLDB(), pool.Engine(), *name, *version, *table)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "mark-applied: %v\n", err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "marked %s applied for plugin %s in %s, without running its script\n", *version, *name, table)
+	_, _ = fmt.Fprintf(stdout, "marked %s applied for plugin %s in %s, without running its script\n", *version, *name, marked)
 	return 0
 }

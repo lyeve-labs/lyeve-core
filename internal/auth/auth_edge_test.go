@@ -86,18 +86,35 @@ func TestRefresh_ConcurrentRotate(t *testing.T) {
 	ctx := context.Background()
 	issued, err := s.Issue(ctx, "u1", 5*time.Minute)
 	require.NoError(t, err)
-	start, ch := make(chan struct{}), make(chan error, 2)
+	type outcome struct {
+		token string
+		err   error
+	}
+	start, ch := make(chan struct{}), make(chan outcome, 2)
 	for range 2 {
-		go func() { <-start; _, err := s.Rotate(ctx, issued.RefreshToken, 5*time.Minute); ch <- err }()
+		go func() {
+			<-start
+			res, err := s.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+			if err != nil {
+				ch <- outcome{err: err}
+				return
+			}
+			ch <- outcome{token: res.RefreshToken}
+		}()
 	}
 	close(start)
-	ok := 0
+	// The second trade of one token gets the successor the first issued, so
+	// both may succeed, but only with one successor between them.
+	successors := map[string]bool{}
 	for range 2 {
-		if <-ch == nil {
-			ok++
+		o := <-ch
+		if o.err != nil {
+			assert.ErrorIs(t, o.err, auth.ErrTokenRotated)
+			continue
 		}
+		successors[o.token] = true
 	}
-	assert.Equal(t, 1, ok)
+	assert.Len(t, successors, 1)
 }
 func TestRefresh_ReuseAfterRotation(t *testing.T) {
 	s := auth.NewRefreshTokenStore(auth.NewMemoryBackend(), "cms-edge")

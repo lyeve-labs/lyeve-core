@@ -3,6 +3,7 @@ package compliance
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"slices"
 	"strconv"
 	"strings"
@@ -124,6 +125,10 @@ func canonicalAddress(address string) string {
 // the hex digits but not of the letter they spell, so text that escapes a
 // capital is not found.
 //
+// The address as given follows last with its at sign percent-encoded and
+// written as an HTML character reference, as a URL or a form body and an HTML
+// page store it: ann%40x.example and ann&#64;x.example.
+//
 // How many forms there are depends on the address, so build one condition for
 // each. Each form still matches inside a longer address, and on MySQL an
 // accented spelling, so confirm every row with NamesAddress.
@@ -159,6 +164,10 @@ func AddressTextForms(address string) []string {
 			add(once)
 			add(asciiEscaped(once))
 		}
+	}
+	if at := strings.LastIndexByte(address, '@'); at >= 0 {
+		add(address[:at] + "%40" + address[at+1:])
+		add(address[:at] + "&#64;" + address[at+1:])
 	}
 	return forms
 }
@@ -249,10 +258,17 @@ func valueNames(v any, address string, depth int) bool {
 // refuses a longer address, and an address escaped that way is still found.
 // A string that does not decode, being truncated, holding a raw quote or
 // nested too deep, is read with a JSON escape beside the match counted as a
-// boundary.
+// boundary. A string holding a percent-encoded byte or an HTML character
+// reference is also read with those decoded, so bob%40x.example and
+// bob&#64;x.example name bob@x.example.
 func stringNames(text, address string, depth int) bool {
 	if holdsAddress(text, address, false) {
 		return true
+	}
+	if depth < maxPayloadDepth {
+		if decoded := html.UnescapeString(percentDecoded(text)); decoded != text && stringNames(decoded, address, depth+1) {
+			return true
+		}
 	}
 	if !strings.Contains(text, `\`) && !strings.Contains(foldedText(text), strings.ToLower(address)) {
 		return false
@@ -311,8 +327,10 @@ func foldedText(text string) string {
 // Lao, Khmer and Myanmar scripts are boundaries too: those scripts are
 // written without spaces, so such text often runs into an address, and a
 // local part ending in one of them just before the subject's is far rarer.
-// A percent-encoded byte ("%20", "%3C") beside the match is a boundary,
-// because a URL or form body encodes the space or bracket around an address.
+// A percent-encoded byte or an HTML character reference before the match is
+// read decoded, so "%20" and "%3C", the space and bracket a URL or form body
+// encodes around an address, are boundaries, and "%2B", "%2D", "%5F" and
+// "&#43;" continue the local part.
 // A backslash or a percent sign after the match never continues it, so only
 // the left side needs those rules.
 
@@ -339,24 +357,73 @@ func continuesRight(r rune) bool { return wordRune(r) || r == '-' }
 // beyond the dot, because an address never starts or ends with one and a
 // sentence often does. Text is lower case here.
 func extendsBefore(text string, escapes bool) bool {
-	if endsWithPercentByte(text) || (escapes && endsWithJSONEscape(text)) {
+	if escapes && endsWithJSONEscape(text) {
 		return false
 	}
-	r, size := utf8.DecodeLastRuneInString(text)
+	r, size := lastRuneDecoded(text)
 	if size == 0 {
 		return false
 	}
 	if r == '.' {
-		r, size = utf8.DecodeLastRuneInString(text[:len(text)-size])
+		r, size = lastRuneDecoded(text[:len(text)-size])
 		return size > 0 && continuesLeft(r)
 	}
 	return continuesLeft(r)
 }
 
-// endsWithPercentByte reports whether text ends in "%" and two hex digits.
-func endsWithPercentByte(text string) bool {
+// lastRuneDecoded returns the last character of text and how many bytes of
+// text spell it. An HTML character reference at the end is decoded, so
+// "&#43;" reads as "+". A run of percent-encoded bytes at the end is decoded
+// too, so "%2b" reads as "+" and "%c3%a9" as "é". Bytes that do not decode
+// to a character read as utf8.RuneError, which continues nothing.
+func lastRuneDecoded(text string) (rune, int) {
+	if amp := strings.LastIndexByte(text, '&'); amp >= 0 && strings.HasSuffix(text, ";") && len(text)-amp <= 10 {
+		ref := text[amp:]
+		if decoded := html.UnescapeString(ref); decoded != ref {
+			if r, size := utf8.DecodeRuneInString(decoded); size == len(decoded) {
+				return r, len(ref)
+			}
+		}
+	}
+	var raw []byte
 	n := len(text)
-	return n >= 3 && text[n-3] == '%' && isLowerHex(text[n-2:])
+	for len(raw) < utf8.UTFMax && n >= 3 && text[n-3] == '%' && isLowerHex(text[n-2:n]) {
+		b, _ := strconv.ParseUint(text[n-2:n], 16, 8)
+		raw = append([]byte{byte(b)}, raw...)
+		n -= 3
+		if raw[0] < utf8.RuneSelf || utf8.RuneStart(raw[0]) {
+			break
+		}
+	}
+	if len(raw) == 0 {
+		return utf8.DecodeLastRuneInString(text)
+	}
+	r, size := utf8.DecodeRune(raw)
+	if size != len(raw) {
+		r = utf8.RuneError
+	}
+	return r, len(text) - n
+}
+
+// percentDecoded is text with every "%" followed by two hex digits replaced
+// by the byte it encodes. A "%" that starts no such sequence is kept, so a
+// stray percent sign does not stop the rest from decoding, and a "+" is kept
+// as a plus.
+func percentDecoded(text string) string {
+	if !strings.Contains(text, "%") {
+		return text
+	}
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		if text[i] == '%' && i+2 < len(text) && isLowerHex(strings.ToLower(text[i+1:i+3])) {
+			v, _ := strconv.ParseUint(text[i+1:i+3], 16, 8)
+			b.WriteByte(byte(v))
+			i += 2
+			continue
+		}
+		b.WriteByte(text[i])
+	}
+	return b.String()
 }
 
 // endsWithJSONEscape reports whether text ends in a JSON escape: "\u" and

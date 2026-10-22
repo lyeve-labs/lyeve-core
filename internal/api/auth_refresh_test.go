@@ -81,9 +81,10 @@ func TestRefresh_RetryAfterFailedAnswerRenews(t *testing.T) {
 	assert.NotEmpty(t, next, "the retry answered no refresh token")
 }
 
-// Two console replicas can each trade one token a moment apart. The second
-// trade is answered with a retryable status, and the successor the first one
-// received still renews.
+// Two console replicas can each trade one token a moment apart, and a client
+// whose answer was lost retries the token it sent. The second trade gets the
+// successor the first one issued, so a lost answer costs no session. A third
+// is answered with a retryable status, and the successor still renews.
 func TestRefresh_SecondTradeOfOneTokenIsRetryable(t *testing.T) {
 	f := newRefreshFixture(t)
 
@@ -91,8 +92,12 @@ func TestRefresh_SecondTradeOfOneTokenIsRetryable(t *testing.T) {
 	require.Equal(t, http.StatusOK, code, body)
 	require.NotEmpty(t, successor)
 
+	code, body, again := f.refresh(t, f.token)
+	require.Equal(t, http.StatusOK, code, "the retry of a lost answer: %s", body)
+	assert.Equal(t, successor, again, "the retry must carry the successor the lost answer carried")
+
 	code, body, _ = f.refresh(t, f.token)
-	assert.Equal(t, http.StatusConflict, code, "second trade of one token: %s", body)
+	assert.Equal(t, http.StatusConflict, code, "third trade of one token: %s", body)
 	assert.NotContains(t, body, "AUTH_TOKEN_REUSE")
 
 	code, body, _ = f.refresh(t, successor)

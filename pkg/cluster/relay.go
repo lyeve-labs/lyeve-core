@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
@@ -130,6 +132,7 @@ func (r *Relay) call(ctx context.Context, h Handler, m Message) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			r.logger.ErrorContext(ctx, "cluster bus handler panicked", "topic", m.Topic, "panic", rec)
+			panicreport.Report(panicreport.Panic{Goroutine: "cluster-relay/" + m.Topic, Value: rec, Stack: debug.Stack()})
 		}
 	}()
 	h(hctx, m)

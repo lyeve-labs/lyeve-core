@@ -57,6 +57,24 @@ func TestGoroutineTracker_PanicRecovery(t *testing.T) {
 	_ = recovered.Load() // unused but verifies the pattern
 }
 
+// The tracker recovers a tracked goroutine's panic itself, ahead of GoSafe,
+// so it has to report the panic too.
+func TestGoroutineTracker_ReportsTheRecoveredPanic(t *testing.T) {
+	reports := catchPanicReports(t, OwnerEngine+"/tracked-report")
+	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: 5 * time.Second, MaxGoroutines: 10000})
+
+	tracker.Go("tracked-report", func(ctx context.Context) { panic("tracked boom") })
+
+	select {
+	case got := <-reports:
+		if got.Value != "tracked boom" {
+			t.Fatalf("report = %+v, want the panic value", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the tracker recovered the panic but never reported it")
+	}
+}
+
 func TestGoroutineTracker_Shutdown(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{MaxGoroutines: 10000})
 

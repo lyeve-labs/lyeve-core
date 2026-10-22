@@ -448,8 +448,8 @@ func TestLogin_EnumerationResistance_Unit(t *testing.T) {
 
 // Unknown-email and known-email+wrong-password paths must be
 // indistinguishable in timing (both run bcrypt). Runs each path many
-// times, computes the median, and asserts the difference is within
-// tolerance.
+// times, computes the median CPU time, and asserts the difference is within
+// tolerance. CPU time holds on a busy host, where wall-clock time stretches.
 func TestLogin_EnumerationTiming_Unit(t *testing.T) {
 	t.Parallel()
 
@@ -477,9 +477,7 @@ func TestLogin_EnumerationTiming_Unit(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			start := time.Now()
-			h.Login(rr, req)
-			durs[i] = time.Since(start)
+			durs[i] = signInCost(t, func() { h.Login(rr, req) })
 
 			if rr.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", email, rr.Code, http.StatusUnauthorized)
@@ -553,9 +551,18 @@ func TestLogin_MFAFailClosed_Unit(t *testing.T) {
 
 	h.Login(rr, req)
 
-	// Must fail closed: a store error never issues a session.
-	if rr.Code != http.StatusUnauthorized {
-		t.Errorf("status = %d, want %d (Unauthorized - MFA store error must fail closed)", rr.Code, http.StatusUnauthorized)
+	// Must fail closed: a store error never issues a session. It is an
+	// outage, not a wrong password, so it answers 503 for the client to retry.
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d: an unreadable MFA store is an outage", rr.Code, http.StatusServiceUnavailable)
+	}
+	if !strings.Contains(rr.Body.String(), "AUTH_MFA_STORE_ERROR") {
+		t.Errorf("body = %q, want the MFA store error code", rr.Body.String())
+	}
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == security.SessionCookieNameInsecure && c.Value != "" {
+			t.Error("a session cookie was set while the MFA store could not be read")
+		}
 	}
 }
 
@@ -1452,9 +1459,7 @@ func TestToken_EnumerationTiming_Unit(t *testing.T) {
 			req.Header.Set("Content-Type", "application/json")
 			rr := httptest.NewRecorder()
 
-			start := time.Now()
-			h.Token(rr, req)
-			durs[i] = time.Since(start)
+			durs[i] = signInCost(t, func() { h.Token(rr, req) })
 
 			if rr.Code != http.StatusUnauthorized {
 				t.Errorf("%s status = %d, want %d", email, rr.Code, http.StatusUnauthorized)
@@ -1679,5 +1684,81 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 	}
 	if rr := refresh(legacy.RefreshToken); rr.Code != http.StatusUnauthorized {
 		t.Fatalf("family with no version: status = %d, want 401", rr.Code)
+	}
+}
+
+// TOKEN: second factor
+
+// tokenRequest posts the right password for user@test.com to the content
+// API's token route.
+func tokenRequest(t *testing.T, h *AuthHandler) *httptest.ResponseRecorder {
+	t.Helper()
+	body := makeLoginBody("user@test.com", "correct-horse-battery-staple")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Token(rr, req)
+	return rr
+}
+
+func tokenTestUsers(t *testing.T) *fakeUserStore {
+	t.Helper()
+	hash, _ := auth.HashPassword("bcrypt", "correct-horse-battery-staple")
+	return &fakeUserStore{
+		byEmail: map[string]*domain.User{
+			"user@test.com": {ID: uuid.New(), Email: "user@test.com", PasswordHash: hash},
+		},
+	}
+}
+
+func TestToken_MFAEnrolledAccountGetsNoSessionToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &mfaEnrolledStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	resp := decodeAuthResponse(t, rr)
+	if _, ok := resp["token"]; ok {
+		t.Fatalf("a password alone must not become a session for an enrolled account: %v", resp)
+	}
+	if mfa, _ := resp["mfa_required"].(bool); !mfa {
+		t.Fatalf("expected mfa_required, got status %d and %v", rr.Code, resp)
+	}
+	challenge, _ := resp["challenge_token"].(string)
+	claims, err := auth.Parse("secret", challenge)
+	if err != nil || !claims.MFAPending {
+		t.Fatalf("challenge token does not parse as a pending challenge: %v", err)
+	}
+}
+
+func TestToken_MFAStoreErrorRefusesTheToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &failingMFAStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d: an unreadable factor store must fail closed as an outage", rr.Code, http.StatusServiceUnavailable)
+	}
+	if _, ok := decodeAuthResponse(t, rr)["token"]; ok {
+		t.Fatal("a token was issued while the factor store could not be read")
+	}
+}
+
+func TestToken_AccountWithoutAFactorStillGetsAToken(t *testing.T) {
+	t.Parallel()
+
+	h := NewAuthHandler(tokenTestUsers(t), &fakeMFAStore{}, nil, "secret", 3600, false)
+	rr := tokenRequest(t, h)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%q", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := decodeAuthResponse(t, rr)
+	if tok, _ := resp["token"].(string); tok == "" {
+		t.Fatalf("no token for an account with no factor enrolled: %v", resp)
+	}
+	if _, ok := resp["mfa_required"]; ok {
+		t.Fatalf("an account with no factor was challenged: %v", resp)
 	}
 }

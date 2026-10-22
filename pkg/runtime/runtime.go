@@ -33,6 +33,7 @@ import (
 	poolpkg "github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/internal/provider"
 	"github.com/lyeve-labs/lyeve-core/internal/storage"
 	"github.com/lyeve-labs/lyeve-core/internal/tracing"
@@ -643,6 +644,9 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}); ok {
 		setter.WithFlowRegistry(activator.FlowRegistry())
 	}
+	// Every panic the engine recovers goes to the running plugins that hold
+	// the panic reporter role, from the first request on.
+	panicreport.Set(reportPanicsTo(activator))
 	// The host answers a tenant's region from whichever running plugin holds
 	// the role, asking the activator on each call.
 	if setter, ok := hostBase.(interface {
@@ -877,6 +881,12 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// admin cache flush from wiping all refresh tokens.
 	if refreshBackend != nil {
 		refreshBackend = auth.NewFlushProtectedBackend(refreshBackend)
+	}
+	// Replicas that share the families need compare-and-set to let one of
+	// them win a rotation. Without it two replicas could both rotate one
+	// token, so the engine refuses to start rather than run that way.
+	if err := auth.CheckSharedBackend(refreshBackend, refreshBackendDistributed); err != nil {
+		return fmt.Errorf("refresh token store: %w, and replicas share it: register a cache backend that supports compare-and-set", err)
 	}
 	// Lockout and brute-force state
 	// MFA lockouts and login blocks are counted in memory by the plugins that

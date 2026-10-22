@@ -437,9 +437,8 @@ func TestPasswordLogin_AddressHeldInAnotherTenantAnswersAsAFreeOne(t *testing.T)
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
-				start := time.Now()
-				door(rec, req)
-				return rec.Code, rec.Body.String(), time.Since(start)
+				cost := signInCost(t, func() { door(rec, req) })
+				return rec.Code, rec.Body.String(), cost
 			}
 			const iterations = 10
 			times := map[string][]time.Duration{}
@@ -491,9 +490,8 @@ func TestPasswordLogin_PasswordlessAccountAnswersAsAFreeOne(t *testing.T) {
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
 				rec := httptest.NewRecorder()
-				start := time.Now()
-				door(rec, req)
-				return rec.Code, rec.Body.String(), time.Since(start)
+				cost := signInCost(t, func() { door(rec, req) })
+				return rec.Code, rec.Body.String(), cost
 			}
 			times := map[string][]time.Duration{}
 			for i := 0; i < h.MaxFailedAttempts-1; i++ {

@@ -1075,6 +1075,25 @@ func TestEngineOwnedRoutes_CoverTheAdminRouter(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// Every route on that list is one the engine serves, with every optional
+// store wired. A listed route the engine never registers turns a plugin's handler for it into a boot warning that
+// calls the handler dead, and the grant registry refuses a grant on a route
+// only the plugin answers.
+func TestEngineOwnedRoutes_AreAllServedByTheAdminRouter(t *testing.T) {
+	pool := &fakeDB{engine: "postgres"}
+	router, err := NewAdminRouter(pool, testConfig(), WithLifetime(testLifetime(t)), WithAdminTokenStore(newFakeAdminTokens(pool)))
+	require.NoError(t, err)
+	served := map[string]bool{}
+	err = chi.Walk(router.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		served[method+" "+normalizeRoutePattern(route)] = true
+		return nil
+	})
+	require.NoError(t, err)
+	for route := range engineOwnedRoutes(adminPathPrefix) {
+		assert.True(t, served[route], "engineOwnedRoutes lists %s, which the admin router does not serve", route)
+	}
+}
+
 func TestAdminToken_UnroutedRequestIs404(t *testing.T) {
 	rg := newTokenRig(t)
 	_, session := rg.user("admin")

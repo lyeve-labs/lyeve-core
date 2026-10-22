@@ -3,6 +3,7 @@ package compliance
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -34,6 +35,18 @@ type HoldRef struct {
 // slice with a nil error means the subject is free to erase.
 type HoldChecker interface {
 	SubjectHolds(ctx context.Context, identifier string) ([]HoldRef, error)
+}
+
+// TenantHoldChecker is the optional interface a HoldChecker implements to
+// answer which active legal holds in the context tenant cover the data of a
+// resource type beyond one named subject: a hold on the whole tenant, on the
+// resource type, on an action or on a time window. SubjectHolds answers only
+// for the identifier it is given, so a caller that deletes a type's data in
+// bulk asks this as well. It is optional, so a checker written before it
+// keeps working, and CheckTenantHolds reads such a checker as holding
+// nothing.
+type TenantHoldChecker interface {
+	TenantHolds(ctx context.Context, resourceType string) ([]HoldRef, error)
 }
 
 // HoldCheckerProvider is the optional interface a plugin implements to supply
@@ -75,6 +88,24 @@ func ResetHoldChecker() {
 	holdMu.Lock()
 	defer holdMu.Unlock()
 	holdChecker = nil
+}
+
+// CheckTenantHolds asks the registered checker which active holds in the
+// context tenant cover resourceType beyond one named subject. With no checker
+// registered, or one that does not implement TenantHoldChecker, nothing is
+// held. A checker that cannot answer returns ErrHoldCheckUnavailable whatever
+// LYEVE_GDPR_HOLD_CHECK says, because that setting keeps erasure requests
+// flowing and a bulk delete is not one.
+func CheckTenantHolds(ctx context.Context, resourceType string) ([]HoldRef, error) {
+	checker, ok := RegisteredHoldChecker().(TenantHoldChecker)
+	if !ok {
+		return nil, nil
+	}
+	holds, err := checker.TenantHolds(ctx, resourceType)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrHoldCheckUnavailable, err)
+	}
+	return holds, nil
 }
 
 // proceedOnHoldCheckFailure reports whether erasure should run when a

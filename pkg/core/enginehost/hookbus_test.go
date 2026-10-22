@@ -202,3 +202,25 @@ func TestHookBusAdapter_Publish_ForwardsRecordIDAndSource(t *testing.T) {
 	assert.Equal(t, "new", got.Data["title"])
 	assert.Equal(t, "old", got.OldData["title"])
 }
+
+// A subscriber reads the actor from the event it is handed, because it often
+// runs after the request is gone. The adapter rebuilds the event on both
+// sides of the registry, so the actor has to survive both copies.
+func TestHookBusAdapter_Publish_ForwardsActorID(t *testing.T) {
+	reg := hooks.NewRegistry()
+	adapter := &hookBusAdapter{registry: reg}
+
+	var got core.Event
+	sub := adapter.Subscribe("*", core.AfterCreate, func(ctx context.Context, e core.Event) error {
+		got = e
+		return nil
+	})
+	defer sub.Unsubscribe()
+
+	ctx := core.WithTenantID(context.Background(), "tenant-actor")
+	ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{UserID: "user-7"})
+	require.NoError(t, adapter.Publish(ctx, core.ContentEvent(ctx, "graphql", core.AfterCreate, "articles", "rec-2", nil, map[string]any{"title": "x"})))
+
+	assert.Equal(t, "user-7", got.ActorID)
+	assert.Equal(t, core.ActorKindUser, got.ActorKind)
+}

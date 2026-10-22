@@ -4,6 +4,7 @@ package hotreload
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -492,7 +493,7 @@ func TestWatchHotReload_CanceledContext(t *testing.T) {
 		Root:       root,
 		PluginsDir: "lyeve-plugin-*/plugin/",
 	})
-	if err != context.Canceled {
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got: %v", err)
 	}
 }

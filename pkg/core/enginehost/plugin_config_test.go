@@ -166,3 +166,20 @@ func TestPluginEnvDuration_UnsetIsZero(t *testing.T) {
 	assert.Zero(t, pluginEnvDuration("example_lock_ttl"))
 	assert.Zero(t, pluginEnvDuration("example_data_ttl"))
 }
+
+// A key with no field of its own resolves from the environment after the
+// resolver reads '.', '-' and ' ' as '_'. A plugin that spells a credential
+// that way must get nothing, or Config serves the signing secret and the
+// database address to every plugin, holder of CapConfigSecret or not.
+func TestConfig_CredentialSpelledWithSeparatorsStaysRedacted(t *testing.T) {
+	c := &configAdapter{cfg: &config.Config{}}
+	t.Setenv("JWT_SECRET", "signing-secret")
+	t.Setenv("DATABASE_URL", "postgres://user:pass@db/app")
+
+	for _, key := range []string{"jwt.secret", "jwt-secret", "database.url", " database-url"} {
+		assert.Empty(t, c.String(key), "Config.String(%q) served a credential", key)
+		assert.Empty(t, c.Strings(key), "Config.Strings(%q) served a credential", key)
+	}
+	assert.Empty(t, core.NewScopedHost(&engineHost{cfg: &config.Config{}}, "test", 0).Config().String("jwt.secret"),
+		"a plugin holding no capability read the signing secret through Config")
+}

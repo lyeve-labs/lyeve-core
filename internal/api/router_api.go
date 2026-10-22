@@ -42,6 +42,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 		apimw.ClientAddress(o.trustedProxies, cfg.ConsoleKeys()...))
 	applyCustomRoutes(r, o.customRoutes)
 	r.Use(middleware.Recoverer)
+	r.Use(reportPanics)
 	r.Use(apimw.AllowedHosts(cfg.AllowedHosts))
 	r.Use(apimw.HTTPSRedirect(cfg.SecureCookie))
 	// Content-Type enforcement: rejects mutation requests (POST/PUT/PATCH)
@@ -115,12 +116,6 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	authHandler := NewAuthHandler(userStore, o.mfaStore, pool, cfg.JWTSecret, cfg.JWTExpirySecs, secureCook)
 	authHandler.WithSharedLockoutBackend(o.lockoutBackend)
 	authHandler.WithMemberships(o.memberships)
-	authHandler.WithPasswordPolicy(auth.PasswordPolicy{
-		MinLength:         cfg.PasswordMinLength,
-		RequireUpperLower: cfg.PasswordRequireComplexity,
-		RequireDigit:      cfg.PasswordRequireComplexity,
-		CheckCommon:       cfg.PasswordCheckCommon,
-	})
 	// Wire per-tenant DEK encryption. Prefer a KeyStore injected by the runtime
 	// (KEK resolved through the secret-custody chain). Otherwise fall back to
 	// building one from ENCRYPTION_KEY.
