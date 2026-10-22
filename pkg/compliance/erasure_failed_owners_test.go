@@ -93,3 +93,67 @@ func TestRunSubjectErasure_NamesEveryOwnerThatFailedOrNeverRan(t *testing.T) {
 		assert.Equal(t, []string{"forms"}, res.Failed)
 	})
 }
+
+// signingOutAccount is the account eraser, recording its sign-out and its
+// erasure in order.
+type signingOutAccount struct{ order *[]string }
+
+func (a *signingOutAccount) ErasesAccount() {}
+
+func (a *signingOutAccount) EraserName() string { return "account" }
+
+func (a *signingOutAccount) EndSessions(context.Context, string) error {
+	*a.order = append(*a.order, "sign-out")
+	return nil
+}
+
+func (a *signingOutAccount) EraseSubject(context.Context, string) (int64, error) {
+	*a.order = append(*a.order, "account")
+	return 1, nil
+}
+
+// orderedEraser records its run in order, and fails with err when it is set.
+type orderedEraser struct {
+	name  string
+	err   error
+	order *[]string
+}
+
+func (o *orderedEraser) EraserName() string { return o.name }
+
+func (o *orderedEraser) EraseSubject(context.Context, string) (int64, error) {
+	*o.order = append(*o.order, o.name)
+	return 1, o.err
+}
+
+// The account eraser rewrites the address the other owners resolve the
+// subject by. Run while one of them failed, it left the next run nothing to
+// find. The subject is signed out first, and the account is erased only once
+// every other eraser has succeeded.
+func TestRunSubjectErasure_SignsOutFirstAndErasesTheAccountLast(t *testing.T) {
+	t.Run("every eraser succeeds", func(t *testing.T) {
+		var order []string
+		reg := &SubjectEraserRegistry{}
+		reg.Register(&signingOutAccount{order: &order})
+		reg.Register(&orderedEraser{name: "email", order: &order})
+
+		res, err := runSubjectErasureOn(context.Background(), reg, "someone@example.test")
+		require.NoError(t, err)
+		assert.Equal(t, []string{"sign-out", "email", "account"}, order)
+		assert.Empty(t, res.Failed)
+	})
+
+	t.Run("another eraser fails", func(t *testing.T) {
+		var order []string
+		reg := &SubjectEraserRegistry{}
+		reg.Register(&signingOutAccount{order: &order})
+		reg.Register(&orderedEraser{name: "email", err: errors.New("down"), order: &order})
+		reg.Register(&orderedEraser{name: "media", order: &order})
+
+		res, err := runSubjectErasureOn(context.Background(), reg, "someone@example.test")
+		require.EqualError(t, err, "down")
+		assert.Equal(t, []string{"sign-out", "email", "media"}, order,
+			"the subject is signed out and the others still run, and the account is not erased")
+		assert.Equal(t, []string{"email", "account"}, res.Failed, "the account is named as not run")
+	})
+}
