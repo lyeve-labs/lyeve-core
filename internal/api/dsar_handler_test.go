@@ -544,3 +544,37 @@ func TestDSARHandler_Erase_ClientDisconnectDoesNotStopIt(t *testing.T) {
 		t.Error("the log carries the subject identifier")
 	}
 }
+
+// unresolvableAccount cannot read the subject's accounts.
+type unresolvableAccount struct{}
+
+func (unresolvableAccount) EraserName() string { return "account" }
+func (unresolvableAccount) SubjectAccounts(context.Context, string) ([]compliance.SubjectAccount, error) {
+	return nil, errors.New("connection refused: 127.0.0.1:5432")
+}
+func (unresolvableAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
+
+// An erasure whose subject addresses cannot be read erases nothing. It
+// answered 207 with every part listed as failed, which reads as a partial
+// erasure. It is the retryable 503 a failed sign-out answers.
+func TestDSARHandler_Erase_UnresolvedAddressesIsRetryable(t *testing.T) {
+	compliance.RegisterSubjectEraser(unresolvableAccount{})
+	compliance.RegisterSubjectEraser(&testEraser{affected: 3})
+	defer compliance.ResetSubjectErasers()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "user@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Erase(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "not attempted") {
+		t.Errorf("the answer does not say the erasure was not attempted: %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") {
+		t.Errorf("raw driver error text leaked into response: %s", body)
+	}
+}
