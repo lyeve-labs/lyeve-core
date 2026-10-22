@@ -31,6 +31,7 @@ func newSysUserEraser(host core.Host) *sysUserEraser {
 
 var _ compliance.SubjectEraser = (*sysUserEraser)(nil)
 var _ compliance.AccountEraser = (*sysUserEraser)(nil)
+var _ compliance.SessionEnder = (*sysUserEraser)(nil)
 
 // ErasesAccount puts this eraser at the end of the fan-out.
 //
@@ -141,7 +142,6 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	if err != nil {
 		return 0, err
 	}
-	revoker, canRevoke := e.host.(core.RefreshTokenRevoker)
 
 	// token_version is bumped so the tokenVersionCheck middleware rejects every
 	// access token issued before the erasure, without waiting for natural
@@ -167,6 +167,31 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	     provider_seen_at = NULL
 	 WHERE anonymized = %s AND id IN `, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, boolFalse)
 
+	n, err := execByIDs(ctx, q, update, ids)
+	if err != nil {
+		return n, err
+	}
+
+	// The accounts erased can be any tenant's, so the lines below are about
+	// the install and go under no tenant. Stamped with the request's tenant,
+	// they would tell its admins how many accounts the address holds
+	// elsewhere.
+	logCtx := logging.WithoutTenant(ctx)
+	e.revokeRefreshTokens(ctx, ids, identifier)
+
+	if n > 0 {
+		slog.InfoContext(logCtx, "sys_users erased", "subject_ref", compliance.SubjectRef(identifier), "rows", n)
+	}
+	return n, nil
+}
+
+// eraseIDBatch is how many ids one UPDATE names, well under the 2100
+// parameters SQL Server accepts.
+const eraseIDBatch = 500
+
+// execByIDs runs update, which ends in "id IN ", once per batch of ids and
+// returns the rows it changed.
+func execByIDs(ctx context.Context, q core.Querier, update string, ids []uuid.UUID) (int64, error) {
 	var n int64
 	for rest := ids; len(rest) > 0; {
 		batch := rest[:min(len(rest), eraseIDBatch)]
@@ -183,33 +208,58 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 		}
 		n += tag.RowsAffected
 	}
-
-	// The accounts erased can be any tenant's, so the lines below are about
-	// the install and go under no tenant. Stamped with the request's tenant,
-	// they would tell its admins how many accounts the address holds
-	// elsewhere.
-	logCtx := logging.WithoutTenant(ctx)
-
-	// Best-effort: a revoked refresh token cannot mint a fresh access token.
-	// Failures here do not undo the erasure, so they are logged, not returned.
-	if canRevoke {
-		for _, id := range ids {
-			if err := revoker.RevokeAllRefreshTokens(ctx, id.String()); err != nil {
-				slog.WarnContext(logCtx, "sys_users erasure: refresh token revocation failed",
-					"subject_ref", compliance.SubjectRef(identifier), "err", err)
-			}
-		}
-	}
-
-	if n > 0 {
-		slog.InfoContext(logCtx, "sys_users erased", "subject_ref", compliance.SubjectRef(identifier), "rows", n)
-	}
 	return n, nil
 }
 
-// eraseIDBatch is how many ids one UPDATE names, well under the 2100
-// parameters SQL Server accepts.
-const eraseIDBatch = 500
+// revokeRefreshTokens revokes the refresh tokens of every account in ids.
+// Best-effort: a revoked refresh token cannot mint a fresh access token, and
+// a failure here undoes nothing, so it is logged, not returned.
+func (e *sysUserEraser) revokeRefreshTokens(ctx context.Context, ids []uuid.UUID, identifier string) {
+	revoker, ok := e.host.(core.RefreshTokenRevoker)
+	if !ok {
+		return
+	}
+	logCtx := logging.WithoutTenant(ctx)
+	for _, id := range ids {
+		if err := revoker.RevokeAllRefreshTokens(ctx, id.String()); err != nil {
+			slog.WarnContext(logCtx, "sys_users erasure: refresh token revocation failed",
+				"subject_ref", compliance.SubjectRef(identifier), "err", err)
+		}
+	}
+}
+
+// EndSessions signs the subject out of every unerased account that belongs
+// to identifier, and erases nothing. token_version is bumped so every access
+// token issued before is rejected, and the refresh tokens are revoked. The
+// erasure calls it before any eraser runs. The account keeps its address
+// until EraseSubject runs, which is once every other eraser has succeeded.
+func (e *sysUserEraser) EndSessions(ctx context.Context, identifier string) error {
+	if strings.TrimSpace(identifier) == "" {
+		return nil
+	}
+	q := e.host.Querier(ctx)
+	utcFn, idCast, boolFalse := "NOW()", "id::text", "false"
+	switch e.host.Dialect() {
+	case "mysql":
+		utcFn, idCast, boolFalse = "NOW(6)", "id", "0"
+	case "mssql":
+		utcFn, idCast, boolFalse = "SYSUTCDATETIME()", "CAST(id AS NVARCHAR(36))", "0"
+	}
+	ids, err := e.resolveSubjectIDs(ctx, q, idCast, boolFalse, identifier)
+	if err != nil {
+		return err
+	}
+	update := fmt.Sprintf(`UPDATE sys_users
+	 SET token_version = token_version + 1,
+	     sessions_revoked_at = %s,
+	     updated_at = %s
+	 WHERE anonymized = %s AND id IN `, utcFn, utcFn, boolFalse)
+	if _, err := execByIDs(ctx, q, update, ids); err != nil {
+		return fmt.Errorf("sys_users sign-out: %w", err)
+	}
+	e.revokeRefreshTokens(ctx, ids, identifier)
+	return nil
+}
 
 // resolveSubjectIDs returns the ids of the unerased sys_users rows that belong
 // to identifier: an account whose email or provider_email is the address, or
