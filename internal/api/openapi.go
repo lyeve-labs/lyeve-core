@@ -373,8 +373,27 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	paths["/api/admin/gdpr/export"] = openAPIPath{
 		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422}}, super...),
 	}
+	// One body for both answers: complete says whether the subject is fully
+	// erased, and a partial erasure answers 207 so no caller reads it as done.
+	eraseBody := map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+		"type":     "object",
+		"required": []string{"identifier", "total_rows", "complete"},
+		"properties": map[string]any{
+			"identifier": map[string]any{"type": "string"},
+			"total_rows": map[string]any{"type": "integer", "description": "Rows erased or anonymized"},
+			"complete":   map[string]any{"type": "boolean", "description": "True only when every part erased and no legal hold kept any"},
+			"failed":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The owners that failed or did not run"},
+			"errors":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What is unfinished, that the account was not erased, and that repeating the request finishes it"},
+			"holds":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "Legal holds that kept data"},
+		},
+	}}}
 	paths["/api/admin/gdpr/erase"] = openAPIPath{
-		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422}}, super...),
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{
+			"200": openAPIResponse{Description: "Erased. complete is false when a legal hold kept data", Content: eraseBody},
+			"207": openAPIResponse{Description: "Partly erased: the account was not erased, failed names the owners left, and repeating the request finishes it", Content: eraseBody},
+			"400": err400, "401": err401, "403": err403, "422": notASubject422,
+			"503": map[string]any{"description": "Legal hold status is unavailable, so nothing was erased"},
+		}}, super...),
 	}
 
 	// Admin API: probe endpoints
