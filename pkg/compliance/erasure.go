@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"slices"
@@ -334,9 +335,10 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 	}
 	ref := subjectRef(identifier)
 
-	// The subject is signed out before anything is erased, so a run that
-	// stops partway still ends their sessions. A failure here is logged: the
-	// account eraser signs the subject out again when it runs.
+	// The subject is signed out and locked before anything is erased, so a
+	// run that stops partway leaves an account nobody can sign in to. When
+	// the sign-out fails nothing runs: an erasure that went ahead would leave
+	// the subject signed in, writing rows behind the erasers that had run.
 	for _, eraser := range erasers {
 		ender, ok := eraser.(SessionEnder)
 		if !ok {
@@ -348,6 +350,10 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 				"subject_ref", ref,
 				"err", err,
 			)
+			for _, e := range erasers {
+				fail(e)
+			}
+			return res, fmt.Errorf("%w: %w", ErrSubjectNotSignedOut, err)
 		}
 	}
 
