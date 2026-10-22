@@ -163,9 +163,14 @@ func SubjectErasers() []SubjectEraser {
 
 // ErasureResult is what an erasure run did. Holds is non-empty when an active
 // legal hold stopped it, in which case Rows is zero and nothing was erased.
+// Failed names, by EraserName and in fan-out order, every eraser that returned
+// an error and every one that never ran because the context ended. The error
+// a run returns is only the first of them, and a caller that records or
+// retries an incomplete erasure needs all of them.
 type ErasureResult struct {
-	Rows  int64
-	Holds []HoldRef
+	Rows   int64
+	Holds  []HoldRef
+	Failed []string
 }
 
 // RunSubjectErasure fans out the given identifier to all registered erasers
@@ -181,7 +186,7 @@ func RunSubjectErasure(ctx context.Context, identifier string) (int64, error) {
 // then fans the identifier out to all registered erasers. Each eraser is
 // called independently. A failure in one does not stop the others. Errors are
 // logged and the first non-nil error is returned alongside the total rows
-// affected.
+// affected, and the result names every eraser that failed or never ran.
 //
 // A subject under an active hold is not erased and not an error: the run
 // returns zero rows and names the holds, so the requester is told their
@@ -198,8 +203,7 @@ func RunSubjectErasureWithHolds(ctx context.Context, identifier string) (Erasure
 		)
 		return ErasureResult{Holds: holds}, nil
 	}
-	rows, err := runSubjectErasureOn(ctx, globalEraserRegistry, identifier)
-	return ErasureResult{Rows: rows}, err
+	return runSubjectErasureOn(ctx, globalEraserRegistry, identifier)
 }
 
 // CheckSubjectHolds asks the registered checker which holds cover the
@@ -297,11 +301,15 @@ func EraserName(e SubjectEraser) string {
 	return strings.TrimPrefix(last, "lyeve-plugin-")
 }
 
-func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identifier string) (int64, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
+func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identifier string) (ErasureResult, error) {
 	erasers := reg.Erasers()
+	var res ErasureResult
+	if err := ctx.Err(); err != nil {
+		for _, e := range erasers {
+			res.Failed = append(res.Failed, EraserName(e))
+		}
+		return res, err
+	}
 	ref := subjectRef(identifier)
 	var total int64
 	var firstErr error
@@ -318,7 +326,11 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 				"rows", total,
 				"err", err,
 			)
-			return total, err
+			for _, e := range erasers[i:] {
+				res.Failed = append(res.Failed, EraserName(e))
+			}
+			res.Rows = total
+			return res, err
 		}
 		started := time.Now()
 		n, err := eraser.EraseSubject(ctx, identifier)
@@ -335,6 +347,7 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 			if firstErr == nil {
 				firstErr = err
 			}
+			res.Failed = append(res.Failed, EraserName(eraser))
 			continue
 		}
 		// A slow eraser is otherwise invisible: the fan-out is sequential, so
@@ -350,7 +363,8 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 			)
 		}
 	}
-	return total, firstErr
+	res.Rows = total
+	return res, firstErr
 }
 
 // SubjectEraserProvider is an optional interface a plugin can implement to
