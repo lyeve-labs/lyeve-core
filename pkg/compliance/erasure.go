@@ -1,8 +1,8 @@
 package compliance
 
 import (
+	"bytes"
 	"context"
-	"crypto/hkdf"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -296,11 +296,6 @@ func subjectRef(identifier string) string {
 // the fan-out logs, so the lines of one erasure run still correlate.
 func SubjectRef(identifier string) string { return subjectRef(identifier) }
 
-// subjectRefInfo names the subject reference key in its derivation, so the
-// install secret it comes from is never used raw and no other key derived
-// from that secret equals it.
-const subjectRefInfo = "lyeve subject reference key v1"
-
 // subjectRefKey keys subjectRef. It starts random for the process, so a
 // reference logged before the runtime installs the install's key, or by a
 // test or a tool that never does, matches nothing outside the process.
@@ -312,19 +307,16 @@ func init() {
 	subjectRefKey.Store(&key)
 }
 
-// SetSubjectRefSecret keys every later subject reference to secret, through a
-// key derived with HKDF-SHA-256. The runtime calls it once at boot with a
-// secret every replica shares and the install keeps across restarts, so the
-// references agree wherever and whenever a line is written. An empty secret is
-// refused, because a key derived from it is the same on every install.
-func SetSubjectRefSecret(secret []byte) error {
-	if len(secret) == 0 {
-		return fmt.Errorf("subject reference secret is empty")
+// SetSubjectRefKey keys every later subject reference to key. The runtime
+// calls it once at boot with a key derived from a secret every replica shares
+// and the install keeps across restarts, so the references agree wherever and
+// whenever a line is written. An empty key is refused, because it is the same
+// on every install.
+func SetSubjectRefKey(key []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("subject reference key is empty")
 	}
-	key, err := hkdf.Key(sha256.New, secret, nil, subjectRefInfo, sha256.Size)
-	if err != nil {
-		return fmt.Errorf("derive subject reference key: %w", err)
-	}
+	key = bytes.Clone(key)
 	subjectRefKey.Store(&key)
 	return nil
 }
