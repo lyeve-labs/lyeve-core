@@ -195,6 +195,13 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}); ok {
 		reg.SetMFAChallengeCompleter(authHandler)
 	}
+	// A plugin that asks for a password or an authenticator code asks this
+	// handler, so its wrong answers count against the token routes' lockouts.
+	if reg, ok := o.scalingHost.(interface {
+		SetStepUpChecker(core.StepUpChecker)
+	}); ok {
+		reg.SetStepUpChecker(authHandler)
+	}
 	// The document describes what this router mounts, so it is built from the
 	// same values the mounts are.
 	specOptions := openAPIOptions{

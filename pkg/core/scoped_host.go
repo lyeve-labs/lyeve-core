@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -477,6 +478,16 @@ func (h *ScopedHost) CompleteMFAChallenge(ctx context.Context, challengeToken st
 	return "", ErrCapDenied
 }
 
+// CheckStepUp forwards to inner if it implements StepUpChecker. It needs no
+// capability: it checks only the account the request's own session names,
+// and counts every wrong answer against that account's lockouts.
+func (h *ScopedHost) CheckStepUp(r *http.Request, factor, answer string) error {
+	if c, ok := h.inner.(StepUpChecker); ok {
+		return c.CheckStepUp(r, factor, answer)
+	}
+	return fmt.Errorf("step-up checks are not available on this host: %w", ErrServiceUnavailable)
+}
+
 // CachedFetch forwards to inner if it implements QueryCacheProvider.
 func (h *ScopedHost) CachedFetch(ctx context.Context, pluginName, tenantID, dialect, sql string, args []any, ttl time.Duration, dest any, fn CacheFetcher) (bool, error) {
 	if p, ok := h.inner.(QueryCacheProvider); ok {
@@ -877,6 +888,7 @@ var (
 	_ RecordRevisionStoreRegistrar     = (*ScopedHost)(nil)
 	_ SchemaEngineRegistrar            = (*ScopedHost)(nil)
 	_ EmailSenderRegistrar             = (*ScopedHost)(nil)
+	_ StepUpChecker                    = (*ScopedHost)(nil)
 	_ StorageSetter                    = (*ScopedHost)(nil)
 	_ UserProvisionerSetter            = (*ScopedHost)(nil)
 	_ MetricsGathererProvider          = (*ScopedHost)(nil)
