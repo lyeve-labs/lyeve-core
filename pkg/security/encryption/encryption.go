@@ -101,19 +101,26 @@ func deriveKEK(masterKey string) []byte {
 	return kek
 }
 
-// DeriveKey returns a 32-byte key for info, derived with HKDF-SHA-256 from the
-// KEK that NewKeyStore derives from masterKey. A key that leaves the process in
-// any form, even as a MAC over a value an attacker knows, then costs a guess at
-// masterKey the same PBKDF2 stretching a ciphertext does. Derived from the raw
-// master key, it would test a guess at a fraction of that cost. The KEK comes
-// from the same cache, so a process that builds a KeyStore derives it once.
-func DeriveKey(masterKey, info string) ([]byte, error) {
+// subjectRefInfo is an input to the subject reference key. Changing it rekeys
+// every reference, so lines logged before the change stop correlating with
+// lines logged after it.
+const subjectRefInfo = "lyeve subject reference key v1"
+
+// SubjectRefKey returns the 32-byte key that log lines name a data subject by,
+// derived with HKDF-SHA-256 from the KEK that NewKeyStore derives from
+// masterKey. A logged reference over an address an attacker knows tests a
+// guess at masterKey, so the guess has to cost the same PBKDF2 stretching a
+// ciphertext does. Derived from the raw master key, it would test a guess at a
+// fraction of that cost. The KEK comes from the same cache, so a process that
+// builds a KeyStore derives it once. The info string and the absent salt keep
+// this key apart from every tenant DEK, which salts with the tenant id.
+func SubjectRefKey(masterKey string) ([]byte, error) {
 	if masterKey == "" {
 		return nil, fmt.Errorf("encryption: master key must not be empty")
 	}
 	key := make([]byte, AESSize)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, deriveKEK(masterKey), nil, []byte(info)), key); err != nil {
-		return nil, fmt.Errorf("encryption: derive key: %w", err)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, deriveKEK(masterKey), nil, []byte(subjectRefInfo)), key); err != nil {
+		return nil, fmt.Errorf("encryption: derive subject reference key: %w", err)
 	}
 	return key, nil
 }
