@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -23,6 +24,14 @@ import (
 //
 // The routes that export everything, RunSubjectExport and
 // RunSubjectExportAcrossTenants, do not read sections at all.
+//
+// An export of chosen sections is the one a person runs for themselves, and
+// it holds less than the super admin's export of the same account. An address
+// can pass from one person to the next, so a row found through an address
+// belongs in it only if the row is no older than the account. Some rows an
+// exporter finds through the subject's address hold data of someone else,
+// such as the IP of whoever asked for mail to that address, and those stay
+// out too. SubjectSince tells an exporter which run it is in.
 
 // EngineExportSection is the section of the exporters the engine registers
 // for the records it owns itself, such as the account.
@@ -166,7 +175,9 @@ type SubjectExportSectionsResult struct {
 // at all, so while one is registered every bundle is marked incomplete.
 //
 // The subject's addresses are resolved as RunSubjectExport resolves them, and
-// a set that cannot be read returns ErrSubjectAddressesUnresolved.
+// a set that cannot be read returns ErrSubjectAddressesUnresolved. The
+// creation time of the account identifier names in that tenant is read first
+// and handed to every exporter through SubjectSince.
 func RunSubjectExportSections(ctx context.Context, identifier string, sections []string) (*SubjectExportSectionsResult, error) {
 	tenant, err := core.RequireTenantID(ctx)
 	if err != nil {
@@ -199,6 +210,11 @@ func RunSubjectExportSections(ctx context.Context, identifier string, sections [
 	}
 
 	identifier = canonicalSubject(identifier)
+	since, err := accountCreated(ctx, identifier, tenant)
+	if err != nil {
+		return nil, err
+	}
+	ctx = context.WithValue(ctx, subjectSinceKey{}, since)
 	ctx, err = resolveExportAddresses(ctx, identifier)
 	if err != nil {
 		return nil, err
@@ -224,4 +240,47 @@ func RunSubjectExportSections(ctx context.Context, identifier string, sections [
 		result.MatchedTenants = []string{tenant}
 	}
 	return &SubjectExportSectionsResult{SubjectExportResult: result, Sections: keys}, nil
+}
+
+type subjectSinceKey struct{}
+
+// SubjectSince reports whether ctx is an export a person runs for
+// themselves, and if so, when their account was created. An exporter then
+// leaves out every row it finds through an address and that is older than
+// the account, or whose age it cannot read, and withholds what such a row
+// holds about someone other than the subject. Rows it finds through the
+// account id stay. On every other export, the super admin's included, ok is
+// false and the exporter keeps every row whole.
+func SubjectSince(ctx context.Context) (since time.Time, ok bool) {
+	since, ok = ctx.Value(subjectSinceKey{}).(time.Time)
+	return since, ok
+}
+
+// accountCreated returns when the account identifier names in tenant was
+// created, read through the account resolvers among the registered erasers.
+// An identifier that names no account there has no creation to bound its
+// rows by, so the bound is now, and the run holds no row found through an
+// address. Two accounts the identifier names there bound it by the later one.
+func accountCreated(ctx context.Context, identifier, tenant string) (time.Time, error) {
+	var since time.Time
+	found := false
+	for _, e := range globalEraserRegistry.Erasers() {
+		r, ok := e.(SubjectAccountResolver)
+		if !ok {
+			continue
+		}
+		accounts, err := r.SubjectAccounts(ctx, identifier)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("%w: %w", ErrSubjectAddressesUnresolved, err)
+		}
+		for _, a := range accounts {
+			if a.Tenant == tenant && (!found || a.Created.After(since)) {
+				since, found = a.Created, true
+			}
+		}
+	}
+	if !found {
+		return time.Now(), nil
+	}
+	return since, nil
 }
