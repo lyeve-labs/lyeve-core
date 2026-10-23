@@ -101,6 +101,23 @@ func deriveKEK(masterKey string) []byte {
 	return kek
 }
 
+// DeriveKey returns a 32-byte key for info, derived with HKDF-SHA-256 from the
+// KEK that NewKeyStore derives from masterKey. A key that leaves the process in
+// any form, even as a MAC over a value an attacker knows, then costs a guess at
+// masterKey the same PBKDF2 stretching a ciphertext does. Derived from the raw
+// master key, it would test a guess at a fraction of that cost. The KEK comes
+// from the same cache, so a process that builds a KeyStore derives it once.
+func DeriveKey(masterKey, info string) ([]byte, error) {
+	if masterKey == "" {
+		return nil, fmt.Errorf("encryption: master key must not be empty")
+	}
+	key := make([]byte, AESSize)
+	if _, err := io.ReadFull(hkdf.New(sha256.New, deriveKEK(masterKey), nil, []byte(info)), key); err != nil {
+		return nil, fmt.Errorf("encryption: derive key: %w", err)
+	}
+	return key, nil
+}
+
 // NewKeyStoreLegacy creates a KeyStore using the single-SHA-256 derivation
 // with no PBKDF2 strengthening.
 //

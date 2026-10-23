@@ -29,7 +29,7 @@ func TestSubjectRef_KnownAddressDoesNotMatchItsDigest(t *testing.T) {
 	assert.NotEqual(t, digestPrefix, ref,
 		"before any key is installed, the reference must not be the SHA-256 prefix anyone holding the address can compute")
 
-	require.NoError(t, SetSubjectRefSecret([]byte("install-secret-for-the-subject-reference-test")))
+	require.NoError(t, SetSubjectRefKey([]byte("install-key-for-the-subject-reference-test")))
 	ref = SubjectRef(knownAddress)
 	assert.Len(t, ref, 12)
 	assert.NotEqual(t, digestPrefix, ref,
@@ -38,34 +38,34 @@ func TestSubjectRef_KnownAddressDoesNotMatchItsDigest(t *testing.T) {
 
 func TestSubjectRef_OneKeyGivesAStableReference(t *testing.T) {
 	keepSubjectRefKey(t)
-	secret := []byte("install-secret-for-the-subject-reference-test")
+	key, err := hex.DecodeString("ebf2e080ad9e24fb12a35c603ccbc0c1af12fbdb3fa2f61d99572b3a2c06a057")
+	require.NoError(t, err)
 
-	require.NoError(t, SetSubjectRefSecret(secret))
+	require.NoError(t, SetSubjectRefKey(key))
 	first := SubjectRef(knownAddress)
-	require.NoError(t, SetSubjectRefSecret([]byte("another-install-secret")))
-	require.NoError(t, SetSubjectRefSecret(secret))
+	require.NoError(t, SetSubjectRefKey([]byte("another-install-key")))
+	require.NoError(t, SetSubjectRefKey(key))
 
-	assert.Equal(t, first, SubjectRef(knownAddress), "one secret must give one reference, or lines written across restarts stop correlating")
-	// HMAC-SHA-256 under HKDF-SHA-256(secret, info "lyeve subject reference
-	// key v1"), computed outside Go. A change here changes every reference an
-	// install has already logged.
+	assert.Equal(t, first, SubjectRef(knownAddress), "one key must give one reference, or lines written across restarts stop correlating")
+	// HMAC-SHA-256 under the key above, computed outside Go. A change here
+	// changes every reference an install has already logged.
 	assert.Equal(t, "34b9c8122332", first)
 }
 
 func TestSubjectRef_TwoKeysGiveDifferentReferences(t *testing.T) {
 	keepSubjectRefKey(t)
 
-	require.NoError(t, SetSubjectRefSecret([]byte("first-install-secret")))
+	require.NoError(t, SetSubjectRefKey([]byte("first-install-key")))
 	first := SubjectRef(knownAddress)
-	require.NoError(t, SetSubjectRefSecret([]byte("second-install-secret")))
+	require.NoError(t, SetSubjectRefKey([]byte("second-install-key")))
 
 	assert.NotEqual(t, first, SubjectRef(knownAddress))
 }
 
-func TestSetSubjectRefSecret_RefusesAnEmptySecret(t *testing.T) {
+func TestSetSubjectRefKey_RefusesAnEmptyKey(t *testing.T) {
 	keepSubjectRefKey(t)
 	before := SubjectRef(knownAddress)
 
-	require.Error(t, SetSubjectRefSecret(nil))
-	assert.Equal(t, before, SubjectRef(knownAddress), "a refused secret must leave the key as it was")
+	require.Error(t, SetSubjectRefKey(nil))
+	assert.Equal(t, before, SubjectRef(knownAddress), "a refused key must leave the key as it was")
 }

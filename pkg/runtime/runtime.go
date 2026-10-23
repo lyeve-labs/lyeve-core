@@ -158,15 +158,12 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return fmt.Errorf("config load: %w", err)
 	}
 
-	// Before anything can log a data subject.
+	// Before anything can log a data subject. It derives the master KEK, which
+	// is cached per key, so the KeyStores the router and the plugins build
+	// later find it ready.
 	if err := keySubjectRefs(cfg.EncryptionKey); err != nil {
 		return err
 	}
-
-	// Derive the master KEK while the database connects. The derivation is
-	// cached per key, so the first KeyStore a plugin builds finds it ready
-	// instead of spending its start level on it.
-	engine.GoSafe("runtime-kek-warmup", func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) })
 
 	// GOMEMLIMIT + GC tuning
 	// Set a soft memory cap at 85% of the container limit so Go's GC triggers
