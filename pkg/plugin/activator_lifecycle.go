@@ -3,6 +3,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -454,12 +455,19 @@ func (a *Activator) RegisterSubjectErasers() int {
 // would be absent from every export, and the export would still read as
 // complete. Registering twice is safe: the registry ignores an exporter it
 // already holds.
+//
+// Each exporter is registered as the section of the plugin it came from, and
+// the activator becomes the resolver that says which sections are active, so
+// an export of chosen sections reaches only the plugins running at the time
+// of the call.
 func (a *Activator) RegisterSubjectExporters() int {
+	compliance.SetExportSectionResolver(a.subjectExportSection)
+
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 
 	registered := 0
-	for _, ap := range a.active {
+	for name, ap := range a.active {
 		if ap.plugin == nil {
 			continue
 		}
@@ -468,11 +476,63 @@ func (a *Activator) RegisterSubjectExporters() int {
 			continue
 		}
 		if e := p.SubjectExporter(); e != nil {
-			compliance.RegisterSubjectExporter(e)
+			compliance.RegisterSubjectExporterAs(name, e)
 			registered++
 		}
 	}
 	return registered
+}
+
+// subjectExportSection is the activator's compliance.ExportSectionResolver.
+// The engine's section is always active, and a plugin's section is active
+// while the plugin runs.
+//
+// A plugin that registers its exporter from Start hands the registry no name,
+// and RegisterSubjectExporter takes none, so the exporter is attributed to
+// the plugin whose concrete type is declared in the same package as the
+// exporter's. Every plugin keeps its exporter beside its plugin type, and a
+// match on the whole package path holds in a build that renames packages,
+// where a prefix would not. An exporter no plugin shares a package with, or
+// that two plugins do, is in no section rather than in a guessed one.
+func (a *Activator) subjectExportSection(e compliance.SubjectExporter, section string) (string, bool) {
+	if section == compliance.EngineExportSection {
+		return section, true
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if section == "" {
+		pkg := typePackage(e)
+		if pkg == "" {
+			return "", false
+		}
+		for name, ap := range a.active {
+			if ap.plugin == nil || typePackage(ap.plugin) != pkg {
+				continue
+			}
+			if section != "" {
+				return "", false
+			}
+			section = name
+		}
+		if section == "" {
+			return "", false
+		}
+	}
+	ap := a.active[section]
+	return section, ap != nil && ap.plugin != nil && ap.phase == PhaseRunning
+}
+
+// typePackage is the import path of the package that declares v's concrete
+// type, looking through pointers. It is empty for an unnamed type.
+func typePackage(v any) string {
+	t := reflect.TypeOf(v)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil {
+		return ""
+	}
+	return t.PkgPath()
 }
 
 // RegisterCustomValidators installs the schema validators of every active
