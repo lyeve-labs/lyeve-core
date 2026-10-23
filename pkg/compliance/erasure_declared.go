@@ -37,22 +37,33 @@ type SubjectEraseFunc func(ctx context.Context, host core.Host, identifier strin
 // and Erase would fail on its first statement. A set partly present is an
 // error naming what is missing, so the erasure reports itself incomplete
 // rather than quietly erasing part of the set.
+//
+// Addresses, when set, returns the addresses the set's tables hold for an
+// account, and every eraser reaches the rows kept under them (see
+// SubjectAddresses). It is read only where the set's tables are whole. Final
+// runs the set with the account eraser, once every other eraser has
+// succeeded, so the rows Addresses reads are still there on every run until
+// then.
 type SubjectErasure struct {
-	Tables  []string
-	Columns []string
-	Erase   SubjectEraseFunc
-	Unkeyed SubjectEraseFunc
+	Tables    []string
+	Columns   []string
+	Erase     SubjectEraseFunc
+	Unkeyed   SubjectEraseFunc
+	Addresses SubjectAddressFunc
+	Final     bool
 }
 
 // DeclaredEraser runs a SubjectErasure behind the check for its tables. The
 // activator builds one per declared set, and plugin tests run them the same
 // way.
 type DeclaredEraser struct {
-	name    string
-	host    core.Host
-	set     core.TableSet
-	erase   SubjectEraseFunc
-	unkeyed SubjectEraseFunc
+	name      string
+	host      core.Host
+	set       core.TableSet
+	erase     SubjectEraseFunc
+	unkeyed   SubjectEraseFunc
+	addresses SubjectAddressFunc
+	final     bool
 }
 
 var _ SubjectEraser = (*DeclaredEraser)(nil)
@@ -67,7 +78,7 @@ func NewDeclaredEraser(name string, host core.Host, se SubjectErasure) *Declared
 	if len(set.Tables()) == 0 {
 		return nil
 	}
-	return &DeclaredEraser{name: name, host: host, set: set, erase: se.Erase, unkeyed: se.Unkeyed}
+	return &DeclaredEraser{name: name, host: host, set: set, erase: se.Erase, unkeyed: se.Unkeyed, addresses: se.Addresses, final: se.Final}
 }
 
 // EraserName names the plugin that declared the eraser.
@@ -76,6 +87,36 @@ func (e *DeclaredEraser) EraserName() string { return e.name }
 // EraseSubject erases the subject where the set's tables are whole, and
 // reports nothing erased where the plugin never ran.
 func (e *DeclaredEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
+	state, err := e.check(ctx)
+	if err != nil {
+		return 0, err
+	}
+	switch state {
+	case core.TableSetReady:
+		return e.erase(ctx, e.host, identifier)
+	case core.TableSetUnkeyed:
+		if e.unkeyed != nil {
+			return e.unkeyed(ctx, e.host, identifier)
+		}
+	}
+	return 0, nil
+}
+
+// accountAddresses returns the addresses the set's tables hold for the
+// account, and none where the tables are not whole.
+func (e *DeclaredEraser) accountAddresses(ctx context.Context, accountID string) ([]string, error) {
+	if e.addresses == nil {
+		return nil, nil
+	}
+	state, err := e.check(ctx)
+	if err != nil || state != core.TableSetReady {
+		return nil, err
+	}
+	return e.addresses(ctx, e.host, accountID)
+}
+
+// check reads which of the set's tables and columns are present.
+func (e *DeclaredEraser) check(ctx context.Context) (core.TableSetState, error) {
 	// On SQL Server the catalog read takes shared locks that a schema change
 	// running at the same time can deadlock with, and the server may choose
 	// the read as the victim. It runs on the pool, outside any transaction,
@@ -87,15 +128,7 @@ func (e *DeclaredEraser) EraseSubject(ctx context.Context, identifier string) (i
 		return err
 	})
 	if err != nil {
-		return 0, fmt.Errorf("%s erasure: %w", e.name, err)
+		return state, fmt.Errorf("%s erasure: %w", e.name, err)
 	}
-	switch state {
-	case core.TableSetReady:
-		return e.erase(ctx, e.host, identifier)
-	case core.TableSetUnkeyed:
-		if e.unkeyed != nil {
-			return e.unkeyed(ctx, e.host, identifier)
-		}
-	}
-	return 0, nil
+	return state, nil
 }

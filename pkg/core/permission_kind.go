@@ -38,6 +38,15 @@ type PermissionKind struct {
 	// kind while no rule names admin for it, so an install that has written
 	// no rule still lets its admins manage the plugin's resources.
 	AdminByDefault bool
+
+	// OpenByDefault allows every role every action on a resource of the
+	// kind while the tenant has written no rule on it or on the kind's
+	// General. It is for something each signed-in person does for
+	// themselves, which a tenant may later limit to some roles. Once one
+	// rule names the resource, only the roles the rules grant are allowed,
+	// beside super_admin and, with AdminByDefault, admin while no rule names
+	// admin.
+	OpenByDefault bool
 }
 
 // permissionKinds holds the registered kinds, sorted by General. A
@@ -97,6 +106,14 @@ func PermissionKinds() []PermissionKind {
 		out[i] = k
 	}
 	return out
+}
+
+// IsOpenByDefaultPermissionResource reports whether resource belongs to a
+// kind registered with OpenByDefault. A rule store reads it to know when a
+// resource with no rule admits every role.
+func IsOpenByDefaultPermissionResource(resource string) bool {
+	k, ok := permissionKindOf(resource)
+	return ok && k.OpenByDefault
 }
 
 // registeredPermissionKinds returns the registry's own slice. The caller

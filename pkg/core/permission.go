@@ -109,8 +109,9 @@ func ValidPermissionAction(resource, action string) bool {
 // On a resource of a kind registered with AdminByDefault the admin role is
 // allowed everything while no rule names admin for it, so an install that
 // has written no rule still lets its admins manage the plugin's resources.
-// Any other role with no rule is refused. The wildcard "*" reaches schemas
-// only.
+// On a resource of a kind registered with OpenByDefault every role is
+// allowed while the tenant has no rule on the resource or its General. Any
+// other role with no rule is refused. The wildcard "*" reaches schemas only.
 //
 // The error is a store failure and nothing else. A refusal is false with a
 // nil error. A handler answers a store failure as 503 and a refusal as 403
@@ -192,6 +193,8 @@ type FieldMasker interface {
 //   - admin is allowed a resource of a kind registered with AdminByDefault
 //     while no rule names admin for it, so an install with no rules still
 //     lets its admins manage them.
+//   - every role, and a caller with none, is allowed a resource of a kind
+//     registered with OpenByDefault, because no rule restricts it.
 //   - every other role is refused every action on every resource.
 //
 // It is deliberately neither of the two easy answers. Allowing everything
@@ -209,6 +212,9 @@ var _ PermissionChecker = RoleOnlyPermissionChecker{}
 // Allowed implements PermissionChecker. It reads no table, so it never fails.
 func (RoleOnlyPermissionChecker) Allowed(_ context.Context, roles []string, resource, _ string) (bool, error) {
 	kind, ok := permissionKindOf(resource)
+	if ok && kind.OpenByDefault {
+		return true, nil
+	}
 	adminByDefault := ok && kind.AdminByDefault
 	for _, role := range roles {
 		switch role {
