@@ -93,6 +93,34 @@ func TestMFALockout_StoreOutageDoesNotCountCorrectCodes(t *testing.T) {
 	}
 }
 
+// A wrong authenticator code is judged before any recovery code is looked
+// up, so a recovery code store that is down cannot give its attempt back.
+// It answered 503 and released the attempt, which left a judged guess
+// uncounted for as long as the outage lasted.
+func TestMFALockout_WrongCodeCountsDuringARecoveryCodeOutage(t *testing.T) {
+	for _, backend := range lockoutBackends {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			inner, totpSecret := mfaFixture(t)
+			store := &outageMFAStore{MFAStore: inner}
+			h := lockoutHandler(nil, store, backend)
+			uid := uuid.New()
+			verify := func(code string) int {
+				c, err := auth.SignChallenge(lockoutTestSecret, uid, "test@example.com", []string{"admin"}, "")
+				require.NoError(t, err)
+				return mfaVerify(h, c, code)
+			}
+
+			store.down.Store(true)
+			wrong := wrongTOTPCode(t, totpSecret)
+			for i := 0; i < DefaultMFAVerifyMaxAttempts; i++ {
+				require.Equal(t, http.StatusUnprocessableEntity, verify(wrong), "attempt %d during the outage", i+1)
+			}
+			assert.Equal(t, http.StatusTooManyRequests, verify(wrong), "five wrong codes lock the account")
+		})
+	}
+}
+
 // A release gives back one attempt in the window it was reserved in, and
 // nothing once that window has closed and another has opened.
 func TestMFALockout_ReleaseGivesBackOnlyItsOwnAttempt(t *testing.T) {
