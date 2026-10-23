@@ -605,7 +605,7 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 	// that reads the count, so concurrent wrong codes cannot all be checked.
 	// A replayed code keeps its attempt counted, and only a code that
 	// verifies clears the count.
-	reserved, err := h.mfaLockoutChecker.ReserveMFAAttempt(ctx, u.ID)
+	reservation, reserved, err := h.mfaLockoutChecker.ReserveMFAAttempt(ctx, u.ID)
 	if err != nil {
 		return http.StatusServiceUnavailable, "account check unavailable"
 	}
@@ -614,6 +614,7 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 	}
 	outcome, err := acceptTOTP(ctx, h.mfaStore, u.ID, secret, code)
 	if err != nil {
+		h.releaseMFAAttempt(ctx, u.ID, reservation)
 		slog.WarnContext(ctx, "step-up mfa code check failed", "err", err, "user_id", u.ID)
 		return http.StatusServiceUnavailable, "account check unavailable"
 	}

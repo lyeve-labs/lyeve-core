@@ -202,6 +202,15 @@ func (h *AuthHandler) clearPasswordAttempts(ctx context.Context, userID uuid.UUI
 	}
 }
 
+// releaseMFAAttempt gives back the code attempt a request reserved when the
+// store failed before the code could be judged, so an outage never counts a
+// code against its owner. A release that fails is logged.
+func (h *AuthHandler) releaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
+	if err := h.mfaLockoutChecker.ReleaseMFAAttempt(ctx, userID, r); err != nil {
+		slog.WarnContext(ctx, "failed to release mfa attempt", "err", err, "user_id", userID)
+	}
+}
+
 // lockoutScopeNote says where a lockout lives, for the lines that report one.
 func (h *AuthHandler) lockoutScopeNote() string {
 	if h.lockoutShared {

@@ -115,7 +115,7 @@ func (l *InMemoryMFALockout) CheckMFALockout(userID uuid.UUID) (bool, error) {
 // the failure limit. The read and the increment are one step under l.mu, so
 // of many concurrent attempts only the limit reach the code check. A window
 // that has expired starts again.
-func (l *InMemoryMFALockout) ReserveMFAAttempt(userID uuid.UUID) bool {
+func (l *InMemoryMFALockout) ReserveMFAAttempt(userID uuid.UUID) (Reservation, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -127,11 +127,30 @@ func (l *InMemoryMFALockout) ReserveMFAAttempt(userID uuid.UUID) bool {
 		}
 		l.entries[userID] = state
 	}
-	if state.failures.Load() >= int64(l.maxAttempts) {
-		return false
+	r := Reservation{Count: int(state.failures.Load()), window: state.createdAt.UnixNano()}
+	if r.Count >= l.maxAttempts {
+		return r, false
 	}
-	state.failures.Add(1)
-	return true
+	r.Count = int(state.failures.Add(1))
+	return r, true
+}
+
+// ReleaseMFAAttempt gives back one attempt reserved in the user's current
+// window. A window that has expired or been replaced is left as it is, and a
+// window whose count reaches zero is removed.
+func (l *InMemoryMFALockout) ReleaseMFAAttempt(userID uuid.UUID, r Reservation) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	state, ok := l.entries[userID]
+	if !ok || state.createdAt.UnixNano() != r.window || time.Since(state.createdAt) > l.window {
+		return
+	}
+	if state.failures.Load() <= 1 {
+		delete(l.entries, userID)
+		return
+	}
+	state.failures.Add(-1)
 }
 
 // ResetMFAAttempts clears the failure counter for the given user.
