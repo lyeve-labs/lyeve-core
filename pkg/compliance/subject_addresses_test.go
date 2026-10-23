@@ -1,8 +1,10 @@
 package compliance_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -141,5 +143,57 @@ func TestRunSubjectErasure_ResolvesEveryAddressFromLiveRowsEachRun(t *testing.T)
 		require.NoError(t, err)
 		assert.ElementsMatch(t, append([]compliance.SubjectAddress{{Address: strings.ToUpper(email)}},
 			inAcme("idp2-"+tag+"@example.com", "gh-"+tag+"@example.com")...), mail.runs[3])
+	})
+}
+
+// An identity provider can assert any text as an account's address, and
+// nothing checks it is one. An account whose provider asserted another
+// account's id handed that id to every eraser and exporter, which then reached
+// the rows naming the other account. Only email addresses are resolved now.
+func TestRunSubjectErasure_ResolvesOnlyEmailAddresses(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		ctx := context.Background()
+		q := host.Querier(ctx)
+		compliance.ResetSubjectErasers()
+		t.Cleanup(compliance.ResetSubjectErasers)
+		compliance.ResetHoldChecker()
+		t.Cleanup(compliance.ResetHoldChecker)
+
+		tag := uuid.NewString()[:8]
+		other, id := uuid.New(), uuid.New()
+		email := "own-" + tag + "@example.com"
+		_, err := q.Exec(ctx, `INSERT INTO sys_users (id, email, password_hash, tenant_id) VALUES ($1, $2, '', 'acme')`, other, "other-"+tag+"@example.com")
+		require.NoError(t, err)
+		_, err = q.Exec(ctx, `INSERT INTO sys_users (id, email, password_hash, provider_email, tenant_id) VALUES ($1, $2, '', $3, 'acme')`, id, email, other.String())
+		require.NoError(t, err)
+
+		compliance.RegisterSubjectEraser(plugintest.SubjectAccounts(host))
+		compliance.RegisterSubjectEraser(compliance.NewDeclaredEraser("links", host, compliance.SubjectErasure{
+			Tables: []string{"sys_users"},
+			Addresses: func(ctx context.Context, host core.Host, accountID string) ([]string, error) {
+				return []string{"gh-" + tag + "@example.com", "Jane " + tag, "jane-" + tag + "@localhost"}, nil
+			},
+			Erase: func(ctx context.Context, host core.Host, identifier string) (int64, error) { return 0, nil },
+		}))
+		mail := &addressRecorder{}
+		compliance.RegisterSubjectEraser(mail)
+
+		var buf bytes.Buffer
+		restore := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+		t.Cleanup(func() { slog.SetDefault(restore) })
+
+		_, err = compliance.RunSubjectErasureWithHolds(ctx, id.String())
+		require.NoError(t, err)
+		require.Len(t, mail.runs, 1)
+		assert.ElementsMatch(t, inAcme(email, "gh-"+tag+"@example.com"), mail.runs[0],
+			"the account's own address and a linked one resolve, the other account's id and the text that is no address do not")
+
+		out := buf.String()
+		assert.Equal(t, 1, strings.Count(out, "subject_addresses_dropped"), "one line per run")
+		assert.Contains(t, out, `"count":3`)
+		for _, dropped := range []string{other.String(), "Jane " + tag, "jane-" + tag} {
+			assert.NotContains(t, out, dropped, "the log names no address")
+		}
 	})
 }

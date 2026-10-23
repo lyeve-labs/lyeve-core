@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/google/uuid"
@@ -102,10 +103,20 @@ type subjectAddressesKey struct{}
 // through its identity provider or its admins, so each is reached in that
 // tenant only. Each run that reads them resolves them again, and an error
 // leaves the set unknown, so the run must not go ahead.
+//
+// Of those, only a value core.ValidEmail accepts is kept. An identity provider
+// can assert any text as an address and nothing checks it on the way in, so a
+// value shaped like another account's id would otherwise reach the rows that
+// name that account. What is dropped is logged once per run, as a count.
 func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []SubjectEraser) (context.Context, error) {
 	var set []SubjectAddress
+	dropped := 0
 	add := func(tenant string, addresses []string) {
 		for _, a := range addresses {
+			if a != "" && tenant != "" && !core.ValidEmail(a) {
+				dropped++
+				continue
+			}
 			if a == "" || slices.ContainsFunc(set, func(held SubjectAddress) bool {
 				return (held.Tenant == "" || held.Tenant == tenant) && SameAddress(held.Address, a)
 			}) {
@@ -142,6 +153,9 @@ func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []S
 			}
 			add(a.Tenant, addresses)
 		}
+	}
+	if dropped > 0 {
+		slog.WarnContext(ctx, "subject_addresses_dropped", "count", dropped, "reason", "not an email address")
 	}
 	return context.WithValue(ctx, subjectAddressesKey{}, set), nil
 }
