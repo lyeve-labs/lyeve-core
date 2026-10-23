@@ -55,6 +55,9 @@ type SubjectExporter interface {
 type SubjectExporterRegistry struct {
 	mu        sync.Mutex
 	exporters []SubjectExporter
+	// sections holds, beside each exporter, the section it was registered
+	// under, or "" when the registration named none.
+	sections []string
 }
 
 // Register adds an exporter. Nil exporters are silently ignored, and one the
@@ -66,19 +69,31 @@ type SubjectExporterRegistry struct {
 // check rather than panicking on it. Every registered exporter is a pointer,
 // so this guards a future one rather than a live case.
 func (r *SubjectExporterRegistry) Register(e SubjectExporter) {
+	r.registerAs("", e)
+}
+
+// registerAs is Register with the section the exporter belongs to. An
+// exporter registered once without a section and again with one takes the
+// section, because a plugin may register from Start before the runtime
+// registers the same exporter for it.
+func (r *SubjectExporterRegistry) registerAs(section string, e SubjectExporter) {
 	if e == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if reflect.TypeOf(e).Comparable() {
-		for _, existing := range r.exporters {
+		for i, existing := range r.exporters {
 			if existing == e {
+				if r.sections[i] == "" {
+					r.sections[i] = section
+				}
 				return
 			}
 		}
 	}
 	r.exporters = append(r.exporters, e)
+	r.sections = append(r.sections, section)
 }
 
 // Exporters returns a snapshot copy of registered exporters.
@@ -162,6 +177,10 @@ type ExportSummary struct {
 type ExportError struct {
 	// Index is the exporter's position in the registry.
 	Index int `json:"index"`
+
+	// Section names the section the failed exporter answers for, on an
+	// export of chosen sections.
+	Section string `json:"section,omitempty"`
 
 	// Error is the error message.
 	Error string `json:"error"`
