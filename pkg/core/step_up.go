@@ -12,7 +12,8 @@ import (
 // The account is the one the request's session names, never one the caller
 // chooses.
 //
-// The engine host implements it, and ScopedHost forwards it to every plugin.
+// The engine host implements it, and ScopedHost forwards it to a plugin
+// granted CapStepUp and answers ErrCapDenied to every other.
 // The checks count and lock out exactly as the token routes do: a wrong
 // password counts against the login lockout, a wrong authenticator code
 // against the MFA lockout, and a code accepted once is not accepted again
@@ -22,13 +23,15 @@ type StepUpChecker interface {
 	// account. It answers nil when the answer is accepted.
 	//
 	// ErrStepUpUnavailable means the account cannot give the factor at all:
-	// it has no password, no authenticator is enrolled, or the request
-	// carries no signed-in session. It is answered before the answer is
-	// read. ErrStepUpRequired means the answer is empty, and is never
-	// counted. ErrStepUpRefused is a wrong answer, which was counted.
-	// ErrStepUpLocked means the factor's lockout is reached and nothing was
-	// checked. Any other error is state the engine could not read, and
-	// wraps ErrServiceUnavailable.
+	// it has no password, no authenticator is enrolled, the request
+	// carries no signed-in session, or the session's account is not one of
+	// the request's tenant. It is answered before the answer is read.
+	// ErrStepUpRequired means the answer is empty, and is never counted.
+	// ErrStepUpRefused is a wrong answer, which was counted, or a code
+	// already accepted within its window, which is refused without being
+	// counted. ErrStepUpLocked means the factor's lockout is reached and
+	// nothing was checked. Any other error, a factor the engine does not
+	// check among them, wraps ErrServiceUnavailable.
 	CheckStepUp(r *http.Request, factor, answer string) error
 }
 

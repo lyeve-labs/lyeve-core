@@ -66,7 +66,7 @@ func (h *AuthHandler) CheckStepUp(r *http.Request, factor, answer string) error 
 		}
 		status, _ = h.stepUpCode(r, u, encSecret, answer)
 	default:
-		return fmt.Errorf("step-up factor %q is not one the engine checks", factor)
+		return fmt.Errorf("step-up factor %q is not one the engine checks: %w", factor, core.ErrServiceUnavailable)
 	}
 	switch status {
 	case 0:
@@ -83,6 +83,12 @@ func (h *AuthHandler) CheckStepUp(r *http.Request, factor, answer string) error 
 // stepUpAccount reads the account a signed-in session names. A request that
 // carries no session, or carries an API key or an admin token, has no person
 // at it to ask.
+//
+// The account has to belong to the tenant the request resolved to, because a
+// plugin can set the session claims on its own request and would otherwise
+// spend the lockouts of an account in any tenant. An account with no home
+// tenant acts in the default tenant, and a super admin with none acts in
+// every tenant.
 func (h *AuthHandler) stepUpAccount(r *http.Request) (*domain.User, error) {
 	claims := core.GetClaims(r.Context())
 	if claims == nil || claims.IsAPIKey || claims.APIKeyID != "" || claims.AdminTokenID != "" {
@@ -98,6 +104,13 @@ func (h *AuthHandler) stepUpAccount(r *http.Request) (*domain.User, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("step-up account: %w", errors.Join(err, core.ErrServiceUnavailable))
+	}
+	tenant := core.TenantIDFromCtx(r.Context())
+	switch {
+	case u.TenantID == tenant:
+	case u.TenantID == "" && (tenant == core.DefaultTenantSlug || hasRole(u.Roles, "super_admin")):
+	default:
+		return nil, core.ErrStepUpUnavailable
 	}
 	return u, nil
 }
