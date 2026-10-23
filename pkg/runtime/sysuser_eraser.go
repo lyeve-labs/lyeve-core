@@ -235,6 +235,12 @@ func (e *sysUserEraser) SubjectAccounts(ctx context.Context, identifier string) 
 	return compliance.SubjectAccounts(ctx, e.host, identifier)
 }
 
+// AddressHolders names the accounts of tenant that hold address, so the
+// erasure keeps an address two accounts hold away from both.
+func (e *sysUserEraser) AddressHolders(ctx context.Context, tenant, address string) ([]compliance.SubjectAccount, error) {
+	return compliance.AddressHolders(ctx, e.host, tenant, address)
+}
+
 // EndSessions signs the subject out of every unerased account that belongs
 // to identifier and locks it, and erases nothing. The account is disabled,
 // which every sign-in refuses, and token_version is bumped in the same

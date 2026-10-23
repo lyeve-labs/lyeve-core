@@ -27,6 +27,21 @@ import (
 // for SubjectEraseFunc.
 type SubjectAddressFunc func(ctx context.Context, host core.Host, accountID string) ([]string, error)
 
+// SubjectHolderFunc returns the accounts of tenant whose rows in a plugin's
+// tables hold address, each with the addresses it holds there. It may return
+// more than match, such as every row the column's collation folds to
+// address: the resolver keeps an account only where SameAddress confirms one
+// of its addresses and its tenant is tenant.
+type SubjectHolderFunc func(ctx context.Context, host core.Host, tenant, address string) ([]SubjectAccount, error)
+
+// SubjectHolderResolver names the accounts of a tenant that hold an address.
+// ResolveSubjectAddresses asks every one among its erasers, the engine's
+// account eraser and each declared set with Holders, before it lets an
+// address read from an account reach anything.
+type SubjectHolderResolver interface {
+	AddressHolders(ctx context.Context, tenant, address string) ([]SubjectAccount, error)
+}
+
 // SubjectAddress is one address an erasure or export reaches, and the tenant it is reached in.
 // Tenant is empty for the identifier the caller named, which keeps its reach.
 type SubjectAddress struct{ Address, Tenant string }
@@ -92,6 +107,47 @@ func SubjectAccounts(ctx context.Context, host core.Host, identifier string) ([]
 	return accounts, nil
 }
 
+// AddressHolders returns the unerased accounts of tenant whose email or
+// provider_email may be address, selected as SubjectAccounts selects them.
+// An account of the install keeps an empty tenant_id and is read as
+// core.DefaultTenantSlug's.
+func AddressHolders(ctx context.Context, host core.Host, tenant, address string) ([]SubjectAccount, error) {
+	d := host.Dialect()
+	notErased := "0"
+	if d == "postgres" {
+		notErased = "false"
+	}
+	unset := tenant
+	if tenant == core.DefaultTenantSlug {
+		unset = ""
+	}
+	args := append(AddressForms(address), tenant, unset)
+	rows, err := host.Querier(ctx).Query(ctx,
+		`SELECT id, email, provider_email, tenant_id FROM sys_users WHERE (`+AddressCandidates("email", 1)+` OR `+AddressCandidates("provider_email", 1)+
+			`) AND (tenant_id = $4 OR tenant_id = $5) AND anonymized = `+notErased, args...)
+	if err != nil {
+		return nil, fmt.Errorf("resolve address holders: %w", err)
+	}
+	defer rows.Close()
+	var accounts []SubjectAccount
+	for rows.Next() {
+		var account uuid.UUID
+		var email, held string
+		var provider sql.NullString
+		if err := rows.Scan(core.ScanUUID(d, &account), &email, &provider, &held); err != nil {
+			return nil, fmt.Errorf("resolve address holders: %w", err)
+		}
+		if held == "" {
+			held = core.DefaultTenantSlug
+		}
+		accounts = append(accounts, SubjectAccount{ID: account.String(), Tenant: held, Addresses: []string{email, provider.String}})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("resolve address holders: %w", err)
+	}
+	return accounts, nil
+}
+
 type subjectAddressesKey struct{}
 
 // ResolveSubjectAddresses returns ctx carrying the addresses of the subject
@@ -107,7 +163,15 @@ type subjectAddressesKey struct{}
 // Of those, only a value core.ValidEmail accepts is kept. An identity provider
 // can assert any text as an address and nothing checks it on the way in, so a
 // value shaped like another account's id would otherwise reach the rows that
-// name that account. What is dropped is logged once per run, as a count.
+// name that account.
+//
+// Nor is an address kept that another account in the same tenant holds, by
+// its own record or by a SubjectHolderResolver among erasers, under
+// SameAddress. Account uniqueness compares bytes, so two accounts can hold one
+// address composed and decomposed, and an identity provider can assert
+// another account's address. Either account's rows under it would reach the
+// other's. What is dropped is logged once per run for each reason, as a
+// count.
 func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []SubjectEraser) (context.Context, error) {
 	var set []SubjectAddress
 	dropped := 0
@@ -157,7 +221,54 @@ func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []S
 	if dropped > 0 {
 		slog.WarnContext(ctx, "subject_addresses_dropped", "count", dropped, "reason", "not an email address")
 	}
+	set, err := dropShared(ctx, set, accounts, erasers)
+	if err != nil {
+		return ctx, err
+	}
 	return context.WithValue(ctx, subjectAddressesKey{}, set), nil
+}
+
+// dropShared returns set without each address read from an account that an
+// account outside accounts holds in the same tenant. The identifier the
+// caller named has no tenant and keeps its reach.
+func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAccount, erasers []SubjectEraser) ([]SubjectAddress, error) {
+	var resolvers []SubjectHolderResolver
+	for _, e := range erasers {
+		if r, ok := e.(SubjectHolderResolver); ok {
+			resolvers = append(resolvers, r)
+		}
+	}
+	subject := func(id string) bool {
+		return slices.ContainsFunc(accounts, func(a SubjectAccount) bool { return a.ID == canonicalSubject(id) })
+	}
+	var kept []SubjectAddress
+	shared := 0
+	for _, a := range set {
+		held := false
+		for _, r := range resolvers {
+			if a.Tenant == "" || held {
+				break
+			}
+			holders, err := r.AddressHolders(ctx, a.Tenant, a.Address)
+			if err != nil {
+				return nil, fmt.Errorf("subject address holders: %w", err)
+			}
+			held = slices.ContainsFunc(holders, func(h SubjectAccount) bool {
+				return h.Tenant == a.Tenant && !subject(h.ID) && slices.ContainsFunc(h.Addresses, func(held string) bool {
+					return SameAddress(held, a.Address)
+				})
+			})
+		}
+		if held {
+			shared++
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if shared > 0 {
+		slog.WarnContext(ctx, "subject_addresses_dropped", "count", shared, "reason", "held by another account")
+	}
+	return kept, nil
 }
 
 // SubjectAddresses returns the addresses of the subject identifier names, as
