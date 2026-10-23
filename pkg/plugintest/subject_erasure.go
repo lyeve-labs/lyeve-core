@@ -57,8 +57,8 @@ func RunSubjectErasuresCtx(ctx context.Context, t T, host core.Host, p core.Plug
 }
 
 // SubjectAccounts returns an eraser that resolves a subject's accounts and
-// their addresses in sys_users as the engine's account eraser does, and
-// erases nothing. Registered beside a plugin's erasers, it lets a test run
+// their addresses in sys_users, and the accounts holding an address, as the
+// engine's account eraser does, and erases nothing. Registered beside a plugin's erasers, it lets a test run
 // the engine's fan-out, which reads the subject's addresses through it.
 func SubjectAccounts(host core.Host) compliance.SubjectEraser {
 	return subjectAccounts{host: host}
@@ -72,4 +72,8 @@ func (subjectAccounts) EraserName() string { return "accounts" }
 
 func (a subjectAccounts) SubjectAccounts(ctx context.Context, identifier string) ([]compliance.SubjectAccount, error) {
 	return compliance.SubjectAccounts(ctx, a.host, identifier)
+}
+
+func (a subjectAccounts) AddressHolders(ctx context.Context, tenant, address string) ([]compliance.SubjectAccount, error) {
+	return compliance.AddressHolders(ctx, a.host, tenant, address)
 }

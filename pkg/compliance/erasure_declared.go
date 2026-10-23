@@ -43,13 +43,16 @@ type SubjectEraseFunc func(ctx context.Context, host core.Host, identifier strin
 // SubjectAddresses). It is read only where the set's tables are whole. Final
 // runs the set with the account eraser, once every other eraser has
 // succeeded, so the rows Addresses reads are still there on every run until
-// then.
+// then. Holders, set beside Addresses, names the accounts of a tenant the
+// set's tables hold an address for, so an address one account holds there
+// reaches no other account's rows (see ResolveSubjectAddresses).
 type SubjectErasure struct {
 	Tables    []string
 	Columns   []string
 	Erase     SubjectEraseFunc
 	Unkeyed   SubjectEraseFunc
 	Addresses SubjectAddressFunc
+	Holders   SubjectHolderFunc
 	Final     bool
 }
 
@@ -63,6 +66,7 @@ type DeclaredEraser struct {
 	erase     SubjectEraseFunc
 	unkeyed   SubjectEraseFunc
 	addresses SubjectAddressFunc
+	holders   SubjectHolderFunc
 	final     bool
 }
 
@@ -78,7 +82,7 @@ func NewDeclaredEraser(name string, host core.Host, se SubjectErasure) *Declared
 	if len(set.Tables()) == 0 {
 		return nil
 	}
-	return &DeclaredEraser{name: name, host: host, set: set, erase: se.Erase, unkeyed: se.Unkeyed, addresses: se.Addresses, final: se.Final}
+	return &DeclaredEraser{name: name, host: host, set: set, erase: se.Erase, unkeyed: se.Unkeyed, addresses: se.Addresses, holders: se.Holders, final: se.Final}
 }
 
 // EraserName names the plugin that declared the eraser.
@@ -113,6 +117,19 @@ func (e *DeclaredEraser) accountAddresses(ctx context.Context, accountID string)
 		return nil, err
 	}
 	return e.addresses(ctx, e.host, accountID)
+}
+
+// AddressHolders returns the accounts of tenant the set's tables hold
+// address for, and none where the tables are not whole.
+func (e *DeclaredEraser) AddressHolders(ctx context.Context, tenant, address string) ([]SubjectAccount, error) {
+	if e.holders == nil {
+		return nil, nil
+	}
+	state, err := e.check(ctx)
+	if err != nil || state != core.TableSetReady {
+		return nil, err
+	}
+	return e.holders(ctx, e.host, tenant, address)
 }
 
 // check reads which of the set's tables and columns are present.
