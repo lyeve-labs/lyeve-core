@@ -371,7 +371,9 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	// Admin API: GDPR DSAR
 	notASubject422 := map[string]any{"description": "The identifier is not an email address, an account id or an IP address"}
 	paths["/api/admin/gdpr/export"] = openAPIPath{
-		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422}}, super...),
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422,
+			"503": map[string]any{"description": "The subject's addresses could not be read, so nothing was exported. Repeat the request"},
+		}}, super...),
 	}
 	// One body for both answers: complete says whether the subject is fully
 	// erased, and a partial erasure answers 207 so no caller reads it as done.

@@ -142,6 +142,13 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 	} else {
 		result, err = compliance.RunSubjectExport(r.Context(), body.Identifier)
 	}
+	// Without the subject's addresses no exporter can list what the erasure
+	// would reach, so nothing is exported, as nothing is erased.
+	if errors.Is(err, compliance.ErrSubjectAddressesUnresolved) {
+		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
+			"the subject's addresses could not be read; export was not attempted")
+		return
+	}
 	if err != nil {
 		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "export failed")
 		return

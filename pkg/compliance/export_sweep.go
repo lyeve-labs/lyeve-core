@@ -60,12 +60,20 @@ type TenantExport struct {
 // The caller is responsible for the super_admin gate and for deciding which
 // tenants to pass. This function does not enumerate them, so it cannot be
 // tricked into widening its own scope.
+//
+// The subject's addresses are resolved once, before the first tenant, as in
+// RunSubjectExport.
 func RunSubjectExportAcrossTenants(
 	ctx context.Context,
 	identifier string,
 	tenants []string,
 	scope TenantScopeFunc,
 ) (*SubjectExportResult, error) {
+	identifier = canonicalSubject(identifier)
+	ctx, err := resolveExportAddresses(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
 	result := &SubjectExportResult{
 		Identifier: identifier,
 		Plugins:    map[string]any{},
@@ -127,6 +135,23 @@ func RunSubjectExportAcrossTenants(
 	result.Incomplete = len(result.Errors) > 0 || result.Scope.Covered < result.Scope.Requested
 
 	return result, nil
+}
+
+// resolveExportAddresses returns ctx carrying the subject's addresses, read
+// from the accounts and the declared address sources as an erasure reads them.
+// An exporter that keeps rows under an address then lists what the erasure
+// would reach. A set that cannot be read is not guessed at, because a bundle
+// built on part of it would leave out rows and still read as complete.
+func resolveExportAddresses(ctx context.Context, identifier string) (context.Context, error) {
+	resolved, err := ResolveSubjectAddresses(ctx, identifier, globalEraserRegistry.Erasers())
+	if err != nil {
+		slog.ErrorContext(ctx, "subject_addresses_unresolved",
+			"subject_ref", subjectRef(identifier),
+			"err", err,
+		)
+		return ctx, fmt.Errorf("%w: %w", ErrSubjectAddressesUnresolved, err)
+	}
+	return resolved, nil
 }
 
 // runExportersInto runs every registered exporter against one already-scoped
