@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -47,11 +48,12 @@ type SubjectHolderResolver interface {
 type SubjectAddress struct{ Address, Tenant string }
 
 // SubjectAccount is one account an identifier names: its id, its home tenant
-// (core.DefaultTenantSlug for an account of the install) and the addresses
-// its record holds.
+// (core.DefaultTenantSlug for an account of the install), the addresses its
+// record holds and when it was created.
 type SubjectAccount struct {
 	ID, Tenant string
 	Addresses  []string
+	Created    time.Time
 }
 
 // SubjectAccountResolver is the engine's account eraser, which names the
@@ -80,7 +82,7 @@ func SubjectAccounts(ctx context.Context, host core.Host, identifier string) ([]
 	}
 	rows, err := host.Querier(ctx).Query(ctx,
 		// lyeve:cross-tenant sys_users an erasure follows one person across every tenant: the admin DSAR routes name the subject by account id or by address and require super_admin, and the self-service erasure names only the caller's own account, by id
-		`SELECT id, email, provider_email, tenant_id FROM sys_users WHERE `+where+` AND anonymized = `+notErased, args...)
+		`SELECT id, email, provider_email, tenant_id, created_at FROM sys_users WHERE `+where+` AND anonymized = `+notErased, args...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve subject accounts: %w", err)
 	}
@@ -90,7 +92,8 @@ func SubjectAccounts(ctx context.Context, host core.Host, identifier string) ([]
 		var account uuid.UUID
 		var email, tenant string
 		var provider sql.NullString
-		if err := rows.Scan(core.ScanUUID(d, &account), &email, &provider, &tenant); err != nil {
+		var created time.Time
+		if err := rows.Scan(core.ScanUUID(d, &account), &email, &provider, &tenant, &created); err != nil {
 			return nil, fmt.Errorf("resolve subject accounts: %w", err)
 		}
 		if !byID && !SameAddress(email, identifier) && !SameAddress(provider.String, identifier) {
@@ -99,7 +102,7 @@ func SubjectAccounts(ctx context.Context, host core.Host, identifier string) ([]
 		if tenant == "" {
 			tenant = core.DefaultTenantSlug
 		}
-		accounts = append(accounts, SubjectAccount{ID: account.String(), Tenant: tenant, Addresses: []string{email, provider.String}})
+		accounts = append(accounts, SubjectAccount{ID: account.String(), Tenant: tenant, Addresses: []string{email, provider.String}, Created: created})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("resolve subject accounts: %w", err)
