@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -254,63 +251,4 @@ func lockoutHandler(users userStore, mfa security.MFAStore, backend string) *Aut
 		h.WithSharedLockoutBackend(auth.NewFlushProtectedBackend(auth.NewMemoryBackend()))
 	}
 	return h
-}
-
-// The attempt a correct password reserved is returned, and the failures
-// before it are cleared, so an account that signs in is not left one wrong
-// password from a lock.
-func TestLockout_CorrectPasswordClearsTheCount(t *testing.T) {
-	t.Parallel()
-	for _, backend := range lockoutBackends {
-		t.Run(backend, func(t *testing.T) {
-			t.Parallel()
-			users, uid := oneUser(t)
-			h := lockoutHandler(users, nil, backend)
-			for i := 0; i < h.MaxFailedAttempts-1; i++ {
-				failLogin(t, h)
-			}
-
-			req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login",
-				strings.NewReader(makeLoginBody("user@test.com", "correct-horse-battery-staple")))
-			req.Header.Set("Content-Type", "application/json")
-			rr := httptest.NewRecorder()
-			h.Login(rr, req)
-			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-
-			n, err := h.lockoutChecker.CountRecentFailures(context.Background(), uid, time.Now().Add(-h.LockoutWindow))
-			require.NoError(t, err)
-			assert.Zero(t, n)
-		})
-	}
-}
-
-// A code that verifies clears the account's MFA failures, its own reserved
-// attempt included, while the wrong codes before it each stay counted.
-func TestMFALockout_CorrectCodeClearsTheCount(t *testing.T) {
-	t.Parallel()
-	for _, backend := range lockoutBackends {
-		t.Run(backend, func(t *testing.T) {
-			t.Parallel()
-			mfa, totpSecret := mfaFixture(t)
-			h := lockoutHandler(nil, mfa, backend)
-			uid := uuid.New()
-			challenge := func() string {
-				c, err := auth.SignChallenge(lockoutTestSecret, uid, "test@example.com", []string{"admin"}, "")
-				require.NoError(t, err)
-				return c
-			}
-			wrong := wrongTOTPCode(t, totpSecret)
-			for i := 0; i < DefaultMFAVerifyMaxAttempts-1; i++ {
-				require.Equal(t, http.StatusUnprocessableEntity, mfaVerify(h, challenge(), wrong), "attempt %d", i+1)
-			}
-			code, err := totp.GenerateCode(totpSecret, time.Now())
-			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, mfaVerify(h, challenge(), code))
-
-			for i := 0; i < DefaultMFAVerifyMaxAttempts; i++ {
-				assert.Equal(t, http.StatusUnprocessableEntity, mfaVerify(h, challenge(), wrong), "attempt %d after the sign-in", i+1)
-			}
-			assert.Equal(t, http.StatusTooManyRequests, mfaVerify(h, challenge(), wrong))
-		})
-	}
 }

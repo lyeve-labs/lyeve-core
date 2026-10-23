@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -130,6 +132,57 @@ func TestMFALockout_ReleaseGivesBackOnlyItsOwnAttempt(t *testing.T) {
 			require.True(t, ok)
 			require.NoError(t, l.ReleaseMFAAttempt(ctx, uid, first))
 			assert.Equal(t, 4, left(), "a release from a closed window gives back nothing in the new one")
+		})
+	}
+}
+
+// A correct answer gives back only the attempt it reserved. The wrong
+// answers before and after it stay counted, so the owner signing in does not
+// hand a guesser a fresh budget: four wrong, one right and one more wrong is
+// a lock.
+func TestLockout_CorrectAnswerKeepsTheWrongOnesCounted(t *testing.T) {
+	t.Parallel()
+	for _, backend := range lockoutBackends {
+		t.Run(backend+"/password", func(t *testing.T) {
+			t.Parallel()
+			users, _ := oneUser(t)
+			h := lockoutHandler(users, nil, backend)
+			login := func(password string) int {
+				req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login",
+					strings.NewReader(makeLoginBody("user@test.com", password)))
+				req.Header.Set("Content-Type", "application/json")
+				rr := httptest.NewRecorder()
+				h.Login(rr, req)
+				return rr.Code
+			}
+			for i := 0; i < h.MaxFailedAttempts-1; i++ {
+				require.Equal(t, http.StatusUnauthorized, login("wrong-password"), "attempt %d", i+1)
+			}
+			require.Equal(t, http.StatusOK, login("correct-horse-battery-staple"))
+			require.Equal(t, http.StatusUnauthorized, login("wrong-password"))
+			assert.Equal(t, http.StatusUnauthorized, login("correct-horse-battery-staple"),
+				"five wrong passwords in the window lock the account, the correct one between them aside")
+		})
+		t.Run(backend+"/code", func(t *testing.T) {
+			t.Parallel()
+			mfa, totpSecret := mfaFixture(t)
+			h := lockoutHandler(nil, mfa, backend)
+			uid := uuid.New()
+			verify := func(code string) int {
+				c, err := auth.SignChallenge(lockoutTestSecret, uid, "test@example.com", []string{"admin"}, "")
+				require.NoError(t, err)
+				return mfaVerify(h, c, code)
+			}
+			wrong := wrongTOTPCode(t, totpSecret)
+			for i := 0; i < DefaultMFAVerifyMaxAttempts-1; i++ {
+				require.Equal(t, http.StatusUnprocessableEntity, verify(wrong), "attempt %d", i+1)
+			}
+			code, err := totp.GenerateCode(totpSecret, time.Now())
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, verify(code))
+			require.Equal(t, http.StatusUnprocessableEntity, verify(wrong))
+			assert.Equal(t, http.StatusTooManyRequests, verify(wrong),
+				"five wrong codes in the window lock the account, the correct one between them aside")
 		})
 	}
 }
