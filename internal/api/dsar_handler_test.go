@@ -71,7 +71,7 @@ func TestDSARHandler_Export_Success(t *testing.T) {
 			},
 		},
 	})
-	defer compliance.RegisterSubjectExporter(nil)
+	t.Cleanup(compliance.ResetSubjectExporters)
 
 	audit := &mockAuditWriter{}
 	handler := NewDSARHandler(audit, nil, nil)
@@ -142,7 +142,7 @@ func TestDSARHandler_Export_EmptyIdentifier(t *testing.T) {
 
 func TestDSARHandler_Erase_Success(t *testing.T) {
 	compliance.RegisterSubjectEraser(&testEraser{affected: 5})
-	defer compliance.RegisterSubjectEraser(nil)
+	t.Cleanup(compliance.ResetSubjectErasers)
 
 	audit := &mockAuditWriter{}
 	handler := NewDSARHandler(audit, nil, nil)
@@ -329,7 +329,7 @@ func TestDSARHandler_Erase_MultipleFailuresSanitized(t *testing.T) {
 // subject's identifier ends up instead.
 func TestDSARHandler_Export_WithoutAuditWriterReportsTheGap(t *testing.T) {
 	compliance.RegisterSubjectExporter(&testExporter{data: map[string]any{"notes": []map[string]any{}}})
-	defer compliance.RegisterSubjectExporter(nil)
+	t.Cleanup(compliance.ResetSubjectExporters)
 
 	cap := captureAccessLog(t)
 	handler := NewDSARHandler(nil, nil, nil)
