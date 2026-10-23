@@ -680,9 +680,15 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A replayed code falls through to the recovery code check like any other
-	// code that does not sign in, and fails there as an invalid code.
+	// code that does not sign in, and fails there as an invalid code. A code
+	// shaped like an authenticator code is not sent there: it is already
+	// judged wrong, and a recovery code store outage must not give its
+	// attempt back.
+	if outcome != totpAccepted && totpShaped(body.Code) {
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeMFAInvalidCode, nil)
+		return
+	}
 	if outcome != totpAccepted {
-		// Check backup codes as fallback.
 		codeHash := func(c string) string {
 			h2 := sha256.Sum256([]byte(c))
 			return hex.EncodeToString(h2[:])
