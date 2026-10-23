@@ -218,6 +218,7 @@ func RunSubjectErasure(ctx context.Context, identifier string) (int64, error) {
 // returns zero rows and names the holds, so the requester is told their
 // request is deferred rather than quietly given a success that erased nothing.
 func RunSubjectErasureWithHolds(ctx context.Context, identifier string) (ErasureResult, error) {
+	identifier = canonicalSubject(identifier)
 	holds, err := CheckSubjectHolds(ctx, identifier)
 	if err != nil {
 		return ErasureResult{}, err

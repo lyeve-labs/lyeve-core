@@ -161,3 +161,16 @@ func SubjectAddresses(ctx context.Context, identifier string) []SubjectAddress {
 	}
 	return []SubjectAddress{{Address: identifier}}
 }
+
+// canonicalSubject spells an account id as the account records hold it, so
+// every eraser and the account eraser name the same account. An id in upper
+// case, in braces, with a urn:uuid: prefix or without hyphens otherwise
+// reached the plugins' rows through the parsed id while the account eraser,
+// which compares the text, found no account and erased nothing. Any other
+// identifier is returned as given.
+func canonicalSubject(identifier string) string {
+	if id, err := uuid.Parse(identifier); err == nil {
+		return id.String()
+	}
+	return identifier
+}
