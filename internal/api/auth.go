@@ -151,9 +151,6 @@ func (h *AuthHandler) WithSetupToken(t *SetupToken) {
 // LockoutChecker is an optional interface for checking account lockout status.
 // A plugin may implement it to track failed logins and enforce a threshold.
 type LockoutChecker interface {
-	// CountRecentFailures returns the number of failed login attempts for
-	// the given user within the specified window.
-	CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
 	// ReserveAttempt counts one password attempt for the user before the
 	// password is checked, in one step with reading the count. It reports
 	// false and counts nothing once the window holds limit attempts. A check

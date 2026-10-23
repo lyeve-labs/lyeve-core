@@ -203,7 +203,7 @@ func TestPasswordSignIn_AnotherTenantsAccountOnADomainLeavesNoTrace(t *testing.T
 				s.send(t, door, globexDomain, address, "not-the-password", "")
 				s.send(t, door, globexDomain, address, providerTestPassword, "")
 			}
-			count, err := s.handler.lockoutChecker.CountRecentFailures(ctx, u.ID, time.Now().Add(-s.handler.LockoutWindow))
+			count, err := lockoutCount(s.handler.lockoutChecker, u.ID)
 			require.NoError(t, err)
 			assert.Zero(t, count, "%s: failed attempts counted", door)
 			assert.Empty(t, devices.tenantsFor(u.ID), "%s: device history rows", door)

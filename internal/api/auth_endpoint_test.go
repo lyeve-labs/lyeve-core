@@ -229,10 +229,6 @@ type recordingLockoutChecker struct {
 	failures int
 }
 
-func (c *recordingLockoutChecker) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
-	return c.failures, nil
-}
-
 func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	if c.failures >= limit {
 		return Reservation{Count: c.failures}, false, nil
@@ -663,13 +659,6 @@ func (s *fakeUserStore) BumpTokenVersion(ctx context.Context, id uuid.UUID) erro
 type fakeLockoutChecker struct {
 	failCount int
 	err       error
-}
-
-func (c *fakeLockoutChecker) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
-	if c.err != nil {
-		return 0, c.err
-	}
-	return c.failCount, nil
 }
 
 func (c *fakeLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {

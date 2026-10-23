@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -19,10 +18,6 @@ import (
 type countingLockout struct {
 	failCount int
 	recorded  []uuid.UUID
-}
-
-func (c *countingLockout) CountRecentFailures(context.Context, uuid.UUID, time.Time) (int, error) {
-	return c.failCount, nil
 }
 
 func (c *countingLockout) ReserveAttempt(_ context.Context, userID uuid.UUID, _ int) (Reservation, bool, error) {
