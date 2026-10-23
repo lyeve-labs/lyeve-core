@@ -16,6 +16,16 @@ const DefaultMaxFailedAttempts = 5
 // DefaultLockoutWindow is the default window for counting login failures.
 const DefaultLockoutWindow = 15 * time.Minute
 
+// Reservation is one attempt a lockout counted before its answer was checked.
+// It names the window the attempt was counted in, so releasing it gives back
+// that attempt and never one counted in a later window.
+type Reservation struct {
+	// Count is the number of attempts in the window, this one included when
+	// it was counted.
+	Count  int
+	window int64 // unix nanos the window opened
+}
+
 // lockoutUserState is one user's failure window.
 //
 // Both fields are read and written only under the owning InMemoryLockout's

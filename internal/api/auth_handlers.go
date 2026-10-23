@@ -646,7 +646,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	// The user's attempt is counted before the code is checked, in the same
 	// step that reads the count, so concurrent wrong codes cannot all read a
 	// count under the cap and all be checked. A code that verifies clears it.
-	reserved, rerr := h.mfaLockoutChecker.ReserveMFAAttempt(r.Context(), userID)
+	reservation, reserved, rerr := h.mfaLockoutChecker.ReserveMFAAttempt(r.Context(), userID)
 	if rerr != nil {
 		slog.WarnContext(logCtx, "mfa lockout check failed, failing closed", "err", rerr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
@@ -659,6 +659,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	outcome, terr := acceptTOTP(r.Context(), h.mfaStore, userID, plainSecret, body.Code)
 	if terr != nil {
+		h.releaseMFAAttempt(logCtx, userID, reservation)
 		slog.WarnContext(logCtx, "mfa code check failed, failing closed", "err", terr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
@@ -676,6 +677,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		// spend that cannot be written refuses the sign-in.
 		found, spendErr := h.mfaStore.ConsumeBackupCode(r.Context(), userID, codeHash)
 		if spendErr != nil {
+			h.releaseMFAAttempt(logCtx, userID, reservation)
 			slog.WarnContext(logCtx, "mfa recovery code spend failed, failing closed", "err", spendErr, "user_id", userID)
 			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 			return

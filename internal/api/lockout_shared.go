@@ -146,6 +146,41 @@ func (c windowCounter) reserve(ctx context.Context, key string, window time.Dura
 	return windowState{}, false, errCounterContended
 }
 
+// release gives back one attempt counted in the window that opened at start.
+// A window that has closed or been replaced since is left as it is, and the
+// count never goes below zero. The decrement is a compare-and-set from the
+// stored value, so it takes back exactly one attempt however many replicas
+// write at once.
+func (c windowCounter) release(ctx context.Context, key string, window time.Duration, start int64) error {
+	cas, hasCAS := c.backend.(auth.CASBackend)
+	for attempt := 0; attempt < maxCounterCASAttempts; attempt++ {
+		raw, st, present, err := c.read(ctx, key)
+		if err != nil {
+			return err
+		}
+		ttl := time.Duration(int64(window) - (time.Now().UnixNano() - st.start))
+		if !present || st.start != start || st.count == 0 || ttl <= 0 {
+			return nil
+		}
+		st.count--
+		next := st.encode()
+		if !hasCAS {
+			if err := c.backend.Set(ctx, key, next, ttl); err != nil {
+				return fmt.Errorf("write lockout counter: %w", err)
+			}
+			return nil
+		}
+		err = cas.CompareAndSet(ctx, key, raw, next, ttl)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, auth.ErrCASFailed) && c.unreachable(ctx) {
+			return fmt.Errorf("write lockout counter: %w", err)
+		}
+	}
+	return errCounterContended
+}
+
 // clear deletes the counter, which closes its window.
 func (c windowCounter) clear(ctx context.Context, key string) error {
 	if err := c.backend.Delete(ctx, key); err != nil {
@@ -213,7 +248,10 @@ type MFALockoutChecker interface {
 	// ReserveMFAAttempt counts one code attempt against the user before the
 	// code is checked, and reports false without counting once the cap is
 	// reached. ResetMFAAttempts clears the count after a code that verifies.
-	ReserveMFAAttempt(ctx context.Context, userID uuid.UUID) (bool, error)
+	ReserveMFAAttempt(ctx context.Context, userID uuid.UUID) (Reservation, bool, error)
+	// ReleaseMFAAttempt gives back one reserved attempt whose code was never
+	// judged, because the store failed while spending it.
+	ReleaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error
 	ResetMFAAttempts(ctx context.Context, userID uuid.UUID) error
 	// ReserveChallengeAttempt spends one of the challenge's attempts, and
 	// reports false without spending once they are used up.
@@ -237,8 +275,14 @@ func (p processMFALockout) CheckMFALockout(_ context.Context, userID uuid.UUID) 
 	return p.mem.CheckMFALockout(userID)
 }
 
-func (p processMFALockout) ReserveMFAAttempt(_ context.Context, userID uuid.UUID) (bool, error) {
-	return p.mem.ReserveMFAAttempt(userID), nil
+func (p processMFALockout) ReserveMFAAttempt(_ context.Context, userID uuid.UUID) (Reservation, bool, error) {
+	r, ok := p.mem.ReserveMFAAttempt(userID)
+	return r, ok, nil
+}
+
+func (p processMFALockout) ReleaseMFAAttempt(_ context.Context, userID uuid.UUID, r Reservation) error {
+	p.mem.ReleaseMFAAttempt(userID, r)
+	return nil
 }
 
 func (p processMFALockout) ResetMFAAttempts(_ context.Context, userID uuid.UUID) error {
@@ -308,9 +352,14 @@ func (l *SharedMFALockout) CheckMFALockout(ctx context.Context, userID uuid.UUID
 
 // ReserveMFAAttempt counts one code attempt against the user unless the
 // failure cap is reached.
-func (l *SharedMFALockout) ReserveMFAAttempt(ctx context.Context, userID uuid.UUID) (bool, error) {
-	_, ok, err := l.counter.reserve(ctx, l.userKey(userID), l.window, l.maxAttempts)
-	return ok, err
+func (l *SharedMFALockout) ReserveMFAAttempt(ctx context.Context, userID uuid.UUID) (Reservation, bool, error) {
+	st, ok, err := l.counter.reserve(ctx, l.userKey(userID), l.window, l.maxAttempts)
+	return Reservation{Count: int(st.count), window: st.start}, ok, err
+}
+
+// ReleaseMFAAttempt gives back one attempt reserved in the user's window.
+func (l *SharedMFALockout) ReleaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error {
+	return l.counter.release(ctx, l.userKey(userID), l.window, r.window)
 }
 
 // ResetMFAAttempts clears the user's failures after a code that verifies.
