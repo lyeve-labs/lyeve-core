@@ -73,3 +73,40 @@ func TestSubjectSince_OnlyTheOwnExportCarriesTheAccountCreation(t *testing.T) {
 		assert.False(t, rec.since.Before(before), "an account of another tenant bounds the run at now")
 	})
 }
+
+// The account and a plugin's row are stamped by different clocks, so a row
+// written in the account's first second can read as a little older than the
+// account. Such a row is the subject's own and stays in the export.
+func TestSubjectSince_KeepsARowFromTheAccountsFirstSecond(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		ctx := context.Background()
+		compliance.ResetSubjectErasers()
+		t.Cleanup(compliance.ResetSubjectErasers)
+		compliance.ResetSubjectExporters()
+		t.Cleanup(compliance.ResetSubjectExporters)
+
+		id := uuid.New()
+		_, err := host.Querier(ctx).Exec(ctx,
+			`INSERT INTO sys_users (id, email, password_hash, tenant_id, created_at) VALUES ($1, $2, '', $3, $4)`,
+			id, "first-second-"+id.String()[:8]+"@example.com", "acme",
+			time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(700*time.Millisecond))
+		require.NoError(t, err)
+		// The time as the dialect kept it: MySQL keeps whole seconds, so there
+		// the row and the account share the instant.
+		var created time.Time
+		stored, err := host.Querier(ctx).QueryRow(ctx, `SELECT created_at FROM sys_users WHERE id = $1`, id)
+		require.NoError(t, err)
+		require.NoError(t, stored.Scan(&created))
+		second := created.Truncate(time.Second)
+		row := second.Add(created.Sub(second) / 2)
+		compliance.RegisterSubjectEraser(plugintest.SubjectAccounts(host))
+		rec := &sinceRecorder{}
+		compliance.RegisterSubjectExporterAs("notes", rec)
+
+		_, err = compliance.RunSubjectExportSections(core.WithTenantID(ctx, "acme"), id.String(), []string{"notes"})
+		require.NoError(t, err)
+		require.True(t, rec.ok)
+		assert.False(t, row.Before(rec.since), "a row stamped %s, in the second of an account created at %s, is older than the bound %s on %s",
+			row.Format(time.RFC3339Nano), created.Format(time.RFC3339Nano), rec.since.Format(time.RFC3339Nano), host.Dialect())
+	})
+}
