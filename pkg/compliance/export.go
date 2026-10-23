@@ -170,7 +170,17 @@ type ExportError struct {
 // RunSubjectExport fans out the given identifier to all registered exporters.
 // Each exporter is called independently. A failure in one does not stop the
 // others. The results are merged into a single SubjectExportResult.
+//
+// An account id is spelled as the account records hold it, and the subject's
+// addresses are then resolved, as an erasure resolves them, and every
+// exporter reads them through SubjectAddresses. A set that cannot be
+// read returns ErrSubjectAddressesUnresolved and no bundle.
 func RunSubjectExport(ctx context.Context, identifier string) (*SubjectExportResult, error) {
+	identifier = canonicalSubject(identifier)
+	ctx, err := resolveExportAddresses(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
 	per := runExportersInto(ctx, identifier)
 
 	// A caller that resolved no tenant covered no tenant. ExportScope's own
