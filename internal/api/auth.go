@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -153,13 +154,21 @@ type LockoutChecker interface {
 	// CountRecentFailures returns the number of failed login attempts for
 	// the given user within the specified window.
 	CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
-	// RecordFailedAttempt records a failed login attempt for the given user.
-	RecordFailedAttempt(ctx context.Context, userID uuid.UUID) error
+	// ReserveAttempt counts one password attempt for the user before the
+	// password is checked, in one step with reading the count, and returns
+	// the window's count. It reports false and counts nothing once the window
+	// holds limit attempts. A check that read the count and recorded a
+	// failure afterwards let every concurrent request that read before the
+	// first failure landed through to the password check.
+	ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error)
+	// ResetFailedAttempts clears the user's count after a correct password,
+	// which also returns the attempt that password reserved.
+	ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error
 }
 
 // WithLockoutChecker wires an optional lockout checker. When set, the Login
-// handler checks recent failures before password verification and returns 429
-// if the threshold is exceeded.
+// handler reserves an attempt before password verification and refuses once
+// the threshold is reached.
 func (h *AuthHandler) WithLockoutChecker(lc LockoutChecker) {
 	h.lockoutChecker = lc
 }
@@ -175,6 +184,18 @@ func (h *AuthHandler) WithSharedLockoutBackend(backend core.CacheBackend) {
 	h.lockoutChecker = NewSharedLockout(backend, h.LockoutWindow)
 	h.mfaLockoutChecker = NewSharedMFALockout(backend, 0, 0)
 	h.lockoutShared = true
+}
+
+// clearPasswordAttempts clears the account's lockout count after a correct
+// password, which also returns the attempt that password reserved. A clear
+// that fails is logged and changes no answer.
+func (h *AuthHandler) clearPasswordAttempts(ctx context.Context, userID uuid.UUID) {
+	if h.lockoutChecker == nil {
+		return
+	}
+	if err := h.lockoutChecker.ResetFailedAttempts(ctx, userID); err != nil {
+		slog.WarnContext(ctx, "failed to clear lockout attempts", "err", err, "user_id", userID)
+	}
 }
 
 // lockoutScopeNote says where a lockout lives, for the lines that report one.

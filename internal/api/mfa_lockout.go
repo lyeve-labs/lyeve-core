@@ -110,20 +110,28 @@ func (l *InMemoryMFALockout) CheckMFALockout(userID uuid.UUID) (bool, error) {
 	return state.failures.Load() >= int64(l.maxAttempts), nil
 }
 
-// RecordMFAFailure increments the failure counter for the given user.
-func (l *InMemoryMFALockout) RecordMFAFailure(userID uuid.UUID) {
+// ReserveMFAAttempt counts one code attempt against the user before the code
+// is checked, and returns false without counting once the user has reached
+// the failure limit. The read and the increment are one step under l.mu, so
+// of many concurrent attempts only the limit reach the code check. A window
+// that has expired starts again.
+func (l *InMemoryMFALockout) ReserveMFAAttempt(userID uuid.UUID) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	state, ok := l.entries[userID]
-	if !ok {
+	if !ok || time.Since(state.createdAt) > l.window {
 		state = &mfaLockoutUserState{
 			failures:  new(atomic.Int64),
 			createdAt: time.Now(),
 		}
 		l.entries[userID] = state
 	}
+	if state.failures.Load() >= int64(l.maxAttempts) {
+		return false
+	}
 	state.failures.Add(1)
+	return true
 }
 
 // ResetMFAAttempts clears the failure counter for the given user.
@@ -140,10 +148,21 @@ func (l *InMemoryMFALockout) CheckChallengeLimit(challengeHash string) (bool, er
 	return counter.Load() >= int64(l.maxChallengeAttempts), nil
 }
 
-// RecordChallengeAttempt increments the attempt counter for the challenge hash.
-func (l *InMemoryMFALockout) RecordChallengeAttempt(challengeHash string) {
+// ReserveChallengeAttempt spends one of the challenge's attempts, and returns
+// false without spending once they are used up. The counter is raised by
+// compare-and-swap from a value under the cap, so concurrent attempts on one
+// challenge cannot pass the cap together.
+func (l *InMemoryMFALockout) ReserveChallengeAttempt(challengeHash string) bool {
 	counter := l.loadChallengeCounter(challengeHash, false)
-	counter.Add(1)
+	for {
+		n := counter.Load()
+		if n >= int64(l.maxChallengeAttempts) {
+			return false
+		}
+		if counter.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
 }
 
 // loadChallengeCounter returns the atomic counter for a challenge hash.

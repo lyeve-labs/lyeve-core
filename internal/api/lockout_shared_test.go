@@ -110,11 +110,69 @@ func TestSharedLockout_WindowStartedBeforeSinceCountsZero(t *testing.T) {
 	t.Parallel()
 	l := NewSharedLockout(auth.NewMemoryBackend(), time.Hour)
 	uid := uuid.New()
-	require.NoError(t, l.RecordFailedAttempt(context.Background(), uid))
+	require.NoError(t, reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit)))
 
 	n, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(time.Minute))
 	require.NoError(t, err)
 	assert.Zero(t, n)
+}
+
+// noLimit is a limit no test reaches, for the tests about counting rather
+// than refusing.
+const noLimit = 1 << 30
+
+func reserveErr(_ int, _ bool, err error) error { return err }
+
+// Of many concurrent reservations on two replicas, exactly the limit are
+// counted and the rest are refused without writing.
+func TestSharedLockout_ConcurrentReservesStopAtTheLimit(t *testing.T) {
+	t.Parallel()
+	backend := auth.NewFlushProtectedBackend(auth.NewMemoryBackend())
+	a := NewSharedLockout(backend, time.Hour)
+	b := NewSharedLockout(backend, time.Hour)
+	uid := uuid.New()
+
+	const callers, limit = 12, 5
+	var wg sync.WaitGroup
+	var granted atomic.Int32
+	for i := 0; i < callers; i++ {
+		l := a
+		if i%2 == 1 {
+			l = b
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, ok, err := l.ReserveAttempt(context.Background(), uid, limit)
+			assert.NoError(t, err)
+			if ok {
+				granted.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, int32(limit), granted.Load())
+	n, err := a.CountRecentFailures(context.Background(), uid, time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, limit, n)
+}
+
+func TestSharedLockout_ResetClearsTheWindow(t *testing.T) {
+	t.Parallel()
+	l := NewSharedLockout(auth.NewMemoryBackend(), time.Hour)
+	uid := uuid.New()
+	for i := 0; i < 5; i++ {
+		require.NoError(t, reserveErr(l.ReserveAttempt(context.Background(), uid, 5)))
+	}
+	_, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
+	n, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, 1, n)
 }
 
 func TestSharedLockout_ConcurrentReplicasCountEveryFailure(t *testing.T) {
@@ -137,7 +195,7 @@ func TestSharedLockout_ConcurrentReplicasCountEveryFailure(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs <- l.RecordFailedAttempt(context.Background(), uid)
+			errs <- reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 		}()
 	}
 	wg.Wait()
@@ -172,10 +230,10 @@ func TestSharedLockout_CASContentionCountsBothFailures(t *testing.T) {
 	other := NewSharedLockout(mem, time.Hour)
 	uid := uuid.New()
 	rb := &racingBackend{MemoryBackend: mem}
-	rb.race = func() { require.NoError(t, other.RecordFailedAttempt(context.Background(), uid)) }
+	rb.race = func() { require.NoError(t, reserveErr(other.ReserveAttempt(context.Background(), uid, noLimit))) }
 	l := NewSharedLockout(rb, time.Hour)
 
-	require.NoError(t, l.RecordFailedAttempt(context.Background(), uid))
+	require.NoError(t, reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit)))
 
 	n, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
@@ -198,7 +256,7 @@ func TestSharedLockout_BackendWithoutCASStillCounts(t *testing.T) {
 	l := NewSharedLockout(setOnlyBackend{mem: auth.NewMemoryBackend()}, time.Hour)
 	uid := uuid.New()
 	for i := 0; i < 3; i++ {
-		require.NoError(t, l.RecordFailedAttempt(context.Background(), uid))
+		require.NoError(t, reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit)))
 	}
 	n, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-time.Hour))
 	require.NoError(t, err)
@@ -224,7 +282,7 @@ func TestSharedLockout_UnreachableBackendIsAnError(t *testing.T) {
 	l := NewSharedLockout(downBackend{}, time.Hour)
 	_, err := l.CountRecentFailures(context.Background(), uuid.New(), time.Now().Add(-time.Hour))
 	require.Error(t, err, "an outage must not read as zero failures")
-	require.Error(t, l.RecordFailedAttempt(context.Background(), uuid.New()))
+	require.Error(t, reserveErr(l.ReserveAttempt(context.Background(), uuid.New(), noLimit)))
 }
 
 func mfaVerify(h *AuthHandler, challengeToken, code string) int {
@@ -314,11 +372,13 @@ func TestSharedMFALockout_ChallengeAttemptsShared(t *testing.T) {
 		if i%2 == 1 {
 			l = b
 		}
-		require.NoError(t, l.RecordChallengeAttempt(ctx, "hash"))
+		spent, err := l.ReserveChallengeAttempt(ctx, "hash")
+		require.NoError(t, err)
+		require.True(t, spent, "attempt %d", i+1)
 	}
-	exhausted, err := a.CheckChallengeLimit(ctx, "hash")
+	spent, err := a.ReserveChallengeAttempt(ctx, "hash")
 	require.NoError(t, err)
-	assert.True(t, exhausted)
+	assert.False(t, spent, "the challenge's attempts are spent across both replicas")
 }
 
 func TestSharedMFALockout_UnreachableBackendRefusesChallenge(t *testing.T) {
