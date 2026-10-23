@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -70,9 +71,35 @@ func resolveSection(e SubjectExporter, section string) (string, bool) {
 	return fn(e, section)
 }
 
+// UnsectionedExporter is a registered exporter that resolves to no section.
+// No export of chosen sections can reach it, so its data is missing from
+// every self-service bundle.
+type UnsectionedExporter struct {
+	// Index is the exporter's position in the registry.
+	Index int
+
+	// Package is the import path of the package that declares the
+	// exporter's concrete type, which is what attribution matched on.
+	Package string
+}
+
+// UnsectionedSubjectExporters lists every registered exporter that resolves
+// to no section now.
+func UnsectionedSubjectExporters() []UnsectionedExporter {
+	_, unsectioned := resolveExportRuns()
+	return unsectioned
+}
+
 // activeExportRuns returns every registered exporter whose section is active
 // now, with its section and its position in the registry.
 func activeExportRuns() []exportRun {
+	runs, _ := resolveExportRuns()
+	return runs
+}
+
+// resolveExportRuns resolves every registered exporter once, and splits off
+// the ones that resolve to no section from the ones whose section is active.
+func resolveExportRuns() ([]exportRun, []UnsectionedExporter) {
 	r := globalExporterRegistry
 	r.mu.Lock()
 	exporters := append([]SubjectExporter(nil), r.exporters...)
@@ -80,14 +107,31 @@ func activeExportRuns() []exportRun {
 	r.mu.Unlock()
 
 	var runs []exportRun
+	var unsectioned []UnsectionedExporter
 	for i, e := range exporters {
 		section, active := resolveSection(e, sections[i])
-		if section == "" || !active {
+		if section == "" {
+			unsectioned = append(unsectioned, UnsectionedExporter{Index: i, Package: exporterPackage(e)})
 			continue
 		}
-		runs = append(runs, exportRun{index: i, section: section, exporter: e})
+		if active {
+			runs = append(runs, exportRun{index: i, section: section, exporter: e})
+		}
 	}
-	return runs
+	return runs, unsectioned
+}
+
+// exporterPackage is the import path of the package that declares e's
+// concrete type, looking through pointers.
+func exporterPackage(e SubjectExporter) string {
+	t := reflect.TypeOf(e)
+	for t != nil && t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t == nil {
+		return ""
+	}
+	return t.PkgPath()
 }
 
 // SubjectExportSections lists, sorted, the sections an export can hold now.
@@ -118,7 +162,8 @@ type SubjectExportSectionsResult struct {
 // tenant is refused, because the only scope left would be every tenant. A
 // section that is not active now is refused with ErrExportSectionUnavailable
 // before any exporter runs, so a bundle never silently lacks a section that
-// was asked for.
+// was asked for. An exporter that resolves to no section cannot be asked for
+// at all, so while one is registered every bundle is marked incomplete.
 //
 // The subject's addresses are resolved as RunSubjectExport resolves them, and
 // a set that cannot be read returns ErrSubjectAddressesUnresolved.
@@ -131,8 +176,9 @@ func RunSubjectExportSections(ctx context.Context, identifier string, sections [
 	for _, s := range sections {
 		want[s] = true
 	}
+	active, unsectioned := resolveExportRuns()
 	var runs []exportRun
-	for _, run := range activeExportRuns() {
+	for _, run := range active {
 		if want[run.section] {
 			runs = append(runs, run)
 		}
@@ -158,6 +204,14 @@ func RunSubjectExportSections(ctx context.Context, identifier string, sections [
 		return nil, err
 	}
 	per, keys := runExporters(ctx, identifier, runs)
+	// An exporter in no section is outside every choice, so the bundle can
+	// never hold its data. Saying so keeps the bundle from reading as whole.
+	for _, u := range unsectioned {
+		per.Errors = append(per.Errors, ExportError{
+			Index: u.Index,
+			Error: "some data is held by an exporter that answers for no section, so no export of chosen sections reaches it",
+		})
+	}
 	result := &SubjectExportResult{
 		Identifier: identifier,
 		Plugins:    per.Plugins,

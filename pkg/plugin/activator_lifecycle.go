@@ -459,13 +459,12 @@ func (a *Activator) RegisterSubjectErasers() int {
 // Each exporter is registered as the section of the plugin it came from, and
 // the activator becomes the resolver that says which sections are active, so
 // an export of chosen sections reaches only the plugins running at the time
-// of the call.
+// of the call. An exporter that resolves to no section is logged as an
+// error, because every self-service export then misses its data.
 func (a *Activator) RegisterSubjectExporters() int {
 	compliance.SetExportSectionResolver(a.subjectExportSection)
 
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-
 	registered := 0
 	for name, ap := range a.active {
 		if ap.plugin == nil {
@@ -479,6 +478,14 @@ func (a *Activator) RegisterSubjectExporters() int {
 			compliance.RegisterSubjectExporterAs(name, e)
 			registered++
 		}
+	}
+	// The resolver takes the read lock itself, so it is released before the
+	// registry is resolved.
+	a.mu.RUnlock()
+
+	for _, u := range compliance.UnsectionedSubjectExporters() {
+		a.logger.Error("subject exporter answers for no section, so every self-service export leaves its data out and reports itself incomplete",
+			"index", u.Index, "package", u.Package)
 	}
 	return registered
 }
