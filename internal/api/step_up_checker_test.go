@@ -41,11 +41,16 @@ func (h *stepUpHost) wired(t *testing.T) core.StepUpChecker {
 
 // stepUpRequest is a plugin route's request from u's signed-in session.
 func stepUpRequest(u *domain.User, claims ...func(*core.AuthClaims)) *http.Request {
-	c := &core.AuthClaims{UserID: u.ID.String(), TenantID: "default", Roles: u.Roles}
+	return stepUpRequestIn("default", u, claims...)
+}
+
+// stepUpRequestIn is stepUpRequest on a request that resolved to tenant.
+func stepUpRequestIn(tenant string, u *domain.User, claims ...func(*core.AuthClaims)) *http.Request {
+	c := &core.AuthClaims{UserID: u.ID.String(), TenantID: tenant, Roles: u.Roles}
 	for _, f := range claims {
 		f(c)
 	}
-	ctx := context.WithValue(core.WithTenantID(context.Background(), "default"), core.ClaimsKey, c)
+	ctx := context.WithValue(core.WithTenantID(context.Background(), tenant), core.ClaimsKey, c)
 	return httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil).WithContext(ctx)
 }
 
@@ -123,8 +128,31 @@ func TestCheckStepUp_OnlyASessionAndAKnownFactor(t *testing.T) {
 		assert.ErrorIs(t, checker.CheckStepUp(stepUpRequest(u, f), core.StepUpPassword, tokenTestPassword), core.ErrStepUpUnavailable, name)
 	}
 	err := checker.CheckStepUp(stepUpRequest(u), "email", "123456")
-	require.Error(t, err)
+	require.ErrorIs(t, err, core.ErrServiceUnavailable)
 	for _, known := range []error{core.ErrStepUpUnavailable, core.ErrStepUpRequired, core.ErrStepUpRefused, core.ErrStepUpLocked} {
 		assert.NotErrorIs(t, err, known)
 	}
+}
+
+// A plugin can set the session claims on its own request, so claims naming an
+// account of another tenant reach no check and spend none of that account's
+// lockouts. A super admin with no home tenant acts in every tenant.
+func TestCheckStepUp_OnlyTheRequestTenantsAccount(t *testing.T) {
+	host := &stepUpHost{}
+	rg := newTokenRig(t, WithScalingHost(host))
+	checker := host.wired(t)
+	other, _ := rg.userIn("other-tenant", "user")
+
+	for i := range 10 {
+		assert.ErrorIs(t, checker.CheckStepUp(stepUpRequest(other), core.StepUpPassword, "wrong"), core.ErrStepUpUnavailable, "attempt %d", i)
+	}
+	assert.ErrorIs(t, checker.CheckStepUp(stepUpRequest(other), core.StepUpPassword, tokenTestPassword), core.ErrStepUpUnavailable)
+	assert.NoError(t, checker.CheckStepUp(stepUpRequestIn("other-tenant", other), core.StepUpPassword, tokenTestPassword),
+		"the account's own tenant, with no lockout spent by the refused checks")
+
+	admin, _ := rg.userIn("", "super_admin")
+	assert.NoError(t, checker.CheckStepUp(stepUpRequestIn("other-tenant", admin), core.StepUpPassword, tokenTestPassword))
+	homeless, _ := rg.userIn("", "user")
+	assert.NoError(t, checker.CheckStepUp(stepUpRequest(homeless), core.StepUpPassword, tokenTestPassword))
+	assert.ErrorIs(t, checker.CheckStepUp(stepUpRequestIn("other-tenant", homeless), core.StepUpPassword, tokenTestPassword), core.ErrStepUpUnavailable)
 }

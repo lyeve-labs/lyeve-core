@@ -240,6 +240,8 @@ func capName(c Capability) string {
 		return "CapSessionSign"
 	case CapSessionKey:
 		return "CapSessionKey"
+	case CapStepUp:
+		return "CapStepUp"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -478,10 +480,14 @@ func (h *ScopedHost) CompleteMFAChallenge(ctx context.Context, challengeToken st
 	return "", ErrCapDenied
 }
 
-// CheckStepUp forwards to inner if it implements StepUpChecker. It needs no
-// capability: it checks only the account the request's own session names,
-// and counts every wrong answer against that account's lockouts.
+// CheckStepUp forwards to inner if it implements StepUpChecker. Denied
+// without CapStepUp, because a plugin can set the session claims on its own
+// request, and every wrong answer it sends spends that account's lockouts.
 func (h *ScopedHost) CheckStepUp(r *http.Request, factor, answer string) error {
+	if !h.has(CapStepUp) {
+		h.warnDenied("CheckStepUp", "", CapStepUp)
+		return ErrCapDenied
+	}
 	if c, ok := h.inner.(StepUpChecker); ok {
 		return c.CheckStepUp(r, factor, answer)
 	}
