@@ -136,6 +136,49 @@ func TestMFALockout_ReleaseGivesBackOnlyItsOwnAttempt(t *testing.T) {
 	}
 }
 
+// A password release gives back one attempt in the window it was reserved
+// in, and nothing once that window has closed and another has opened.
+func TestLockout_ReleaseGivesBackOnlyItsOwnAttempt(t *testing.T) {
+	t.Parallel()
+	const window = 50 * time.Millisecond
+	lockouts := map[string]LockoutChecker{
+		"in-process": NewInMemoryLockout(5, window),
+		"shared":     NewSharedLockout(auth.NewFlushProtectedBackend(auth.NewMemoryBackend()), window),
+	}
+	for name, l := range lockouts {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			uid := uuid.New()
+			reserve := func() (Reservation, bool) {
+				r, ok, err := l.ReserveAttempt(ctx, uid, 5)
+				require.NoError(t, err)
+				return r, ok
+			}
+			left := func() int {
+				n := 0
+				for _, ok := reserve(); ok; _, ok = reserve() {
+					n++
+				}
+				return n
+			}
+
+			first, ok := reserve()
+			require.True(t, ok)
+			_, ok = reserve()
+			require.True(t, ok)
+			require.NoError(t, l.ReleaseAttempt(ctx, uid, first))
+			assert.Equal(t, 4, left(), "one of the two attempts was given back")
+
+			time.Sleep(2 * window)
+			_, ok = reserve()
+			require.True(t, ok)
+			require.NoError(t, l.ReleaseAttempt(ctx, uid, first))
+			assert.Equal(t, 4, left(), "a release from a closed window gives back nothing in the new one")
+		})
+	}
+}
+
 // A correct answer gives back only the attempt it reserved. The wrong
 // answers before and after it stay counted, so the owner signing in does not
 // hand a guesser a fresh budget: four wrong, one right and one more wrong is
