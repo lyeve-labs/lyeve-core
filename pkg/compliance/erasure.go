@@ -189,10 +189,17 @@ func SubjectErasers() []SubjectEraser {
 // an error and every one that never ran because the context ended. The error
 // a run returns is only the first of them, and a caller that records or
 // retries an incomplete erasure needs all of them.
+//
+// Shared counts the subject's addresses no eraser reached because another
+// account in the same tenant holds them too (see ResolveSubjectAddresses).
+// Rows under them stay, and once the account is erased only an erasure
+// naming the address reaches them, so a run with any is unfinished although
+// every eraser succeeded.
 type ErasureResult struct {
 	Rows   int64
 	Holds  []HoldRef
 	Failed []string
+	Shared int
 }
 
 // RunSubjectErasure fans out the given identifier to all registered erasers
@@ -381,6 +388,7 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 		}
 		return res, fmt.Errorf("%w: %w", ErrSubjectAddressesUnresolved, err)
 	}
+	res.Shared = sharedSubjectAddresses(ctx)
 
 	var total int64
 	var firstErr error

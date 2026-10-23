@@ -171,7 +171,9 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 // names each eraser that failed or never ran, and the account is among them:
 // the erasure signs the subject out and locks the account first, and
 // anonymizes it only once every other eraser has succeeded. Repeating the
-// request runs every eraser again and finishes the erasure.
+// request runs every eraser again and finishes the erasure. Complete is also
+// false when another account holds one of the subject's addresses: rows under
+// it are kept, and only an erasure naming that address reaches them.
 type EraseResponse struct {
 	Identifier string   `json:"identifier"`
 	TotalRows  int64    `json:"total_rows"`
@@ -223,7 +225,7 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), erasureRunLimit)
 	defer cancel()
 	result, err := compliance.RunSubjectErasureWithHolds(ctx, body.Identifier)
-	complete := err == nil && len(result.Holds) == 0
+	complete := err == nil && len(result.Holds) == 0 && result.Shared == 0
 	status := http.StatusOK
 	var refusal string
 	switch {
@@ -243,7 +245,7 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, compliance.ErrSubjectAddressesUnresolved):
 		status = http.StatusServiceUnavailable
 		refusal = "the subject's addresses could not be read; erasure was not attempted"
-	case err != nil:
+	case err != nil, result.Shared > 0:
 		status = http.StatusMultiStatus
 	}
 	// The caller may be gone by now, so the outcome is logged whether or not
@@ -255,6 +257,7 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		"holds", len(result.Holds),
 		"rows", result.Rows,
 		"failed", result.Failed,
+		"shared", result.Shared,
 	)
 	if refusal != "" {
 		httpx.ErrorReq(w, r, status, refusal)
@@ -279,6 +282,12 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 			"the account was not erased: it is signed out and locked until every other part has erased",
 			"repeat the request to finish the erasure",
 		}
+	}
+	if result.Shared > 0 {
+		// The answer names no address, as the log names none: which one is
+		// shared would tell the caller about the other account.
+		resp.Errors = append(resp.Errors,
+			"not finished: rows kept under an address another account also holds, which only an erasure naming that address reaches")
 	}
 
 	// Audit log.

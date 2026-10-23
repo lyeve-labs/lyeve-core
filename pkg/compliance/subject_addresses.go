@@ -171,7 +171,9 @@ type subjectAddressesKey struct{}
 // address composed and decomposed, and an identity provider can assert
 // another account's address. Either account's rows under it would reach the
 // other's. What is dropped is logged once per run for each reason, as a
-// count.
+// count. The count of shared addresses also rides on ctx: rows under them
+// stay, and once the account is erased only an erasure naming the address
+// reaches them, so the run reports itself unfinished.
 func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []SubjectEraser) (context.Context, error) {
 	var set []SubjectAddress
 	dropped := 0
@@ -221,17 +223,27 @@ func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []S
 	if dropped > 0 {
 		slog.WarnContext(ctx, "subject_addresses_dropped", "count", dropped, "reason", "not an email address")
 	}
-	set, err := dropShared(ctx, set, accounts, erasers)
+	set, shared, err := dropShared(ctx, set, accounts, erasers)
 	if err != nil {
 		return ctx, err
 	}
+	ctx = context.WithValue(ctx, subjectAddressesSharedKey{}, shared)
 	return context.WithValue(ctx, subjectAddressesKey{}, set), nil
 }
 
+type subjectAddressesSharedKey struct{}
+
+// sharedSubjectAddresses returns how many of the subject's addresses
+// ResolveSubjectAddresses left out of ctx because another account holds them.
+func sharedSubjectAddresses(ctx context.Context) int {
+	n, _ := ctx.Value(subjectAddressesSharedKey{}).(int)
+	return n
+}
+
 // dropShared returns set without each address read from an account that an
-// account outside accounts holds in the same tenant. The identifier the
-// caller named has no tenant and keeps its reach.
-func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAccount, erasers []SubjectEraser) ([]SubjectAddress, error) {
+// account outside accounts holds in the same tenant, and how many it left
+// out. The identifier the caller named has no tenant and keeps its reach.
+func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAccount, erasers []SubjectEraser) ([]SubjectAddress, int, error) {
 	var resolvers []SubjectHolderResolver
 	for _, e := range erasers {
 		if r, ok := e.(SubjectHolderResolver); ok {
@@ -251,7 +263,7 @@ func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAcc
 			}
 			holders, err := r.AddressHolders(ctx, a.Tenant, a.Address)
 			if err != nil {
-				return nil, fmt.Errorf("subject address holders: %w", err)
+				return nil, 0, fmt.Errorf("subject address holders: %w", err)
 			}
 			held = slices.ContainsFunc(holders, func(h SubjectAccount) bool {
 				return h.Tenant == a.Tenant && !subject(h.ID) && slices.ContainsFunc(h.Addresses, func(held string) bool {
@@ -268,7 +280,7 @@ func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAcc
 	if shared > 0 {
 		slog.WarnContext(ctx, "subject_addresses_dropped", "count", shared, "reason", "held by another account")
 	}
-	return kept, nil
+	return kept, shared, nil
 }
 
 // SubjectAddresses returns the addresses of the subject identifier names, as
