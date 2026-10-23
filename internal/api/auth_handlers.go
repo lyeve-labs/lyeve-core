@@ -290,9 +290,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// The attempt is counted here, before the password is checked, in the
 	// same step that reads the count, so concurrent wrong passwords cannot all
 	// read a count under the limit and all be checked. A correct password
-	// clears the count below.
+	// gives back its own attempt below.
+	var reservation Reservation
 	if h.lockoutChecker != nil {
-		count, reserved, lerr := h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
+		var reserved bool
+		var lerr error
+		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
 		if lerr != nil {
 			slog.Warn("lockout check failed, failing closed", "err", lerr, "user_id", user.ID)
 			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
@@ -308,7 +311,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			// line names it for the operator and changes no response.
 			slog.WarnContext(failedAttemptContext(r.Context(), user), "login refused: account is locked out",
 				"user_id", user.ID,
-				"failures", count,
+				"failures", reservation.Count,
 				"max_attempts", h.MaxFailedAttempts,
 				"window", h.LockoutWindow,
 				"note", h.lockoutScopeNote())
@@ -346,7 +349,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	h.clearPasswordAttempts(r.Context(), user.ID)
+	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
 
 	// Account state enforcement (after password, before session)
 	// Answer exactly as a wrong password does. Collapsing disabled into
@@ -656,7 +659,8 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	// The user's attempt is counted before the code is checked, in the same
 	// step that reads the count, so concurrent wrong codes cannot all read a
-	// count under the cap and all be checked. A code that verifies clears it.
+	// count under the cap and all be checked. A code that verifies gives back
+	// its own attempt.
 	reservation, reserved, rerr := h.mfaLockoutChecker.ReserveMFAAttempt(r.Context(), userID)
 	if rerr != nil {
 		slog.WarnContext(logCtx, "mfa lockout check failed, failing closed", "err", rerr, "user_id", userID)
@@ -700,9 +704,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if cerr := h.mfaLockoutChecker.ResetMFAAttempts(r.Context(), userID); cerr != nil {
-		slog.WarnContext(logCtx, "failed to clear mfa failures", "err", cerr, "user_id", userID)
-	}
+	h.releaseMFAAttempt(logCtx, userID, reservation)
 
 	// The challenge is spent before anything is signed, by a write only one
 	// request wins. A completion that loses it, or cannot write it, is refused.

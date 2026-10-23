@@ -159,15 +159,16 @@ type LockoutChecker interface {
 	// the given user within the specified window.
 	CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
 	// ReserveAttempt counts one password attempt for the user before the
-	// password is checked, in one step with reading the count, and returns
-	// the window's count. It reports false and counts nothing once the window
-	// holds limit attempts. A check that read the count and recorded a
-	// failure afterwards let every concurrent request that read before the
-	// first failure landed through to the password check.
-	ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error)
-	// ResetFailedAttempts clears the user's count after a correct password,
-	// which also returns the attempt that password reserved.
-	ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error
+	// password is checked, in one step with reading the count. It reports
+	// false and counts nothing once the window holds limit attempts. A check
+	// that read the count and recorded a failure afterwards let every
+	// concurrent request that read before the first failure landed through
+	// to the password check.
+	ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error)
+	// ReleaseAttempt gives back one reserved attempt whose password was
+	// correct. Every other attempt in the window stays counted, wrong ones
+	// still in flight included.
+	ReleaseAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error
 }
 
 // WithLockoutChecker wires an optional lockout checker. When set, the Login
@@ -190,21 +191,22 @@ func (h *AuthHandler) WithSharedLockoutBackend(backend core.CacheBackend) {
 	h.lockoutShared = true
 }
 
-// clearPasswordAttempts clears the account's lockout count after a correct
-// password, which also returns the attempt that password reserved. A clear
-// that fails is logged and changes no answer.
-func (h *AuthHandler) clearPasswordAttempts(ctx context.Context, userID uuid.UUID) {
+// releasePasswordAttempt gives back the attempt a correct password reserved,
+// and only that one, so the wrong passwords in the window stay counted. A
+// release that fails is logged and changes no answer.
+func (h *AuthHandler) releasePasswordAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
 	if h.lockoutChecker == nil {
 		return
 	}
-	if err := h.lockoutChecker.ResetFailedAttempts(ctx, userID); err != nil {
-		slog.WarnContext(ctx, "failed to clear lockout attempts", "err", err, "user_id", userID)
+	if err := h.lockoutChecker.ReleaseAttempt(ctx, userID, r); err != nil {
+		slog.WarnContext(ctx, "failed to release lockout attempt", "err", err, "user_id", userID)
 	}
 }
 
-// releaseMFAAttempt gives back the code attempt a request reserved when the
-// store failed before the code could be judged, so an outage never counts a
-// code against its owner. A release that fails is logged.
+// releaseMFAAttempt gives back the code attempt a request reserved, when the
+// code verified or the store failed before it could be judged, so neither a
+// correct code nor an outage counts against the owner. Only that attempt is
+// given back. A release that fails is logged.
 func (h *AuthHandler) releaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
 	if err := h.mfaLockoutChecker.ReleaseMFAAttempt(ctx, userID, r); err != nil {
 		slog.WarnContext(ctx, "failed to release mfa attempt", "err", err, "user_id", userID)

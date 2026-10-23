@@ -121,7 +121,7 @@ func TestSharedLockout_WindowStartedBeforeSinceCountsZero(t *testing.T) {
 // than refusing.
 const noLimit = 1 << 30
 
-func reserveErr(_ int, _ bool, err error) error { return err }
+func reserveErr(_ Reservation, _ bool, err error) error { return err }
 
 // Of many concurrent reservations on two replicas, exactly the limit are
 // counted and the rest are refused without writing.
@@ -157,22 +157,29 @@ func TestSharedLockout_ConcurrentReservesStopAtTheLimit(t *testing.T) {
 	assert.Equal(t, limit, n)
 }
 
-func TestSharedLockout_ResetClearsTheWindow(t *testing.T) {
+// A release gives back one attempt and leaves the rest of the window counted.
+func TestSharedLockout_ReleaseGivesBackOneAttempt(t *testing.T) {
 	t.Parallel()
 	l := NewSharedLockout(auth.NewMemoryBackend(), time.Hour)
 	uid := uuid.New()
-	for i := 0; i < 5; i++ {
+	first, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	for i := 1; i < 5; i++ {
 		require.NoError(t, reserveErr(l.ReserveAttempt(context.Background(), uid, 5)))
 	}
-	_, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	_, ok, err = l.ReserveAttempt(context.Background(), uid, 5)
 	require.NoError(t, err)
 	require.False(t, ok)
 
-	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
-	n, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, l.ReleaseAttempt(context.Background(), uid, first))
+	r, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
 	require.NoError(t, err)
 	assert.True(t, ok)
-	assert.Equal(t, 1, n)
+	assert.Equal(t, 5, r.Count)
+	_, ok, err = l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, err)
+	assert.False(t, ok)
 }
 
 func TestSharedLockout_ConcurrentReplicasCountEveryFailure(t *testing.T) {

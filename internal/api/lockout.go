@@ -109,7 +109,7 @@ func (l *InMemoryLockout) CountRecentFailures(ctx context.Context, userID uuid.U
 
 // ReserveAttempt counts one password attempt against the user before the
 // password is checked, unless the open window already holds limit attempts.
-// It returns the window's count and whether the attempt was counted. If no
+// It returns the reservation and whether the attempt was counted. If no
 // active window exists (or the previous window expired), a new window starts
 // now.
 //
@@ -120,7 +120,7 @@ func (l *InMemoryLockout) CountRecentFailures(ctx context.Context, userID uuid.U
 // concurrent CountRecentFailures prunes an entry whose window has not been
 // stamped yet (a fresh one has windowStart zero, which is before any cutoff),
 // and an increment on a state no longer in the map is lost.
-func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error) {
+func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -134,18 +134,37 @@ func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, 
 		s.windowStart.Store(now)
 	}
 
-	n := int(s.failures.Load())
-	if n >= limit {
-		return n, false, nil
+	r := Reservation{Count: int(s.failures.Load()), window: s.windowStart.Load()}
+	if r.Count >= limit {
+		return r, false, nil
 	}
-	return int(s.failures.Add(1)), true, nil
+	r.Count = int(s.failures.Add(1))
+	return r, true, nil
+}
+
+// ReleaseAttempt gives back one attempt reserved in the user's current
+// window. A window that has expired or been replaced is left as it is, and a
+// window whose count reaches zero is removed from the map.
+func (l *InMemoryLockout) ReleaseAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	s, ok := l.entries[userID]
+	if !ok || s.windowStart.Load() != r.window || time.Now().UnixNano()-r.window > int64(l.window) {
+		return nil
+	}
+	if s.failures.Load() <= 1 {
+		delete(l.entries, userID)
+		return nil
+	}
+	s.failures.Add(-1)
+	return nil
 }
 
 // ResetFailedAttempts clears the failure counter for the given user and
 // removes the entry from the map to reclaim memory.
-func (l *InMemoryLockout) ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error {
+func (l *InMemoryLockout) ResetFailedAttempts(userID uuid.UUID) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.entries, userID)
-	return nil
 }

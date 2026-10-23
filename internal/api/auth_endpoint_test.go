@@ -233,16 +233,16 @@ func (c *recordingLockoutChecker) CountRecentFailures(ctx context.Context, userI
 	return c.failures, nil
 }
 
-func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error) {
+func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	if c.failures >= limit {
-		return c.failures, false, nil
+		return Reservation{Count: c.failures}, false, nil
 	}
 	c.failures++
-	return c.failures, true, nil
+	return Reservation{Count: c.failures}, true, nil
 }
 
-func (c *recordingLockoutChecker) ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error {
-	c.failures = 0
+func (c *recordingLockoutChecker) ReleaseAttempt(ctx context.Context, userID uuid.UUID, _ Reservation) error {
+	c.failures--
 	return nil
 }
 
@@ -672,14 +672,14 @@ func (c *fakeLockoutChecker) CountRecentFailures(ctx context.Context, userID uui
 	return c.failCount, nil
 }
 
-func (c *fakeLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error) {
+func (c *fakeLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	if c.err != nil {
-		return 0, false, c.err
+		return Reservation{}, false, c.err
 	}
-	return c.failCount, c.failCount < limit, nil
+	return Reservation{Count: c.failCount}, c.failCount < limit, nil
 }
 
-func (c *fakeLockoutChecker) ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error {
+func (c *fakeLockoutChecker) ReleaseAttempt(context.Context, uuid.UUID, Reservation) error {
 	return nil
 }
 

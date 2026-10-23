@@ -140,8 +140,11 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	// passwords cannot all read a count under the limit and all be checked.
 	// The public rate limiter bounds throughput, not attempts, so this count is
 	// what limits guessing on this endpoint.
+	var reservation Reservation
 	if h.lockoutChecker != nil {
-		count, reserved, lerr := h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
+		var reserved bool
+		var lerr error
+		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
 		if lerr != nil {
 			slog.Warn("lockout check failed in Token, failing closed", "err", lerr, "user_id", user.ID)
 			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
@@ -156,7 +159,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 			// real. TestToken_EnumerationTiming_Unit measures exactly that.
 			slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
 				"user_id", user.ID,
-				"failures", count,
+				"failures", reservation.Count,
 				"max_attempts", h.MaxFailedAttempts,
 				"window", h.LockoutWindow,
 				"note", h.lockoutScopeNote())
@@ -183,7 +186,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	h.clearPasswordAttempts(r.Context(), user.ID)
+	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
 
 	if !h.respondIfPasswordSignInRefused(w, r, user) {
 		return

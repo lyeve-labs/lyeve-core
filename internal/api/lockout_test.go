@@ -106,7 +106,7 @@ func TestInMemoryLockout_ResetFailedAttempts(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "should see 5 failures before reset")
 
-	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
+	l.ResetFailedAttempts(uid)
 
 	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestInMemoryLockout_ResetFailedAttempts_UnknownUser(t *testing.T) {
 	uid := uuid.New()
 
 	assert.NotPanics(t, func() {
-		require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
+		l.ResetFailedAttempts(uid)
 	})
 }
 
@@ -239,7 +239,7 @@ func TestInMemoryLockout_ResetDeletesEntry(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
+	l.ResetFailedAttempts(uid)
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)

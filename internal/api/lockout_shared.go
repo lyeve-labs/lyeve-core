@@ -181,14 +181,6 @@ func (c windowCounter) release(ctx context.Context, key string, window time.Dura
 	return errCounterContended
 }
 
-// clear deletes the counter, which closes its window.
-func (c windowCounter) clear(ctx context.Context, key string) error {
-	if err := c.backend.Delete(ctx, key); err != nil {
-		return fmt.Errorf("clear lockout counter: %w", err)
-	}
-	return nil
-}
-
 // SharedLockout is the password-login failure tracker backed by a shared
 // cache backend. Every replica pointed at the same backend reads and writes
 // the same counter, so the attempt limit is one limit for the deployment and
@@ -227,16 +219,16 @@ func (l *SharedLockout) CountRecentFailures(ctx context.Context, userID uuid.UUI
 
 // ReserveAttempt counts one password attempt against the user before the
 // password is checked, unless the window already holds limit attempts, and
-// returns the window's count and whether the attempt was counted. Losing every
+// returns the reservation and whether the attempt was counted. Losing every
 // compare-and-set is an error, which the handlers treat as a refusal.
-func (l *SharedLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (int, bool, error) {
+func (l *SharedLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	st, ok, err := l.counter.reserve(ctx, l.key(userID), l.window, limit)
-	return int(st.count), ok, err
+	return Reservation{Count: int(st.count), window: st.start}, ok, err
 }
 
-// ResetFailedAttempts clears the user's window after a correct password.
-func (l *SharedLockout) ResetFailedAttempts(ctx context.Context, userID uuid.UUID) error {
-	return l.counter.clear(ctx, l.key(userID))
+// ReleaseAttempt gives back one attempt reserved in the user's window.
+func (l *SharedLockout) ReleaseAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error {
+	return l.counter.release(ctx, l.key(userID), l.window, r.window)
 }
 
 // MFALockoutChecker enforces the MFA verification limits: a per-user failure
@@ -247,12 +239,11 @@ type MFALockoutChecker interface {
 	CheckMFALockout(ctx context.Context, userID uuid.UUID) (bool, error)
 	// ReserveMFAAttempt counts one code attempt against the user before the
 	// code is checked, and reports false without counting once the cap is
-	// reached. ResetMFAAttempts clears the count after a code that verifies.
+	// reached.
 	ReserveMFAAttempt(ctx context.Context, userID uuid.UUID) (Reservation, bool, error)
-	// ReleaseMFAAttempt gives back one reserved attempt whose code was never
-	// judged, because the store failed while spending it.
+	// ReleaseMFAAttempt gives back one reserved attempt whose code verified,
+	// or was never judged because the store failed while spending it.
 	ReleaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error
-	ResetMFAAttempts(ctx context.Context, userID uuid.UUID) error
 	// ReserveChallengeAttempt spends one of the challenge's attempts, and
 	// reports false without spending once they are used up.
 	ReserveChallengeAttempt(ctx context.Context, challengeHash string) (bool, error)
@@ -282,11 +273,6 @@ func (p processMFALockout) ReserveMFAAttempt(_ context.Context, userID uuid.UUID
 
 func (p processMFALockout) ReleaseMFAAttempt(_ context.Context, userID uuid.UUID, r Reservation) error {
 	p.mem.ReleaseMFAAttempt(userID, r)
-	return nil
-}
-
-func (p processMFALockout) ResetMFAAttempts(_ context.Context, userID uuid.UUID) error {
-	p.mem.ResetMFAAttempts(userID)
 	return nil
 }
 
@@ -360,11 +346,6 @@ func (l *SharedMFALockout) ReserveMFAAttempt(ctx context.Context, userID uuid.UU
 // ReleaseMFAAttempt gives back one attempt reserved in the user's window.
 func (l *SharedMFALockout) ReleaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error {
 	return l.counter.release(ctx, l.userKey(userID), l.window, r.window)
-}
-
-// ResetMFAAttempts clears the user's failures after a code that verifies.
-func (l *SharedMFALockout) ResetMFAAttempts(ctx context.Context, userID uuid.UUID) error {
-	return l.counter.clear(ctx, l.userKey(userID))
 }
 
 // ReserveChallengeAttempt spends one of the challenge's attempts unless they
