@@ -1,7 +1,9 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugin/testdata/subexporter"
 )
 
 type exporter struct{ calls int }
@@ -77,4 +80,61 @@ func TestRegisterSubjectExporters_AttributesEachExporterToItsPlugin(t *testing.T
 	section, active := a.subjectExportSection(&exporter{}, "")
 	assert.Empty(t, section, "two running plugins share the exporter's package")
 	assert.False(t, active)
+}
+
+// sectionRun starts alpha, which exposes its exporter, registers extra as a
+// plugin would from Start, and exports alpha's section. It returns what the
+// activator logged and the bundle.
+func sectionRun(t *testing.T, extra compliance.SubjectExporter) (string, *compliance.SubjectExportSectionsResult) {
+	t.Helper()
+	t.Cleanup(resetPluginRegistry)
+	compliance.ResetSubjectExporters()
+	t.Cleanup(compliance.ResetSubjectExporters)
+	t.Cleanup(func() { compliance.SetExportSectionResolver(nil) })
+
+	provider := &exportingPlugin{fakePlugin: newFakePlugin("alpha"), e: &exporter{}}
+	RegisterPlugin("alpha", func() core.Plugin { return provider })
+
+	var logs bytes.Buffer
+	a := NewActivator(testHost{}, slog.New(slog.NewTextHandler(&logs, nil)))
+	a.Resolve(grants("alpha"), "")
+	require.NoError(t, a.Start(context.Background()))
+	if extra != nil {
+		compliance.RegisterSubjectExporter(extra)
+	}
+	a.RegisterSubjectExporters()
+
+	res, err := compliance.RunSubjectExportSections(core.WithTenantID(context.Background(), "acme"),
+		"someone@example.com", []string{"alpha"})
+	require.NoError(t, err)
+	return logs.String(), res
+}
+
+// An exporter kept in a subpackage of its plugin matches no plugin's
+// package, so no section holds it and no self-service export can reach its
+// data. The runtime has to say so at boot, and the bundle has to say it is
+// short, or it reads as everything held about the person.
+func TestRegisterSubjectExporters_ExporterInNoSectionIsLoggedAndLeavesTheExportIncomplete(t *testing.T) {
+	logs, res := sectionRun(t, &subexporter.Exporter{})
+
+	assert.Contains(t, logs, "level=ERROR")
+	assert.Contains(t, logs, "index=0")
+	assert.Contains(t, logs, "package=github.com/lyeve-labs/lyeve-core/pkg/plugin/testdata/subexporter")
+
+	assert.Contains(t, res.Plugins, "plugin_alpha_rows", "the chosen section still exports")
+	assert.NotContains(t, res.Plugins, "sub_rows")
+	assert.True(t, res.Incomplete, "a bundle that cannot hold some data is not whole")
+	require.Len(t, res.Errors, 1)
+	assert.Equal(t, 0, res.Errors[0].Index)
+	assert.Empty(t, res.Errors[0].Section)
+}
+
+// Every exporter in a section leaves nothing to log and nothing missing.
+func TestRegisterSubjectExporters_ExportersInSectionsKeepTheExportComplete(t *testing.T) {
+	logs, res := sectionRun(t, nil)
+
+	assert.NotContains(t, logs, "level=ERROR")
+	assert.Contains(t, res.Plugins, "plugin_alpha_rows")
+	assert.False(t, res.Incomplete)
+	assert.Empty(t, res.Errors)
 }
