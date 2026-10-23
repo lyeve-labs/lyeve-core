@@ -160,19 +160,12 @@ func (l *InMemoryMFALockout) ResetMFAAttempts(userID uuid.UUID) {
 	delete(l.entries, userID)
 }
 
-// CheckChallengeLimit returns true when the challenge hash has exceeded the
-// per-challenge attempt cap. This prevents brute-forcing a single challenge.
-func (l *InMemoryMFALockout) CheckChallengeLimit(challengeHash string) (bool, error) {
-	counter := l.loadChallengeCounter(challengeHash, true)
-	return counter.Load() >= int64(l.maxChallengeAttempts), nil
-}
-
 // ReserveChallengeAttempt spends one of the challenge's attempts, and returns
 // false without spending once they are used up. The counter is raised by
 // compare-and-swap from a value under the cap, so concurrent attempts on one
 // challenge cannot pass the cap together.
 func (l *InMemoryMFALockout) ReserveChallengeAttempt(challengeHash string) bool {
-	counter := l.loadChallengeCounter(challengeHash, false)
+	counter := l.loadChallengeCounter(challengeHash)
 	for {
 		n := counter.Load()
 		if n >= int64(l.maxChallengeAttempts) {
@@ -184,11 +177,10 @@ func (l *InMemoryMFALockout) ReserveChallengeAttempt(challengeHash string) bool 
 	}
 }
 
-// loadChallengeCounter returns the atomic counter for a challenge hash.
-// When peek is true and the entry doesn't exist (or has expired), a zero
-// counter is returned. When peek is false, a fresh entry is created.
+// loadChallengeCounter returns the atomic counter for a challenge hash,
+// creating a fresh entry when none exists or the old one has expired.
 // Expired entries (older than challengeTokenTTL) are pruned on access.
-func (l *InMemoryMFALockout) loadChallengeCounter(challengeHash string, peek bool) *atomic.Int64 {
+func (l *InMemoryMFALockout) loadChallengeCounter(challengeHash string) *atomic.Int64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -202,10 +194,6 @@ func (l *InMemoryMFALockout) loadChallengeCounter(challengeHash string, peek boo
 	}
 
 	if !ok {
-		if peek {
-			zero := new(atomic.Int64)
-			return zero
-		}
 		// keep the map bounded (see maxTrackedChallenges)
 		if len(l.challengeEntries) >= maxTrackedChallenges {
 			l.pruneExpiredChallengesLocked()

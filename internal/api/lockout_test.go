@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,18 +15,18 @@ import (
 
 // InMemoryLockout: unit tests
 
-func TestInMemoryLockout_CountRecentFailures_NoFailures(t *testing.T) {
+func TestInMemoryLockout_Counts_NoFailures(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryLockout(5, 15*time.Minute)
 	uid := uuid.New()
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "user with no failures should have count 0")
 }
 
-func TestInMemoryLockout_CountRecentFailures_UnderThreshold(t *testing.T) {
+func TestInMemoryLockout_Counts_UnderThreshold(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryLockout(5, 15*time.Minute)
@@ -35,12 +36,12 @@ func TestInMemoryLockout_CountRecentFailures_UnderThreshold(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 4, count, "4 failures should be reported")
 }
 
-func TestInMemoryLockout_CountRecentFailures_AtThreshold(t *testing.T) {
+func TestInMemoryLockout_Counts_AtThreshold(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryLockout(5, 15*time.Minute)
@@ -50,12 +51,12 @@ func TestInMemoryLockout_CountRecentFailures_AtThreshold(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "5 failures should be reported")
 }
 
-func TestInMemoryLockout_CountRecentFailures_AboveThreshold(t *testing.T) {
+func TestInMemoryLockout_Counts_AboveThreshold(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryLockout(5, 15*time.Minute)
@@ -65,12 +66,12 @@ func TestInMemoryLockout_CountRecentFailures_AboveThreshold(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 10, count, "10 failures should be reported")
 }
 
-func TestInMemoryLockout_CountRecentFailures_WindowExpiry(t *testing.T) {
+func TestInMemoryLockout_Counts_WindowExpiry(t *testing.T) {
 	t.Parallel()
 
 	// Use a very short window so we can test expiry.
@@ -81,13 +82,13 @@ func TestInMemoryLockout_CountRecentFailures_WindowExpiry(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "should see 5 failures inside window")
 
 	time.Sleep(20 * time.Millisecond)
 
-	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	count, err = lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "should see 0 after window expired")
 }
@@ -102,13 +103,13 @@ func TestInMemoryLockout_ResetFailedAttempts(t *testing.T) {
 		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "should see 5 failures before reset")
 
 	l.ResetFailedAttempts(uid)
 
-	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err = lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "should see 0 after reset")
 }
@@ -137,11 +138,11 @@ func TestInMemoryLockout_PerUserIsolation(t *testing.T) {
 	}
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid2, noLimit))
 
-	count1, err := l.CountRecentFailures(context.Background(), uid1, time.Now().Add(-15*time.Minute))
+	count1, err := lockoutCount(l, uid1)
 	require.NoError(t, err)
 	assert.Equal(t, 5, count1, "uid1 should have 5 failures")
 
-	count2, err := l.CountRecentFailures(context.Background(), uid2, time.Now().Add(-15*time.Minute))
+	count2, err := lockoutCount(l, uid2)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count2, "uid2 should have 1 failure - isolation broken")
 }
@@ -156,14 +157,14 @@ func TestInMemoryLockout_WindowResetOnNewFailure(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	// CountRecentFailures with a since inside the current moment should see 0.
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	// The window has closed, so it holds nothing.
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count, "after window expiry, count should be 0")
 
 	// A new failure starts a fresh window.
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
-	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	count, err = lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "new failure should start a fresh window with count 1")
 }
@@ -176,9 +177,8 @@ func TestNewInMemoryLockout_Defaults(t *testing.T) {
 	assert.Equal(t, DefaultLockoutWindow, l.window, "should use default window")
 }
 
-// Expired entries are deleted from the underlying map on CountRecentFailures
-// (unbounded map growth). A new ReserveAttempt after pruning
-// starts a fresh window at count 1.
+// An expired window holds nothing, and a new ReserveAttempt after it starts
+// a fresh window at count 1.
 func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	t.Parallel()
 
@@ -188,44 +188,15 @@ func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	time.Sleep(20 * time.Millisecond)
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 
 	// A new failure after pruning must start a fresh window at count 1.
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
-	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
+	count, err = lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "fresh window after pruning should start at count 1")
-}
-
-// Recording failures for many distinct users and then letting the window
-// expire must result in a clean map: entries are pruned, preventing
-// unbounded growth.
-func TestInMemoryLockout_ManyUsersPrunedAfterExpiry(t *testing.T) {
-	t.Parallel()
-
-	l := NewInMemoryLockout(5, 10*time.Millisecond)
-	userCount := 50
-	userIDs := make([]uuid.UUID, userCount)
-
-	for i := 0; i < userCount; i++ {
-		userIDs[i] = uuid.New()
-		_ = reserveErr(l.ReserveAttempt(context.Background(), userIDs[i], noLimit))
-	}
-
-	time.Sleep(20 * time.Millisecond)
-
-	for _, uid := range userIDs {
-		count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
-		require.NoError(t, err)
-		assert.Equal(t, 0, count)
-	}
-
-	l.mu.Lock()
-	remaining := len(l.entries)
-	l.mu.Unlock()
-	assert.Equal(t, 0, remaining, "all expired entries should be pruned, found %d", remaining)
 }
 
 // ResetFailedAttempts removes the entry from the map rather than zeroing.
@@ -241,7 +212,7 @@ func TestInMemoryLockout_ResetDeletesEntry(t *testing.T) {
 
 	l.ResetFailedAttempts(uid)
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, 0, count)
 
@@ -279,7 +250,7 @@ func TestInMemoryLockout_ConcurrentReservesStopAtTheLimit(t *testing.T) {
 	wg.Wait()
 
 	assert.Equal(t, int32(limit), granted.Load())
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, limit, count, "a refused reservation counts nothing")
 }
@@ -307,7 +278,7 @@ func TestInMemoryLockout_ConcurrentSafety(t *testing.T) {
 		<-done
 	}
 
-	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
 	assert.Equal(t, goroutines*perGoroutine, count, "concurrent increments should all be counted")
 }
@@ -338,45 +309,10 @@ func TestInMemoryLockout_NoLostFailuresOnTheFirstBurst(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+		count, err := lockoutCount(l, uid)
 		require.NoError(t, err)
 		if count != goroutines {
 			t.Fatalf("round %d: counted %d of %d failures", round, count, goroutines)
-		}
-	}
-}
-
-// A read of the count races a reservation whenever both run at once. Counting
-// prunes an entry whose window has not been stamped (a fresh one reads as
-// expired), and a reservation holding only a pointer to it would then
-// increment a state no longer in the map. This interleaves the pair.
-func TestInMemoryLockout_CountDoesNotEatAConcurrentFailure(t *testing.T) {
-	t.Parallel()
-
-	for round := 0; round < 200; round++ {
-		l := NewInMemoryLockout(5, 15*time.Minute)
-		uid := uuid.New()
-		since := time.Now().Add(-15 * time.Minute)
-
-		const attempts = 20
-		var wg sync.WaitGroup
-		start := make(chan struct{})
-		wg.Add(attempts)
-		for i := 0; i < attempts; i++ {
-			go func() {
-				defer wg.Done()
-				<-start
-				_, _ = l.CountRecentFailures(context.Background(), uid, since)
-				_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
-			}()
-		}
-		close(start)
-		wg.Wait()
-
-		count, err := l.CountRecentFailures(context.Background(), uid, since)
-		require.NoError(t, err)
-		if count != attempts {
-			t.Fatalf("round %d: counted %d of %d failures", round, count, attempts)
 		}
 	}
 }
@@ -400,4 +336,41 @@ func TestNewAuthHandler_WithLockoutCheckerOverridesDefault(t *testing.T) {
 	h.WithLockoutChecker(fake)
 
 	assert.Equal(t, LockoutChecker(fake), h.lockoutChecker, "WithLockoutChecker should override default")
+}
+
+// lockoutCount reads the attempts counted in the user's open window. Tests
+// read it here because nothing in the engine reads the count back.
+func lockoutCount(lc LockoutChecker, uid uuid.UUID) (int, error) {
+	switch l := lc.(type) {
+	case *InMemoryLockout:
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		s, ok := l.entries[uid]
+		if !ok || time.Now().UnixNano()-s.windowStart.Load() > int64(l.window) {
+			return 0, nil
+		}
+		return int(s.failures.Load()), nil
+	case *SharedLockout:
+		st, err := l.counter.current(context.Background(), l.key(uid), l.window, time.Now())
+		return int(st.count), err
+	}
+	return 0, fmt.Errorf("no count to read from %T", lc)
+}
+
+// A release that brings a window to zero removes its entry, so accounts that
+// sign in correctly leave nothing in the map.
+func TestInMemoryLockout_ReleaseToZeroRemovesTheEntry(t *testing.T) {
+	t.Parallel()
+
+	l := NewInMemoryLockout(5, 15*time.Minute)
+	uid := uuid.New()
+	r, ok, err := l.ReserveAttempt(context.Background(), uid, 5)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NoError(t, l.ReleaseAttempt(context.Background(), uid, r))
+
+	l.mu.Lock()
+	_, exists := l.entries[uid]
+	l.mu.Unlock()
+	assert.False(t, exists)
 }

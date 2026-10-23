@@ -176,17 +176,17 @@ func TestInMemoryMFALockout_WindowResetOnExpiry(t *testing.T) {
 
 // Challenge-level attempt cap
 
-func TestInMemoryMFALockout_CheckChallengeLimit_NoAttempts(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeLimit_NoAttempts(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
 
-	exhausted, err := l.CheckChallengeLimit("unknown-challenge-hash")
+	exhausted, err := challengeExhausted(l, "unknown-challenge-hash")
 	require.NoError(t, err)
 	assert.False(t, exhausted, "unused challenge should not be exhausted")
 }
 
-func TestInMemoryMFALockout_CheckChallengeLimit_UnderCap(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeLimit_UnderCap(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
@@ -196,12 +196,12 @@ func TestInMemoryMFALockout_CheckChallengeLimit_UnderCap(t *testing.T) {
 		l.ReserveChallengeAttempt(ch)
 	}
 
-	exhausted, err := l.CheckChallengeLimit(ch)
+	exhausted, err := challengeExhausted(l, ch)
 	require.NoError(t, err)
 	assert.False(t, exhausted, "4 attempts with cap=5 should not be exhausted")
 }
 
-func TestInMemoryMFALockout_CheckChallengeLimit_AtCap(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeLimit_AtCap(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
@@ -211,12 +211,12 @@ func TestInMemoryMFALockout_CheckChallengeLimit_AtCap(t *testing.T) {
 		l.ReserveChallengeAttempt(ch)
 	}
 
-	exhausted, err := l.CheckChallengeLimit(ch)
+	exhausted, err := challengeExhausted(l, ch)
 	require.NoError(t, err)
 	assert.True(t, exhausted, "5 attempts with cap=5 should be exhausted")
 }
 
-func TestInMemoryMFALockout_CheckChallengeLimit_AboveCap(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeLimit_AboveCap(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
@@ -226,12 +226,12 @@ func TestInMemoryMFALockout_CheckChallengeLimit_AboveCap(t *testing.T) {
 		l.ReserveChallengeAttempt(ch)
 	}
 
-	exhausted, err := l.CheckChallengeLimit(ch)
+	exhausted, err := challengeExhausted(l, ch)
 	require.NoError(t, err)
 	assert.True(t, exhausted, "10 attempts with cap=5 should remain exhausted")
 }
 
-func TestInMemoryMFALockout_CheckChallengeLimit_PerChallengeIsolation(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeLimit_PerChallengeIsolation(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
@@ -243,11 +243,11 @@ func TestInMemoryMFALockout_CheckChallengeLimit_PerChallengeIsolation(t *testing
 		l.ReserveChallengeAttempt(ch1)
 	}
 
-	exhausted1, err := l.CheckChallengeLimit(ch1)
+	exhausted1, err := challengeExhausted(l, ch1)
 	require.NoError(t, err)
 	assert.True(t, exhausted1, "ch1 should be exhausted")
 
-	exhausted2, err := l.CheckChallengeLimit(ch2)
+	exhausted2, err := challengeExhausted(l, ch2)
 	require.NoError(t, err)
 	assert.False(t, exhausted2, "ch2 should NOT be exhausted - different challenge")
 }
@@ -343,7 +343,7 @@ func TestMFAVerify_RecordsChallengeAttempt(t *testing.T) {
 	challengeHash := sha256Hex(challengeToken)
 
 	// Verify no attempts before the call.
-	exhausted, err := inProcessMFA(t, h).CheckChallengeLimit(challengeHash)
+	exhausted, err := challengeExhausted(inProcessMFA(t, h), challengeHash)
 	require.NoError(t, err)
 	assert.False(t, exhausted, "should start with 0 attempts")
 
@@ -550,32 +550,6 @@ func TestInMemoryMFALockout_IsJTIUsed_Isolation(t *testing.T) {
 
 // ChallengeEntry pruning: expired entries must be cleaned up
 
-func TestInMemoryMFALockout_ChallengeEntryExpiry_PeekPrunes(t *testing.T) {
-	t.Parallel()
-
-	l := NewInMemoryMFALockout(5, 15*time.Minute)
-	chHash := "expired-challenge-hash"
-
-	// Insert an entry whose createdAt is beyond challengeTokenTTL.
-	l.mu.Lock()
-	l.challengeEntries[chHash] = &challengeEntryState{
-		counter:   new(atomic.Int64),
-		createdAt: time.Now().Add(-challengeTokenTTL - time.Second),
-	}
-	l.mu.Unlock()
-
-	// Peek: the expired entry must be pruned and report not-exhausted.
-	exhausted, err := l.CheckChallengeLimit(chHash)
-	require.NoError(t, err)
-	assert.False(t, exhausted, "expired challenge should not be exhausted (pruned)")
-
-	// The entry must have been removed from the map.
-	l.mu.Lock()
-	_, exists := l.challengeEntries[chHash]
-	l.mu.Unlock()
-	assert.False(t, exists, "expired challenge entry must be deleted from map")
-}
-
 func TestInMemoryMFALockout_ChallengeEntryExpiry_ReserveCreatesFresh(t *testing.T) {
 	t.Parallel()
 
@@ -616,15 +590,15 @@ func TestInMemoryMFALockout_ChallengeEntryExpiry_FreshEntryNotPruned(t *testing.
 	// Reserve an attempt on a fresh hash: entry is auto-created.
 	l.ReserveChallengeAttempt(chHash)
 
-	// Verify it's present and not pruned by CheckChallengeLimit.
-	exhausted, err := l.CheckChallengeLimit(chHash)
+	// Verify it's present and not exhausted.
+	exhausted, err := challengeExhausted(l, chHash)
 	require.NoError(t, err)
 	assert.False(t, exhausted, "fresh challenge with 1 attempt should not be exhausted")
 
 	l.mu.Lock()
 	_, exists := l.challengeEntries[chHash]
 	l.mu.Unlock()
-	assert.True(t, exists, "fresh challenge entry must survive peek")
+	assert.True(t, exists, "fresh challenge entry must stay in the map")
 }
 
 // Helpers
@@ -673,4 +647,17 @@ func makeMFAVerifyBody(challengeToken, code string) string {
 		"code":            code,
 	})
 	return string(b)
+}
+
+// challengeExhausted reports whether a challenge has used its attempts,
+// without creating an entry for it. Tests read it here because the engine
+// only ever spends an attempt.
+func challengeExhausted(l *InMemoryMFALockout, challengeHash string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	entry, ok := l.challengeEntries[challengeHash]
+	if !ok || time.Since(entry.createdAt) > challengeTokenTTL {
+		return false, nil
+	}
+	return entry.counter.Load() >= int64(l.maxChallengeAttempts), nil
 }

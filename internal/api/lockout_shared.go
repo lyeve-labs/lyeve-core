@@ -203,20 +203,6 @@ func (l *SharedLockout) key(userID uuid.UUID) string {
 	return sharedLockoutKeyspace + "login:" + userID.String()
 }
 
-// CountRecentFailures returns the failures in the user's open window, or zero
-// when the window started before since. A backend that cannot be reached is
-// an error, which the login handlers treat as a refusal.
-func (l *SharedLockout) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
-	st, err := l.counter.current(ctx, l.key(userID), l.window, time.Now())
-	if err != nil {
-		return 0, err
-	}
-	if st.count == 0 || time.Unix(0, st.start).Before(since) {
-		return 0, nil
-	}
-	return int(st.count), nil
-}
-
 // ReserveAttempt counts one password attempt against the user before the
 // password is checked, unless the window already holds limit attempts, and
 // returns the reservation and whether the attempt was counted. Losing every
