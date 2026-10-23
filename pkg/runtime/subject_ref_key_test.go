@@ -2,6 +2,9 @@ package runtime
 
 import (
 	"context"
+	"crypto/hkdf"
+	"crypto/hmac"
+	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -27,7 +30,7 @@ func TestRun_KeysSubjectRefsToTheInstallSecret(t *testing.T) {
 		t.Helper()
 		randomKey := make([]byte, 32)
 		_, _ = rand.Read(randomKey)
-		require.NoError(t, compliance.SetSubjectRefSecret(randomKey))
+		require.NoError(t, compliance.SetSubjectRefKey(randomKey))
 
 		addr := freeAddr(t)
 		for k, v := range map[string]string{
@@ -74,7 +77,7 @@ func TestRun_KeysSubjectRefsToTheInstallSecret(t *testing.T) {
 	t.Cleanup(func() {
 		randomKey := make([]byte, 32)
 		_, _ = rand.Read(randomKey)
-		_ = compliance.SetSubjectRefSecret(randomKey)
+		_ = compliance.SetSubjectRefKey(randomKey)
 	})
 	forgetBootRegistries(t)
 
@@ -84,6 +87,16 @@ func TestRun_KeysSubjectRefsToTheInstallSecret(t *testing.T) {
 	assert.Equal(t, first, second, "two engines holding one ENCRYPTION_KEY must log a subject by one reference")
 	sum := sha256.Sum256([]byte(address))
 	assert.NotEqual(t, hex.EncodeToString(sum[:6]), first, "the reference must not be the SHA-256 prefix of the address")
-	require.NoError(t, compliance.SetSubjectRefSecret([]byte(encryptionKey)))
-	assert.Equal(t, compliance.SubjectRef(address), first, "the boot keys the reference to ENCRYPTION_KEY")
+
+	// The key the encryption package stretches ENCRYPTION_KEY into, then
+	// HKDF-SHA-256 of it, computed with the standard library alone. A key
+	// derived from the raw secret would let a logged reference test a guessed
+	// ENCRYPTION_KEY without paying for the stretching.
+	kek, err := pbkdf2.Key(sha256.New, encryptionKey, []byte("lyeve-cms-kek-v1"), 600_000, 32)
+	require.NoError(t, err)
+	key, err := hkdf.Key(sha256.New, kek, nil, "lyeve subject reference key v1", 32)
+	require.NoError(t, err)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(address))
+	assert.Equal(t, hex.EncodeToString(mac.Sum(nil)[:6]), first, "the boot keys the reference to the key derived from ENCRYPTION_KEY")
 }
