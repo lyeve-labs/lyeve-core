@@ -227,6 +227,7 @@ func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []S
 		return ctx, err
 	}
 	ctx = context.WithValue(ctx, subjectAddressesSharedKey{}, shared)
+	ctx = context.WithValue(ctx, requestTenantKey{}, core.TenantIDFromCtx(ctx))
 	return context.WithValue(ctx, subjectAddressesKey{}, set), nil
 }
 
@@ -280,6 +281,21 @@ func dropShared(ctx context.Context, set []SubjectAddress, accounts []SubjectAcc
 		slog.WarnContext(ctx, "subject_addresses_dropped", "count", shared, "reason", "held by another account")
 	}
 	return kept, shared, nil
+}
+
+type requestTenantKey struct{}
+
+// RequestTenant returns the tenant the request that resolved the subject's
+// addresses runs in. An address no account holds reaches that tenant only. A
+// sweep binds each run to its own tenant, and an exporter that read the run's
+// tenant there listed such an address in every tenant, while the erasure of
+// the same request reached one. A context no run resolved answers with its
+// own tenant.
+func RequestTenant(ctx context.Context) string {
+	if tenant, ok := ctx.Value(requestTenantKey{}).(string); ok {
+		return tenant
+	}
+	return core.TenantIDFromCtx(ctx)
 }
 
 // SubjectAddresses returns the addresses of the subject identifier names, as

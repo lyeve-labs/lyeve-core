@@ -1111,6 +1111,9 @@ body (json, newline):
           },
           "422": {
             "description": "The identifier is not an email address, an account id or an IP address"
+          },
+          "503": {
+            "description": "The subject's addresses could not be read, so nothing was exported. Repeat the request"
           }
         },
         "security": [
