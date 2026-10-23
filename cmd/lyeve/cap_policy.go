@@ -37,10 +37,13 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     secret: to verify a session or a token it issued, or to open a value
 //     sealed under a key derived from that secret. CapConfigSecret alone
 //     serves every other secret and never this one.
+//   - core.CapStepUp, because the plugin asks the person at a session for
+//     the account's password or an authenticator code before a sensitive
+//     action: analytics, before it hands a person their own data export.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
-	"analytics":            core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
+	"analytics":            core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapStepUp,
 	"apianalytics":         core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"apikey":               core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"audit":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,

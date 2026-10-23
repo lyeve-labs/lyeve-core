@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"testing"
 
@@ -85,6 +87,32 @@ func TestCapPolicy_OnlySessionKeyReadersGetTheSigningSecret(t *testing.T) {
 		_, list := sh.Secrets("jwt_secrets")
 		if one != readers[name] || list != readers[name] {
 			t.Errorf("%s: jwt_secret served = %v, jwt_secrets served = %v, want %v", name, one, list, readers[name])
+		}
+	}
+}
+
+// stepUpHost accepts every step-up answer, the way the engine accepts a
+// right one.
+type stepUpHost struct{ core.Host }
+
+func (stepUpHost) CheckStepUp(*http.Request, string, string) error { return nil }
+
+// A step-up check spends the lockouts of the account the request's claims
+// name, so only the plugin that asks a person to confirm their own export
+// reaches it. Every other plugin of this build is refused.
+func TestCapPolicy_OnlyAnalyticsChecksStepUp(t *testing.T) {
+	plugin.SetCapPolicy(capPolicy)
+	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
+
+	inner := stepUpHost{mockhost.New(t).Host()}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil)
+	for _, name := range core.RegisteredPlugins() {
+		err := core.NewScopedHost(inner, name, plugin.CapPolicy(name)).CheckStepUp(r, core.StepUpPassword, "secret")
+		switch {
+		case name == "analytics" && err != nil:
+			t.Errorf("analytics asks for a step-up, but its scoped host returned %v", err)
+		case name != "analytics" && !errors.Is(err, core.ErrCapDenied):
+			t.Errorf("%s does not ask for a step-up, but its scoped host returned %v", name, err)
 		}
 	}
 }

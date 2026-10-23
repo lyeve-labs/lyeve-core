@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -357,5 +359,30 @@ func TestScopedHost_MFAChallengeCompletionNeedsTheSigningGrant(t *testing.T) {
 	}
 	if tok, err := granted.CompleteMFAChallenge(context.Background(), "challenge"); err != nil || tok != "session-token" || h.signed != 1 {
 		t.Fatalf("CompleteMFAChallenge token %q, err %v, signed %d: want the engine's token, signed once", tok, err, h.signed)
+	}
+}
+
+func (h *signingHost) CheckStepUp(*http.Request, string, string) error {
+	h.signed++
+	return nil
+}
+
+// A step-up check counts its wrong answers against the lockouts of the
+// account the request's claims name, and a plugin can set those claims, so
+// it takes its own grant. Holding every other grant is not enough.
+func TestScopedHost_CheckStepUpNeedsTheStepUpGrant(t *testing.T) {
+	h := &signingHost{capturingHost: newCapturingHost()}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil)
+	denied := NewScopedHost(h, "webhook", CapAll&^CapStepUp)
+	if err := denied.CheckStepUp(r, StepUpPassword, "secret"); !errors.Is(err, ErrCapDenied) || h.signed != 0 {
+		t.Fatalf("CheckStepUp err = %v, checked %d: want a denial before any check", err, h.signed)
+	}
+	rec := requireOneDenial(t, h.capturingHost)
+	assertField(t, rec, "op", "CheckStepUp")
+	assertField(t, rec, "capability", "CapStepUp")
+
+	granted := NewScopedHost(h, "analytics", CapDBWrite|CapRoutes|CapStepUp)
+	if err := granted.CheckStepUp(r, StepUpPassword, "secret"); err != nil || h.signed != 1 {
+		t.Fatalf("CheckStepUp err = %v, checked %d: want the engine's answer, checked once", err, h.signed)
 	}
 }
