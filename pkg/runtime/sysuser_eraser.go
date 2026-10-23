@@ -51,6 +51,23 @@ func registerSysUserEraser(host core.Host) {
 	compliance.RegisterSubjectEraser(newSysUserEraser(host))
 }
 
+// keySubjectRefs keys the reference every log line names a data subject by.
+// The references have to agree on every replica and across restarts for the
+// lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
+// or the JWT_SECRET it falls back to: every replica shares it, and stored
+// ciphertext depends on it, so the install keeps it. A stateless engine may
+// hold neither, and its references then stay keyed to the process. Lives here
+// for the same reason as the registration above.
+func keySubjectRefs(secret string) error {
+	if secret == "" {
+		return nil
+	}
+	if err := compliance.SetSubjectRefSecret([]byte(secret)); err != nil {
+		return fmt.Errorf("subject reference key: %w", err)
+	}
+	return nil
+}
+
 // logSubjectEraserRoster names every plugin the DSAR erasure fan-out will
 // reach, once, after every route an eraser registers through has run.
 //
