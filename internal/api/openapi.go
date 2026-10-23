@@ -390,7 +390,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	paths["/api/admin/gdpr/erase"] = openAPIPath{
 		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{
 			"200": openAPIResponse{Description: "Erased. complete is false when a legal hold kept data", Content: eraseBody},
-			"207": openAPIResponse{Description: "Partly erased: the account was not erased, failed names the owners left, and repeating the request finishes it", Content: eraseBody},
+			"207": openAPIResponse{Description: "Partly erased: either the account was not erased, failed names the owners left, and repeating the request finishes it, or rows under an address another account also holds were kept, and only an erasure naming that address reaches them", Content: eraseBody},
 			"400": err400, "401": err401, "403": err403, "422": notASubject422,
 			"503": map[string]any{"description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"},
 		}}, super...),
