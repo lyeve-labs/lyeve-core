@@ -52,10 +52,6 @@ func registerSysUserEraser(host core.Host) {
 	compliance.RegisterSubjectEraser(newSysUserEraser(host))
 }
 
-// subjectRefInfo names the subject reference key in its derivation, so no
-// other key derived from the install secret equals it.
-const subjectRefInfo = "lyeve subject reference key v1"
-
 // keySubjectRefs keys the reference every log line names a data subject by.
 // The references have to agree on every replica and across restarts for the
 // lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
@@ -73,7 +69,7 @@ func keySubjectRefs(secret string) error {
 	if secret == "" {
 		return nil
 	}
-	key, err := encryption.DeriveKey(secret, subjectRefInfo)
+	key, err := encryption.SubjectRefKey(secret)
 	if err != nil {
 		return fmt.Errorf("subject reference key: %w", err)
 	}
