@@ -204,3 +204,35 @@ func TestRoleOnlyPermissionChecker_AnswersFromTheRegisteredKinds(t *testing.T) {
 		}
 	}
 }
+
+// A kind registered with OpenByDefault admits every role, and a caller with
+// none, while no rule exists. The kernel keeps no rules, so its checker
+// always answers that way for such a kind and never for another.
+func TestRoleOnlyPermissionChecker_OpenByDefaultAdmitsEveryRole(t *testing.T) {
+	keepPermissionKinds(t)
+	RegisterPermissionKind(PermissionKind{
+		General:        "exports",
+		Prefix:         "export:",
+		ValidSlug:      func(string) bool { return false },
+		Actions:        []string{"export"},
+		AdminByDefault: true,
+		OpenByDefault:  true,
+	})
+	RegisterPermissionKind(PermissionKind{General: "vaults", Prefix: "vault:", ValidSlug: testSlugRe.MatchString})
+
+	checker := RoleOnlyPermissionChecker{}
+	ctx := context.Background()
+	for _, roles := range [][]string{{RoleSuperAdmin}, {RoleAdmin}, {"editor"}, {"user"}, nil} {
+		ok, err := checker.Allowed(ctx, roles, "exports", "export")
+		require.NoError(t, err)
+		assert.True(t, ok, "%v on an open kind", roles)
+
+		ok, err = checker.Allowed(ctx, roles, "vaults", "read")
+		require.NoError(t, err)
+		assert.Equal(t, len(roles) == 1 && roles[0] == RoleSuperAdmin, ok, "%v on a kind that is not open", roles)
+	}
+	assert.True(t, IsOpenByDefaultPermissionResource("exports"))
+	assert.False(t, IsOpenByDefaultPermissionResource("export:mine"), "a slug the kind refuses names no resource")
+	assert.False(t, IsOpenByDefaultPermissionResource("vaults"))
+	assert.False(t, IsOpenByDefaultPermissionResource("articles"))
+}
