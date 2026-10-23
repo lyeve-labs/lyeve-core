@@ -52,3 +52,29 @@ func TestRegisterSubjectExporters_ReachesTheProviderInterface(t *testing.T) {
 	assert.Equal(t, 1, provider.e.calls, "the exporter is asked once per export")
 	assert.Contains(t, res.Plugins, "plugin_alpha_rows")
 }
+
+// An exporter the runtime takes from a plugin is that plugin's section. One
+// registered from Start is attributed by the package that declares it, and
+// one that two running plugins share a package with is in no section rather
+// than in either.
+func TestRegisterSubjectExporters_AttributesEachExporterToItsPlugin(t *testing.T) {
+	t.Cleanup(resetPluginRegistry)
+	compliance.ResetSubjectExporters()
+	t.Cleanup(compliance.ResetSubjectExporters)
+	t.Cleanup(func() { compliance.SetExportSectionResolver(nil) })
+
+	provider := &exportingPlugin{fakePlugin: newFakePlugin("alpha"), e: &exporter{}}
+	RegisterPlugin("alpha", func() core.Plugin { return provider })
+	RegisterPlugin("beta", func() core.Plugin { return newFakePlugin("beta") })
+
+	a := NewActivator(testHost{}, nil)
+	a.Resolve(grants("alpha", "beta"), "")
+	require.NoError(t, a.Start(context.Background()))
+	compliance.RegisterSubjectExporter(&exporter{})
+	a.RegisterSubjectExporters()
+
+	assert.Equal(t, []string{"alpha"}, compliance.SubjectExportSections())
+	section, active := a.subjectExportSection(&exporter{}, "")
+	assert.Empty(t, section, "two running plugins share the exporter's package")
+	assert.False(t, active)
+}
