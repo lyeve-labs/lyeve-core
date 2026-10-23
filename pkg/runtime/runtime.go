@@ -158,6 +158,11 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return fmt.Errorf("config load: %w", err)
 	}
 
+	// Before anything can log a data subject.
+	if err := keySubjectRefs(cfg.EncryptionKey); err != nil {
+		return err
+	}
+
 	// Derive the master KEK while the database connects. The derivation is
 	// cached per key, so the first KeyStore a plugin builds finds it ready
 	// instead of spending its start level on it.
