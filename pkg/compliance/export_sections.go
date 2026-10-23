@@ -245,12 +245,12 @@ func RunSubjectExportSections(ctx context.Context, identifier string, sections [
 type subjectSinceKey struct{}
 
 // SubjectSince reports whether ctx is an export a person runs for
-// themselves, and if so, when their account was created. An exporter then
-// leaves out every row it finds through an address and that is older than
-// the account, or whose age it cannot read, and withholds what such a row
-// holds about someone other than the subject. Rows it finds through the
-// account id stay. On every other export, the super admin's included, ok is
-// false and the exporter keeps every row whole.
+// themselves, and if so, the start of the second their account was created
+// in. An exporter then leaves out every row it finds through an address and
+// that is older than that, or whose age it cannot read, and withholds what
+// such a row holds about someone other than the subject. Rows it finds
+// through the account id stay. On every other export, the super admin's
+// included, ok is false and the exporter keeps every row whole.
 func SubjectSince(ctx context.Context) (since time.Time, ok bool) {
 	since, ok = ctx.Value(subjectSinceKey{}).(time.Time)
 	return since, ok
@@ -261,6 +261,14 @@ func SubjectSince(ctx context.Context) (since time.Time, ok bool) {
 // An identifier that names no account there has no creation to bound its
 // rows by, so the bound is now, and the run holds no row found through an
 // address. Two accounts the identifier names there bound it by the later one.
+//
+// The bound is the start of the second the account was created in. The
+// account's row and a plugin's row are stamped by different clocks: on SQL
+// Server the account's default is accurate to about three milliseconds and a
+// plugin's is not, and some plugins stamp from the application's clock. A row
+// written right after the account can read as older than it by less than a
+// second, and it is the subject's row. MySQL keeps the account's time to the
+// second already.
 func accountCreated(ctx context.Context, identifier, tenant string) (time.Time, error) {
 	var since time.Time
 	found := false
@@ -282,5 +290,5 @@ func accountCreated(ctx context.Context, identifier, tenant string) (time.Time, 
 	if !found {
 		return time.Now(), nil
 	}
-	return since, nil
+	return since.Truncate(time.Second), nil
 }
