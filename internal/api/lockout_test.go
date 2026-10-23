@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestInMemoryLockout_CountRecentFailures_UnderThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 4; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
@@ -46,7 +47,7 @@ func TestInMemoryLockout_CountRecentFailures_AtThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
@@ -61,7 +62,7 @@ func TestInMemoryLockout_CountRecentFailures_AboveThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 10; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
@@ -77,7 +78,7 @@ func TestInMemoryLockout_CountRecentFailures_WindowExpiry(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
@@ -98,14 +99,14 @@ func TestInMemoryLockout_ResetFailedAttempts(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "should see 5 failures before reset")
 
-	l.ResetFailedAttempts(uid)
+	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
 
 	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)
@@ -120,7 +121,7 @@ func TestInMemoryLockout_ResetFailedAttempts_UnknownUser(t *testing.T) {
 	uid := uuid.New()
 
 	assert.NotPanics(t, func() {
-		l.ResetFailedAttempts(uid)
+		require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
 	})
 }
 
@@ -132,9 +133,9 @@ func TestInMemoryLockout_PerUserIsolation(t *testing.T) {
 	uid2 := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid1)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid1, noLimit))
 	}
-	_ = l.RecordFailedAttempt(context.Background(), uid2)
+	_ = reserveErr(l.ReserveAttempt(context.Background(), uid2, noLimit))
 
 	count1, err := l.CountRecentFailures(context.Background(), uid1, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)
@@ -151,7 +152,7 @@ func TestInMemoryLockout_WindowResetOnNewFailure(t *testing.T) {
 	l := NewInMemoryLockout(5, 10*time.Millisecond)
 	uid := uuid.New()
 
-	_ = l.RecordFailedAttempt(context.Background(), uid)
+	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 
 	time.Sleep(20 * time.Millisecond)
 
@@ -161,7 +162,7 @@ func TestInMemoryLockout_WindowResetOnNewFailure(t *testing.T) {
 	assert.Equal(t, 0, count, "after window expiry, count should be 0")
 
 	// A new failure starts a fresh window.
-	_ = l.RecordFailedAttempt(context.Background(), uid)
+	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "new failure should start a fresh window with count 1")
@@ -176,7 +177,7 @@ func TestNewInMemoryLockout_Defaults(t *testing.T) {
 }
 
 // Expired entries are deleted from the underlying map on CountRecentFailures
-// (unbounded map growth). A new RecordFailedAttempt after pruning
+// (unbounded map growth). A new ReserveAttempt after pruning
 // starts a fresh window at count 1.
 func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	t.Parallel()
@@ -184,7 +185,7 @@ func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	l := NewInMemoryLockout(5, 10*time.Millisecond)
 	uid := uuid.New()
 
-	_ = l.RecordFailedAttempt(context.Background(), uid)
+	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	time.Sleep(20 * time.Millisecond)
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
@@ -192,7 +193,7 @@ func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	assert.Equal(t, 0, count)
 
 	// A new failure after pruning must start a fresh window at count 1.
-	_ = l.RecordFailedAttempt(context.Background(), uid)
+	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	count, err = l.CountRecentFailures(context.Background(), uid, time.Now().Add(-5*time.Millisecond))
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "fresh window after pruning should start at count 1")
@@ -210,7 +211,7 @@ func TestInMemoryLockout_ManyUsersPrunedAfterExpiry(t *testing.T) {
 
 	for i := 0; i < userCount; i++ {
 		userIDs[i] = uuid.New()
-		_ = l.RecordFailedAttempt(context.Background(), userIDs[i])
+		_ = reserveErr(l.ReserveAttempt(context.Background(), userIDs[i], noLimit))
 	}
 
 	time.Sleep(20 * time.Millisecond)
@@ -235,10 +236,10 @@ func TestInMemoryLockout_ResetDeletesEntry(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 3; i++ {
-		_ = l.RecordFailedAttempt(context.Background(), uid)
+		_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 	}
 
-	l.ResetFailedAttempts(uid)
+	require.NoError(t, l.ResetFailedAttempts(context.Background(), uid))
 
 	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
 	require.NoError(t, err)
@@ -248,6 +249,39 @@ func TestInMemoryLockout_ResetDeletesEntry(t *testing.T) {
 	_, exists := l.entries[uid]
 	l.mu.Unlock()
 	assert.False(t, exists, "entry should be deleted after ResetFailedAttempts")
+}
+
+// Of many concurrent reservations exactly the limit are counted, so only
+// that many attempts reach the password check.
+func TestInMemoryLockout_ConcurrentReservesStopAtTheLimit(t *testing.T) {
+	t.Parallel()
+
+	l := NewInMemoryLockout(5, 15*time.Minute)
+	uid := uuid.New()
+
+	const callers, limit = 50, 5
+	var wg sync.WaitGroup
+	var granted atomic.Int32
+	start := make(chan struct{})
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			<-start
+			_, ok, err := l.ReserveAttempt(context.Background(), uid, limit)
+			assert.NoError(t, err)
+			if ok {
+				granted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	assert.Equal(t, int32(limit), granted.Load())
+	count, err := l.CountRecentFailures(context.Background(), uid, time.Now().Add(-15*time.Minute))
+	require.NoError(t, err)
+	assert.Equal(t, limit, count, "a refused reservation counts nothing")
 }
 
 func TestInMemoryLockout_ConcurrentSafety(t *testing.T) {
@@ -263,7 +297,7 @@ func TestInMemoryLockout_ConcurrentSafety(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func() {
 			for j := 0; j < perGoroutine; j++ {
-				_ = l.RecordFailedAttempt(context.Background(), uid)
+				_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 			}
 			done <- struct{}{}
 		}()
@@ -298,7 +332,7 @@ func TestInMemoryLockout_NoLostFailuresOnTheFirstBurst(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				_ = l.RecordFailedAttempt(context.Background(), uid)
+				_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 			}()
 		}
 		close(start)
@@ -312,10 +346,10 @@ func TestInMemoryLockout_NoLostFailuresOnTheFirstBurst(t *testing.T) {
 	}
 }
 
-// A login counts before it records, so the two race on every attempt. Counting
+// A read of the count races a reservation whenever both run at once. Counting
 // prunes an entry whose window has not been stamped (a fresh one reads as
-// expired), and a record holding only a pointer to it would then increment a
-// state no longer in the map. This interleaves the pair the way a login does.
+// expired), and a reservation holding only a pointer to it would then
+// increment a state no longer in the map. This interleaves the pair.
 func TestInMemoryLockout_CountDoesNotEatAConcurrentFailure(t *testing.T) {
 	t.Parallel()
 
@@ -332,9 +366,8 @@ func TestInMemoryLockout_CountDoesNotEatAConcurrentFailure(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				// The order a login uses.
 				_, _ = l.CountRecentFailures(context.Background(), uid, since)
-				_ = l.RecordFailedAttempt(context.Background(), uid)
+				_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 			}()
 		}
 		close(start)

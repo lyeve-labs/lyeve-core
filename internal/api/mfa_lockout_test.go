@@ -47,7 +47,7 @@ func TestInMemoryMFALockout_CheckMFALockout_UnderThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 4; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	locked, err := l.CheckMFALockout(uid)
@@ -62,7 +62,7 @@ func TestInMemoryMFALockout_CheckMFALockout_AtThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	locked, err := l.CheckMFALockout(uid)
@@ -77,7 +77,7 @@ func TestInMemoryMFALockout_CheckMFALockout_AboveThreshold(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 10; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	locked, err := l.CheckMFALockout(uid)
@@ -93,7 +93,7 @@ func TestInMemoryMFALockout_CheckMFALockout_WindowExpiry(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	// Should be locked immediately.
@@ -116,7 +116,7 @@ func TestInMemoryMFALockout_ResetMFAAttempts(t *testing.T) {
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	locked, err := l.CheckMFALockout(uid)
@@ -139,7 +139,7 @@ func TestInMemoryMFALockout_PerUserIsolation(t *testing.T) {
 
 	// Lock out uid1.
 	for i := 0; i < 5; i++ {
-		l.RecordMFAFailure(uid1)
+		l.ReserveMFAAttempt(uid1)
 	}
 
 	locked1, err := l.CheckMFALockout(uid1)
@@ -159,14 +159,14 @@ func TestInMemoryMFALockout_WindowResetOnExpiry(t *testing.T) {
 
 	// 3 failures in first window.
 	for i := 0; i < 3; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	time.Sleep(20 * time.Millisecond) // window expires
 
 	// 3 more failures in new window: should NOT lock (3 < 5).
 	for i := 0; i < 3; i++ {
-		l.RecordMFAFailure(uid)
+		l.ReserveMFAAttempt(uid)
 	}
 
 	locked, err := l.CheckMFALockout(uid)
@@ -193,7 +193,7 @@ func TestInMemoryMFALockout_CheckChallengeLimit_UnderCap(t *testing.T) {
 	ch := "test-challenge-hash"
 
 	for i := 0; i < 4; i++ {
-		l.RecordChallengeAttempt(ch)
+		l.ReserveChallengeAttempt(ch)
 	}
 
 	exhausted, err := l.CheckChallengeLimit(ch)
@@ -208,7 +208,7 @@ func TestInMemoryMFALockout_CheckChallengeLimit_AtCap(t *testing.T) {
 	ch := "test-challenge-hash"
 
 	for i := 0; i < 5; i++ {
-		l.RecordChallengeAttempt(ch)
+		l.ReserveChallengeAttempt(ch)
 	}
 
 	exhausted, err := l.CheckChallengeLimit(ch)
@@ -223,7 +223,7 @@ func TestInMemoryMFALockout_CheckChallengeLimit_AboveCap(t *testing.T) {
 	ch := "test-challenge-hash"
 
 	for i := 0; i < 10; i++ {
-		l.RecordChallengeAttempt(ch)
+		l.ReserveChallengeAttempt(ch)
 	}
 
 	exhausted, err := l.CheckChallengeLimit(ch)
@@ -240,7 +240,7 @@ func TestInMemoryMFALockout_CheckChallengeLimit_PerChallengeIsolation(t *testing
 
 	// Exhaust ch1.
 	for i := 0; i < 5; i++ {
-		l.RecordChallengeAttempt(ch1)
+		l.ReserveChallengeAttempt(ch1)
 	}
 
 	exhausted1, err := l.CheckChallengeLimit(ch1)
@@ -282,7 +282,7 @@ func TestMFAVerify_ChallengeExhausted_429(t *testing.T) {
 	// Exhaust the challenge by recording DefaultMFAChallengeMaxAttempts attempts.
 	challengeHash := sha256Hex(challengeToken)
 	for i := 0; i < DefaultMFAChallengeMaxAttempts; i++ {
-		inProcessMFA(t, h).RecordChallengeAttempt(challengeHash)
+		inProcessMFA(t, h).ReserveChallengeAttempt(challengeHash)
 	}
 
 	// Now try to verify: should get 429.
@@ -311,7 +311,7 @@ func TestMFAVerify_PerUserLockout_429(t *testing.T) {
 
 	// Lock out the user by recording MaxAttempts failures.
 	for i := 0; i < DefaultMFAVerifyMaxAttempts; i++ {
-		inProcessMFA(t, h).RecordMFAFailure(userID)
+		inProcessMFA(t, h).ReserveMFAAttempt(userID)
 	}
 
 	// Create a valid challenge token (different from the ones used to lock out).
@@ -417,8 +417,8 @@ func TestMFAVerify_MultipleFailures_ThenLockout(t *testing.T) {
 	h := NewAuthHandler(nil, mfaStore, nil, secret, 3600, false)
 
 	// Send 5 bad codes: each uses a fresh challenge to avoid challenge cap.
-	// The lockout check runs BEFORE the failure is recorded, so the 5th
-	// bad code still returns 422 (failure recorded after the check).
+	// Each reserves its attempt before the code check, so the 5th brings the
+	// count to the limit and still returns 422.
 	for i := 0; i < 5; i++ {
 		challengeToken, cErr := auth.SignChallenge(secret, userID, "test@example.com", []string{"admin"}, "")
 		require.NoError(t, cErr)
@@ -438,7 +438,7 @@ func TestMFAVerify_MultipleFailures_ThenLockout(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, locked, "5 failures ≥ 5 limit - locked")
 
-	// 6th attempt should get 429 from per-user lockout (check runs before failure recording).
+	// 6th attempt should get 429 from per-user lockout.
 	challengeToken, err := auth.SignChallenge(secret, userID, "test@example.com", []string{"admin"}, "")
 	require.NoError(t, err)
 	body := makeMFAVerifyBody(challengeToken, "000000")
@@ -576,7 +576,7 @@ func TestInMemoryMFALockout_ChallengeEntryExpiry_PeekPrunes(t *testing.T) {
 	assert.False(t, exists, "expired challenge entry must be deleted from map")
 }
 
-func TestInMemoryMFALockout_ChallengeEntryExpiry_RecordCreatesFresh(t *testing.T) {
+func TestInMemoryMFALockout_ChallengeEntryExpiry_ReserveCreatesFresh(t *testing.T) {
 	t.Parallel()
 
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
@@ -592,9 +592,9 @@ func TestInMemoryMFALockout_ChallengeEntryExpiry_RecordCreatesFresh(t *testing.T
 	l.challengeEntries[chHash].counter.Store(5)
 	l.mu.Unlock()
 
-	// Record a new attempt: the expired entry should be pruned and a fresh
+	// Reserve a new attempt: the expired entry should be pruned and a fresh
 	// one created, so the counter starts at 1, not 6.
-	l.RecordChallengeAttempt(chHash)
+	l.ReserveChallengeAttempt(chHash)
 
 	l.mu.Lock()
 	entry, exists := l.challengeEntries[chHash]
@@ -613,8 +613,8 @@ func TestInMemoryMFALockout_ChallengeEntryExpiry_FreshEntryNotPruned(t *testing.
 	l := NewInMemoryMFALockout(5, 15*time.Minute)
 	chHash := "fresh-challenge-hash"
 
-	// Record an attempt on a fresh hash: entry is auto-created.
-	l.RecordChallengeAttempt(chHash)
+	// Reserve an attempt on a fresh hash: entry is auto-created.
+	l.ReserveChallengeAttempt(chHash)
 
 	// Verify it's present and not pruned by CheckChallengeLimit.
 	exhausted, err := l.CheckChallengeLimit(chHash)

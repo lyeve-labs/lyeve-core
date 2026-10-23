@@ -25,8 +25,12 @@ func (c *countingLockout) CountRecentFailures(context.Context, uuid.UUID, time.T
 	return c.failCount, nil
 }
 
-func (c *countingLockout) RecordFailedAttempt(_ context.Context, userID uuid.UUID) error {
+func (c *countingLockout) ReserveAttempt(_ context.Context, userID uuid.UUID, _ int) (int, bool, error) {
 	c.recorded = append(c.recorded, userID)
+	return c.failCount + len(c.recorded), true, nil
+}
+
+func (c *countingLockout) ResetFailedAttempts(context.Context, uuid.UUID) error {
 	return nil
 }
 
