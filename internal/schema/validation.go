@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"net/url"
 	"reflect"
 	"regexp"
@@ -314,11 +313,7 @@ func validateFieldValue(fieldName string, val any, rule domain.ValidationRule) *
 }
 
 func validateEmail(fieldName string, val any) *ValidationError {
-	s := toString(val)
-	if _, err := mail.ParseAddress(s); err != nil {
-		return &ValidationError{Field: fieldName, Code: i18n.CodeSchemaValidationEmail, Rule: "email", Value: val, Params: map[string]any{"field": fieldName}}
-	}
-	if !strings.Contains(s, "@") || !strings.Contains(s, ".") {
+	if !core.ValidEmail(toString(val)) {
 		return &ValidationError{Field: fieldName, Code: i18n.CodeSchemaValidationEmail, Rule: "email", Value: val, Params: map[string]any{"field": fieldName}}
 	}
 	return nil

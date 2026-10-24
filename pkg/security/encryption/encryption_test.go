@@ -371,3 +371,36 @@ func TestNewKeyStore_SecondStoreDecryptsTheFirstsCiphertext(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("secret"), pt)
 }
+
+func TestSubjectRefKey(t *testing.T) {
+	ks, err := NewKeyStore("subject-reference-master-key-of-32+chars")
+	require.NoError(t, err)
+	tenantDEK, err := ks.DeriveTenantDEK("tenant-a")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name      string
+		masterKey string
+		wantErr   bool
+	}{
+		{name: "empty master key is refused", masterKey: "", wantErr: true},
+		{name: "master key derives a key", masterKey: "subject-reference-master-key-of-32+chars"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := SubjectRefKey(tt.masterKey)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Nil(t, key)
+				return
+			}
+			require.NoError(t, err)
+			assert.Len(t, key, AESSize)
+
+			again, err := SubjectRefKey(tt.masterKey)
+			require.NoError(t, err)
+			assert.Equal(t, key, again, "one master key must give one subject reference key")
+			assert.NotEqual(t, tenantDEK, key, "the subject reference key must not equal a tenant DEK from the same master key")
+		})
+	}
+}

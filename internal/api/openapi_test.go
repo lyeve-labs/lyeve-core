@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strings"
@@ -283,4 +284,32 @@ func TestOpenAPI_MembershipPathsAreNotTheEngines(t *testing.T) {
 	// The caller's own list stays: it is part of the auth surface and answers
 	// the home tenant whether or not anything supplies memberships.
 	require.NotNil(t, doc.Paths["/api/admin/auth/memberships"])
+}
+
+// The erase route answers 207 for a partial erasure, and the spec listed only
+// 200. Both answers are published with the fields that tell them apart.
+func TestOpenAPI_ErasePublishesThePartialAnswer(t *testing.T) {
+	raw, err := json.Marshal(buildOpenAPIDoc(nil, nil, openAPIOptions{}))
+	require.NoError(t, err)
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Content map[string]struct {
+					Schema struct {
+						Required   []string       `json:"required"`
+						Properties map[string]any `json:"properties"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"responses"`
+		} `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	responses := doc.Paths["/api/admin/gdpr/erase"]["post"].Responses
+	for _, code := range []string{"200", "207"} {
+		schema := responses[code].Content["application/json"].Schema
+		assert.Contains(t, schema.Required, "complete", code)
+		for _, field := range []string{"complete", "failed", "errors", "total_rows"} {
+			assert.Contains(t, schema.Properties, field, code+" declares "+field)
+		}
+	}
 }
