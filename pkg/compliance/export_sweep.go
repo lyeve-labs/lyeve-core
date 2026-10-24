@@ -60,12 +60,20 @@ type TenantExport struct {
 // The caller is responsible for the super_admin gate and for deciding which
 // tenants to pass. This function does not enumerate them, so it cannot be
 // tricked into widening its own scope.
+//
+// The subject's addresses are resolved once, before the first tenant, as in
+// RunSubjectExport.
 func RunSubjectExportAcrossTenants(
 	ctx context.Context,
 	identifier string,
 	tenants []string,
 	scope TenantScopeFunc,
 ) (*SubjectExportResult, error) {
+	identifier = canonicalSubject(identifier)
+	ctx, err := resolveExportAddresses(ctx, identifier)
+	if err != nil {
+		return nil, err
+	}
 	result := &SubjectExportResult{
 		Identifier: identifier,
 		Plugins:    map[string]any{},
@@ -129,30 +137,71 @@ func RunSubjectExportAcrossTenants(
 	return result, nil
 }
 
+// resolveExportAddresses returns ctx carrying the subject's addresses, read
+// from the accounts and the declared address sources as an erasure reads them.
+// An exporter that keeps rows under an address then lists what the erasure
+// would reach. A set that cannot be read is not guessed at, because a bundle
+// built on part of it would leave out rows and still read as complete.
+func resolveExportAddresses(ctx context.Context, identifier string) (context.Context, error) {
+	resolved, err := ResolveSubjectAddresses(ctx, identifier, globalEraserRegistry.Erasers())
+	if err != nil {
+		slog.ErrorContext(ctx, "subject_addresses_unresolved",
+			"subject_ref", subjectRef(identifier),
+			"err", err,
+		)
+		return ctx, fmt.Errorf("%w: %w", ErrSubjectAddressesUnresolved, err)
+	}
+	return resolved, nil
+}
+
 // runExportersInto runs every registered exporter against one already-scoped
 // context. It is the per-tenant half of the sweep and the body RunSubjectExport
 // uses for the single-tenant case, so the two cannot drift.
 func runExportersInto(ctx context.Context, identifier string) *TenantExport {
 	exporters := globalExporterRegistry.Exporters()
+	runs := make([]exportRun, len(exporters))
+	for i, e := range exporters {
+		runs[i] = exportRun{index: i, exporter: e}
+	}
+	out, _ := runExporters(ctx, identifier, runs)
+	return out
+}
+
+// exportRun is one exporter to call, with its position in the registry and
+// the section it answers for. The section is empty on the routes that export
+// everything, which name no section.
+type exportRun struct {
+	index    int
+	section  string
+	exporter SubjectExporter
+}
+
+// runExporters calls each exporter of runs against one already-scoped
+// context, and reports the keys each named section put in the bundle.
+func runExporters(ctx context.Context, identifier string, runs []exportRun) (*TenantExport, map[string][]string) {
 	out := &TenantExport{
 		Plugins: map[string]any{},
 		Errors:  []ExportError{},
 	}
+	keys := map[string][]string{}
 
-	for i, exporter := range exporters {
-		data, err := exporter.ExportSubject(ctx, identifier)
+	for _, run := range runs {
+		i := run.index
+		data, err := run.exporter.ExportSubject(ctx, identifier)
 		if err != nil {
 			// The identifier is the personal data the request is about, and a
 			// stored log line outlives the bundle, so the line names the
 			// subject by the digest the erasure lines use.
 			slog.ErrorContext(ctx, "subject_export_failed",
 				"exporter_index", i,
+				"export_section", run.section,
 				"subject_ref", subjectRef(identifier),
 				"err", err,
 			)
 			out.Errors = append(out.Errors, ExportError{
-				Index: i,
-				Error: "export failed for plugin",
+				Index:   i,
+				Section: run.section,
+				Error:   "export failed for plugin",
 			})
 			continue
 		}
@@ -167,11 +216,13 @@ func runExportersInto(ctx context.Context, identifier string) *TenantExport {
 				qualified := fmt.Sprintf("%s_%d", key, i)
 				slog.WarnContext(ctx, "subject export section name collision",
 					"section", key, "kept_as", qualified, "exporter_index", i)
-				out.Plugins[qualified] = val
-				continue
+				key = qualified
 			}
 			out.Plugins[key] = val
+			if run.section != "" {
+				keys[run.section] = append(keys[run.section], key)
+			}
 		}
 	}
-	return out
+	return out, keys
 }

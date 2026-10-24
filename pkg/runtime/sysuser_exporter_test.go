@@ -250,3 +250,21 @@ func TestSysUserExporter_ExportsTheLowerCaseID(t *testing.T) {
 		}
 	})
 }
+
+// The account is the engine's own record, so its exporter answers for the
+// engine's section, which a person can choose like any plugin's.
+func TestSysUserExporter_ExportsAsTheEngineSection(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		compliance.ResetSubjectExporters()
+		t.Cleanup(compliance.ResetSubjectExporters)
+		registerSysUserExporter(host)
+		assert.Equal(t, []string{compliance.EngineExportSection}, compliance.SubjectExportSections())
+
+		address := "section-" + uuid.NewString()[:8] + "@agency.example"
+		seedTenantLocal(t, host, "acme", address)
+		res, err := compliance.RunSubjectExportSections(core.WithTenantID(context.Background(), "acme"), address,
+			[]string{compliance.EngineExportSection})
+		require.NoError(t, err)
+		assert.Equal(t, map[string][]string{compliance.EngineExportSection: {"sys_users"}}, res.Sections)
+	})
+}

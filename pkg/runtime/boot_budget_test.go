@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 )
 
 // bootBudget is how long the engine may take from RunWithOptions to serving
@@ -49,6 +50,7 @@ func TestRun_ServesWithinBootBudget(t *testing.T) {
 		t.Setenv(k, v)
 	}
 
+	forgetBootRegistries(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	began := time.Now()
@@ -85,4 +87,15 @@ func TestRun_ServesWithinBootBudget(t *testing.T) {
 	assert.Less(t, served, bootBudget,
 		"the engine took %v to serve its first request, over the %v budget: look for a gate waiting on a timeout, a network call to a default address with retries, or work repeated per caller",
 		served.Round(time.Millisecond), bootBudget)
+}
+
+// forgetBootRegistries empties the subject eraser and exporter registries
+// once the engine a test booted has stopped. A boot registers erasers and
+// exporters bound to its database, which closes with it, and a later export
+// or erasure in the package then ran them and failed.
+func forgetBootRegistries(t *testing.T) {
+	t.Cleanup(func() {
+		compliance.ResetSubjectErasers()
+		compliance.ResetSubjectExporters()
+	})
 }
