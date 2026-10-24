@@ -601,8 +601,20 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 		slog.WarnContext(ctx, "step-up totp secret unreadable", "err", err, "user_id", u.ID)
 		return http.StatusInternalServerError, "account check unavailable"
 	}
+	// The attempt is counted before the code is checked, in the same step
+	// that reads the count, so concurrent wrong codes cannot all be checked.
+	// A replayed code keeps its attempt counted, and a code that verifies
+	// gives back its own.
+	reservation, reserved, err := h.mfaLockoutChecker.ReserveMFAAttempt(ctx, u.ID)
+	if err != nil {
+		return http.StatusServiceUnavailable, "account check unavailable"
+	}
+	if !reserved {
+		return http.StatusTooManyRequests, "Too many MFA attempts. Try again later."
+	}
 	outcome, err := acceptTOTP(ctx, h.mfaStore, u.ID, secret, code)
 	if err != nil {
+		h.releaseMFAAttempt(ctx, u.ID, reservation)
 		slog.WarnContext(ctx, "step-up mfa code check failed", "err", err, "user_id", u.ID)
 		return http.StatusServiceUnavailable, "account check unavailable"
 	}
@@ -610,11 +622,9 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 	case totpReplayed:
 		return http.StatusForbidden, "This MFA code was already used. Wait for the next one."
 	case totpInvalid:
-		if rerr := h.mfaLockoutChecker.RecordMFAFailure(ctx, u.ID); rerr != nil {
-			slog.WarnContext(ctx, "failed to record mfa failure", "err", rerr)
-		}
 		return http.StatusForbidden, "The MFA code is not valid."
 	}
+	h.releaseMFAAttempt(ctx, u.ID, reservation)
 	return 0, ""
 }
 
@@ -623,26 +633,28 @@ func (h *AuthHandler) stepUpPassword(r *http.Request, u *domain.User, password s
 	if password == "" {
 		return http.StatusForbidden, "password is required to confirm this change."
 	}
+	// The attempt is counted before the password is checked, in the same
+	// step that reads the count, so concurrent wrong passwords cannot all be
+	// checked. A correct password gives back its own attempt.
+	var reservation Reservation
 	if h.lockoutChecker != nil {
-		count, err := h.lockoutChecker.CountRecentFailures(ctx, u.ID, time.Now().Add(-h.LockoutWindow))
+		var reserved bool
+		var err error
+		reservation, reserved, err = h.lockoutChecker.ReserveAttempt(ctx, u.ID, h.MaxFailedAttempts)
 		if err != nil {
 			slog.WarnContext(ctx, "step-up lockout check failed, failing closed", "err", err, "user_id", u.ID)
 			return http.StatusServiceUnavailable, "account check unavailable"
 		}
-		if count >= h.MaxFailedAttempts {
+		if !reserved {
 			slog.WarnContext(ctx, "step-up refused: account is locked out", "user_id", u.ID,
-				"failures", count, "max_attempts", h.MaxFailedAttempts, "window", h.LockoutWindow)
+				"failures", reservation.Count, "max_attempts", h.MaxFailedAttempts, "window", h.LockoutWindow)
 			return http.StatusTooManyRequests, "Too many failed password attempts. Try again later."
 		}
 	}
 	if err := auth.VerifyPassword(h.passwordHashAlgo, u.PasswordHash, password); err != nil {
-		if h.lockoutChecker != nil {
-			if lerr := h.lockoutChecker.RecordFailedAttempt(ctx, u.ID); lerr != nil {
-				slog.WarnContext(ctx, "failed to record lockout attempt", "err", lerr)
-			}
-		}
 		return http.StatusForbidden, "The password is not valid."
 	}
+	h.releasePasswordAttempt(ctx, u.ID, reservation)
 	return 0, ""
 }
 
