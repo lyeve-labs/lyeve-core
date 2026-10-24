@@ -173,7 +173,7 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 // anonymizes it only once every other eraser has succeeded. Repeating the
 // request runs every eraser again and finishes the erasure. Complete is also
 // false when another account holds one of the subject's addresses: rows under
-// it are kept, and only an erasure naming that address reaches them.
+// it are kept, because they cannot be told apart from that account's data.
 type EraseResponse struct {
 	Identifier string   `json:"identifier"`
 	TotalRows  int64    `json:"total_rows"`
@@ -284,10 +284,12 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if result.Shared > 0 {
-		// The answer names no address, as the log names none: which one is
-		// shared would tell the caller about the other account.
+		// The answer names no address and no account, as the log names none:
+		// either would tell the caller about the other account. It offers no
+		// next step, because an erasure naming the shared address erases the
+		// other account.
 		resp.Errors = append(resp.Errors,
-			"not finished: rows kept under an address another account also holds, which only an erasure naming that address reaches")
+			"not finished: some rows were kept because they cannot be told apart from another account's data")
 	}
 
 	// Audit log.

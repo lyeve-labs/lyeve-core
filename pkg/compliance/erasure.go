@@ -192,9 +192,9 @@ func SubjectErasers() []SubjectEraser {
 //
 // Shared counts the subject's addresses no eraser reached because another
 // account in the same tenant holds them too (see ResolveSubjectAddresses).
-// Rows under them stay, and once the account is erased only an erasure
-// naming the address reaches them, so a run with any is unfinished although
-// every eraser succeeded.
+// Rows under them stay, because they cannot be told apart from the other
+// account's data, so a run with any is unfinished although every eraser
+// succeeded.
 type ErasureResult struct {
 	Rows   int64
 	Holds  []HoldRef

@@ -172,8 +172,7 @@ type subjectAddressesKey struct{}
 // another account's address. Either account's rows under it would reach the
 // other's. What is dropped is logged once per run for each reason, as a
 // count. The count of shared addresses also rides on ctx: rows under them
-// stay, and once the account is erased only an erasure naming the address
-// reaches them, so the run reports itself unfinished.
+// stay, so the run reports itself unfinished.
 func ResolveSubjectAddresses(ctx context.Context, identifier string, erasers []SubjectEraser) (context.Context, error) {
 	var set []SubjectAddress
 	dropped := 0
