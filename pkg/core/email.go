@@ -1,6 +1,9 @@
 package core
 
-import "strings"
+import (
+	"net/mail"
+	"strings"
+)
 
 // NormalizeEmail returns the canonical stored form of an address: trimmed of
 // surrounding whitespace and folded to lower case.
@@ -23,4 +26,14 @@ import "strings"
 // because two sides that fold differently split one address in two.
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// ValidEmail reports whether s is an email address, by the rule a schema field
+// of type email applies to what is written to it: net/mail parses it, and it
+// holds an at sign and a dot.
+func ValidEmail(s string) bool {
+	if _, err := mail.ParseAddress(s); err != nil {
+		return false
+	}
+	return strings.Contains(s, "@") && strings.Contains(s, ".")
 }

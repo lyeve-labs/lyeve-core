@@ -62,6 +62,16 @@ type HoldCheckerProvider interface {
 // to tell "this subject is free to erase" from "nobody knows".
 var ErrHoldCheckUnavailable = errors.New("legal hold status could not be determined")
 
+// ErrSubjectNotSignedOut is returned when the subject could not be signed
+// out. The erasure then runs no eraser, so a caller must not report the
+// account as locked.
+var ErrSubjectNotSignedOut = errors.New("the subject could not be signed out")
+
+// ErrSubjectAddressesUnresolved is returned when the subject's addresses
+// could not be read. The erasure then runs no eraser, and repeating it is
+// safe.
+var ErrSubjectAddressesUnresolved = errors.New("the subject's addresses could not be resolved")
+
 var (
 	holdMu      sync.RWMutex
 	holdChecker HoldChecker
