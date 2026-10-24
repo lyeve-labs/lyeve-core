@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -596,8 +597,7 @@ func (a sharingAccount) AddressHolders(_ context.Context, tenant, address string
 func (sharingAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
 
 // An address the subject shares with another account is left out of the
-// erasure, so rows under it stay, and once the account is erased only an
-// erasure naming that address reaches them. That erasure answered complete.
+// erasure, so rows under it stay. That erasure answered complete.
 func TestDSARHandler_Erase_SharedAddressIsUnfinished(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -634,5 +634,58 @@ func TestDSARHandler_Erase_SharedAddressIsUnfinished(t *testing.T) {
 				t.Errorf("the answer names the shared address: %s", rr.Body.String())
 			}
 		})
+	}
+}
+
+// An erasure naming the shared address erases the other account that holds
+// it, so neither the 207 reason nor the published 207 text may send the caller
+// there, and the reason names neither the address nor either account.
+func TestDSARHandler_Erase_SharedAddressOffersNoErasureByAddress(t *testing.T) {
+	byAddress := regexp.MustCompile(`(?i)\berasure\b[^.]*\baddress\b`)
+
+	compliance.RegisterSubjectEraser(sharingAccount{shared: true})
+	defer compliance.ResetSubjectErasers()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "own@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Erase(rr, req)
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp EraseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, reason := range resp.Errors {
+		if byAddress.MatchString(reason) {
+			t.Errorf("the reason offers an erasure by address: %q", reason)
+		}
+		for _, name := range []string{"@", "6f1c2a0e-4b7d-4c1e-9a3f-2d5e8b7c1a90", "0b9d7e4c-1a2f-4e6b-8c3d-5f7a9e1b2c40"} {
+			if strings.Contains(reason, name) {
+				t.Errorf("the reason names %q: %q", name, reason)
+			}
+		}
+	}
+
+	raw, err := json.Marshal(buildOpenAPIDoc(nil, nil, openAPIOptions{}))
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Description string `json:"description"`
+			} `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode spec: %v", err)
+	}
+	published := doc.Paths["/api/admin/gdpr/erase"]["post"].Responses["207"].Description
+	if published == "" {
+		t.Fatal("the spec publishes no 207 answer for the erase route")
+	}
+	if byAddress.MatchString(published) {
+		t.Errorf("the published 207 offers an erasure by address: %q", published)
 	}
 }
