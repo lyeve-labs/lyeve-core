@@ -59,6 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: on SQL Server, a write whose request quota check ran out of time no longer fails with 503. The check stops without closing the connection the write holds, and the write goes through uncounted.
 - Through the plugin releases this engine pins: a legal hold whose resource id is a UUID typed in upper case now holds what it names on PostgreSQL, and a privacy erasure honors a hold set in any tenant. While a legal hold covers a tenant's content as a whole, content history retention deletes nothing in that tenant.
 - Through the plugin releases this engine pins: deleting a content record removes its stored versions, which a delete used to leave listed.
+- Through the plugin releases this engine pins: request capture stores up to a second of captures in one transaction, where it stored each request in a transaction of its own. A request, a read included, no longer costs the database a commit and a log write that waits for the disk. A capture shows in the list up to a second after its request.
 
 ## [0.55.0] - 2026-10-20
 
