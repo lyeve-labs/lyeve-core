@@ -386,3 +386,38 @@ func TestScopedHost_CheckStepUpNeedsTheStepUpGrant(t *testing.T) {
 		t.Fatalf("CheckStepUp err = %v, checked %d: want the engine's answer, checked once", err, h.signed)
 	}
 }
+
+// rolesReadingHost answers every account as an editor in every tenant.
+type rolesReadingHost struct {
+	*capturingHost
+	reads int
+}
+
+func (h *rolesReadingHost) TenantRoles(context.Context, uuid.UUID, string) ([]string, error) {
+	h.reads++
+	return []string{"editor"}, nil
+}
+
+// TenantRoles answers who may act where for every account on the install,
+// so it takes its own grant. Holding every other grant is not enough, and a
+// host that cannot answer is an outage rather than an empty answer.
+func TestScopedHost_TenantRolesNeedsItsGrant(t *testing.T) {
+	h := &rolesReadingHost{capturingHost: newCapturingHost()}
+	denied := NewScopedHost(h, "webhook", CapAll&^CapTenantRoles)
+	if roles, err := denied.TenantRoles(context.Background(), uuid.New(), "acme"); !errors.Is(err, ErrCapDenied) || roles != nil || h.reads != 0 {
+		t.Fatalf("TenantRoles roles %v, err %v, read %d: want a denial before any read", roles, err, h.reads)
+	}
+	rec := requireOneDenial(t, h.capturingHost)
+	assertField(t, rec, "op", "TenantRoles")
+	assertField(t, rec, "capability", "CapTenantRoles")
+
+	granted := NewScopedHost(h, "publisher", CapDBWrite|CapRoutes|CapTenantRoles)
+	if roles, err := granted.TenantRoles(context.Background(), uuid.New(), "acme"); err != nil || len(roles) != 1 || h.reads != 1 {
+		t.Fatalf("TenantRoles roles %v, err %v, read %d: want the engine's answer, read once", roles, err, h.reads)
+	}
+
+	bare := NewScopedHost(newCapturingHost(), "publisher", CapTenantRoles)
+	if roles, err := bare.TenantRoles(context.Background(), uuid.New(), "acme"); !errors.Is(err, ErrServiceUnavailable) || roles != nil {
+		t.Fatalf("TenantRoles on a host without a reader: roles %v, err %v, want an outage", roles, err)
+	}
+}
