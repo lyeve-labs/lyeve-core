@@ -35,6 +35,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Plugins can ask the legal-hold check the way the engine's erasure does, including the install's setting for a check that cannot answer, so a plugin's own erasure route answers a failed check as the engine's route does.
 - A panic the engine recovers, in a request, a background task, a scheduled job, a flow run or a call into a plugin, is now handed to every running plugin that takes on the panic reporting role, with the tenant, the route or task name, the value and the stack. The request still answers 500 and the panic is still logged.
 - Plugins can apply the engine's rule for which tenant a log line about another tenant is filed under, and the plugin test kit can capture log lines through the engine's own handler, with the tenant and level it would apply.
+- Through the plugin releases this engine pins: without a capture rule, request capture keeps the body a successful request sent and leaves out the response body, which was most of what capture cost the engine and the database. A failed request keeps both bodies, and so does a request a rule chose. A diff of two captures says whether it compared their response bodies.
 
 ### Fixed
 
@@ -59,7 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: on SQL Server, a write whose request quota check ran out of time no longer fails with 503. The check stops without closing the connection the write holds, and the write goes through uncounted.
 - Through the plugin releases this engine pins: a legal hold whose resource id is a UUID typed in upper case now holds what it names on PostgreSQL, and a privacy erasure honors a hold set in any tenant. While a legal hold covers a tenant's content as a whole, content history retention deletes nothing in that tenant.
 - Through the plugin releases this engine pins: deleting a content record removes its stored versions, which a delete used to leave listed.
-- Through the plugin releases this engine pins: request capture stores up to a second of captures in one transaction, where it stored each request in a transaction of its own. A request, a read included, no longer costs the database a commit and a log write that waits for the disk. A capture shows in the list up to a second after its request.
+- Through the plugin releases this engine pins: request capture stores up to a second of captures in one transaction, where it stored each request in a transaction of its own. A request, a read included, no longer costs the database a commit and a log write that waits for the disk. A capture shows in the list within two seconds of its request.
+- Through the plugin releases this engine pins: request capture holds at most a sixty-fourth of the engine's memory for bodies waiting to be stored, between 8 and 64 MiB, where it held up to 64 MiB on any server. Past capacity on a server with 1 GB of memory, that budget and the heap growth behind it ran the server out of memory.
 
 ## [0.55.0] - 2026-10-20
 
