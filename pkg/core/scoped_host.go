@@ -237,6 +237,8 @@ func capName(c Capability) string {
 		return "CapUserProvisioner"
 	case CapSessionSign:
 		return "CapSessionSign"
+	case CapSessionKey:
+		return "CapSessionKey"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -308,6 +310,16 @@ func (h *ScopedHost) UpsertContent(ctx context.Context, schemaName string, id uu
 	return cw.UpsertContent(ctx, schemaName, id, data)
 }
 
+// UpdateContent forwards an update-only content write to the inner host.
+// Implements ContentUpdater.
+func (h *ScopedHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	cu, ok := h.inner.(ContentUpdater)
+	if !ok {
+		return fmt.Errorf("content updater not available")
+	}
+	return cu.UpdateContent(ctx, schemaName, id, data)
+}
+
 // DeleteContent forwards content deletes to the inner host. Implements
 // ContentWriter.
 func (h *ScopedHost) DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error {
@@ -348,10 +360,21 @@ func (h *ScopedHost) ContentPage(ctx context.Context, schemaName string, after u
 	return cr.ContentPage(ctx, schemaName, after, limit)
 }
 
+// FlushContentCache forwards a content cache flush to the inner host.
+// Implements ContentCacheFlusher. A host with no content caches has nothing
+// to drop.
+func (h *ScopedHost) FlushContentCache(ctx context.Context, schemaName string) {
+	if f, ok := h.inner.(ContentCacheFlusher); ok {
+		f.FlushContentCache(ctx, schemaName)
+	}
+}
+
 var (
 	_ ContentWriter          = (*ScopedHost)(nil)
+	_ ContentUpdater         = (*ScopedHost)(nil)
 	_ ContentStatusProjector = (*ScopedHost)(nil)
 	_ ContentReader          = (*ScopedHost)(nil)
+	_ ContentCacheFlusher    = (*ScopedHost)(nil)
 )
 
 // Config returns the host configuration. Without CapConfigSecret,
@@ -422,6 +445,34 @@ func (h *ScopedHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 	}
 	if s, ok := h.inner.(SessionTokenSigner); ok {
 		return s.SignSessionToken(ctx, userID, email, roles)
+	}
+	return "", ErrCapDenied
+}
+
+// MFAChallengeAccount forwards to inner if it implements
+// MFAChallengeCompleter. Denied without CapSessionSign, like the completion
+// it leads to.
+func (h *ScopedHost) MFAChallengeAccount(ctx context.Context, challengeToken string) (MFAChallengeAccount, error) {
+	if !h.has(CapSessionSign) {
+		h.warnDenied("MFAChallengeAccount", "", CapSessionSign)
+		return MFAChallengeAccount{}, ErrCapDenied
+	}
+	if c, ok := h.inner.(MFAChallengeCompleter); ok {
+		return c.MFAChallengeAccount(ctx, challengeToken)
+	}
+	return MFAChallengeAccount{}, ErrCapDenied
+}
+
+// CompleteMFAChallenge forwards to inner if it implements
+// MFAChallengeCompleter. Denied without CapSessionSign, because the session
+// it signs acts as the account the challenge names.
+func (h *ScopedHost) CompleteMFAChallenge(ctx context.Context, challengeToken string) (string, error) {
+	if !h.has(CapSessionSign) {
+		h.warnDenied("CompleteMFAChallenge", "", CapSessionSign)
+		return "", ErrCapDenied
+	}
+	if c, ok := h.inner.(MFAChallengeCompleter); ok {
+		return c.CompleteMFAChallenge(ctx, challengeToken)
 	}
 	return "", ErrCapDenied
 }
@@ -904,9 +955,14 @@ func (h *ScopedHost) AcquireTenantConn(ctx context.Context, tenantID string) (co
 }
 
 // Secret forwards to inner if CapConfigSecret is held and inner
-// implements SecretsProvider.
+// implements SecretsProvider. The session signing secret also needs
+// CapSessionKey.
 func (h *ScopedHost) Secret(key string) (string, bool) {
 	if !h.has(CapConfigSecret) {
+		return "", false
+	}
+	if isSessionKey(key) && !h.has(CapSessionKey) {
+		h.warnDenied("Secret", key, CapSessionKey)
 		return "", false
 	}
 	if p, ok := h.inner.(SecretsProvider); ok {
@@ -916,15 +972,38 @@ func (h *ScopedHost) Secret(key string) (string, bool) {
 }
 
 // Secrets forwards to inner if CapConfigSecret is held and inner
-// implements SecretsProvider.
+// implements SecretsProvider. The session signing secrets also need
+// CapSessionKey.
 func (h *ScopedHost) Secrets(key string) ([]string, bool) {
 	if !h.has(CapConfigSecret) {
+		return nil, false
+	}
+	if isSessionKey(key) && !h.has(CapSessionKey) {
+		h.warnDenied("Secrets", key, CapSessionKey)
 		return nil, false
 	}
 	if p, ok := h.inner.(SecretsProvider); ok {
 		return p.Secrets(key)
 	}
 	return nil, false
+}
+
+// resolvedKeyName is key in the lower-case form of the environment variable
+// the engine resolves it to. The engine's host answers a key it has no field
+// for from the configuration resolver, which trims it, folds case and reads
+// '.', '-' and ' ' as '_'. A check on a key compares this form, or another
+// spelling of the same variable reaches its value around the check.
+func resolvedKeyName(key string) string {
+	return keySeparators.Replace(strings.ToLower(strings.TrimSpace(key)))
+}
+
+var keySeparators = strings.NewReplacer(".", "_", "-", "_", " ", "_")
+
+// isSessionKey reports whether key names the session signing secret, in any
+// spelling that resolves to it.
+func isSessionKey(key string) bool {
+	name := resolvedKeyName(key)
+	return name == "jwt_secret" || name == "jwt_secrets"
 }
 
 // ScopedConfig
@@ -1016,12 +1095,12 @@ var secretSuffixes = []string{"_secret", "_key", "_password", "_pass", "_token"}
 // IsSecretKey reports whether key carries credential material and must never be
 // served through Config. Reachable only through SecretsProvider.
 //
-// The comparison is case-folded because the unknown-key path resolves a config
-// key from the environment under its upper-cased name, so a plugin can name the
-// same variable either way, and neither spelling may escape the map or the
-// suffix rule.
+// The comparison reads the key the way the unknown-key path resolves it from
+// the environment: case-folded, trimmed, and with '.', '-' and ' ' read as
+// '_'. A plugin can name the same variable in any of those spellings, and none
+// may escape the map or the suffix rule.
 func IsSecretKey(key string) bool {
-	lower := strings.ToLower(key)
+	lower := resolvedKeyName(key)
 	if SecretKeys[lower] {
 		return true
 	}
@@ -1076,6 +1155,9 @@ func (c *ScopedConfig) Strings(key string) []string {
 type readOnlyQuerier struct {
 	inner Querier
 }
+
+// SysDatabase passes the inner querier's answer through, for the catalog read.
+func (r readOnlyQuerier) SysDatabase() string { return sysDatabaseOf(r.inner) }
 
 func (r readOnlyQuerier) QueryRow(ctx context.Context, sQL string, args ...any) (Row, error) {
 	return r.inner.QueryRow(ctx, sQL, args...)
@@ -1293,9 +1375,15 @@ func (h *ScopedHost) ProviderWindowAdmitsAccount(ctx context.Context, tenantID s
 	return ProviderWindowAdmits(seenAt, ProviderWindowDefaultDays, time.Now()), nil
 }
 
-// TenantAccounts forwards to inner if it implements TenantAccountProvider.
-// Nil when the host keeps no accounts.
+// TenantAccounts forwards to inner if it implements TenantAccountProvider,
+// for a plugin holding CapDBWrite. The store creates an account with any
+// roles in any tenant, so a plugin that may not write the database gets nil,
+// as it does from a host that keeps no accounts.
 func (h *ScopedHost) TenantAccounts() TenantAccountStore {
+	if !h.has(CapDBWrite) {
+		h.warnDenied("TenantAccounts", "", CapDBWrite)
+		return nil
+	}
 	if p, ok := h.inner.(TenantAccountProvider); ok {
 		return p.TenantAccounts()
 	}

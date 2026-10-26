@@ -3,8 +3,11 @@ package api
 import (
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/internal/middleware"
@@ -48,6 +51,24 @@ func NewDSARHandler(
 // than reporting no match, so an unbounded identifier would fail every eraser
 // with a 5xx for input that could never have matched a row.
 
+const errNotASubject = "identifier must be an email address, an account id or an IP address"
+
+// namesASubject reports whether the identifier is an email address, an
+// account id or an IP address, the keys the erasers look a subject up by.
+// The free-text erasers redact every standalone match of the identifier, some
+// of them in every tenant, so a bare word such as a first name would be
+// redacted wherever it appears, in the records of people who never asked.
+func namesASubject(identifier string) bool {
+	if _, err := uuid.Parse(identifier); err == nil {
+		return true
+	}
+	if net.ParseIP(identifier) != nil {
+		return true
+	}
+	at := strings.LastIndexByte(identifier, '@')
+	return at > 0 && at < len(identifier)-1
+}
+
 // ExportRequest is the JSON body for POST /api/admin/gdpr/export.
 type ExportRequest struct {
 	Identifier string `json:"identifier" validate:"required,min=1,max=320"`
@@ -84,6 +105,10 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	if middleware.ContainsNullOrControl(body.Identifier) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "identifier contains invalid characters")
+		return
+	}
+	if !namesASubject(body.Identifier) {
+		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, errNotASubject)
 		return
 	}
 
@@ -160,6 +185,10 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 
 	if middleware.ContainsNullOrControl(body.Identifier) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "identifier contains invalid characters")
+		return
+	}
+	if !namesASubject(body.Identifier) {
+		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, errNotASubject)
 		return
 	}
 

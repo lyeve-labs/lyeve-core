@@ -12,7 +12,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 )
 
-// db.IsDML behavioral parity tests
+// db.IsDMLOn behavioral parity tests
 
 func TestIsDML_RejectsDMLVerbs(t *testing.T) {
 	tests := []string{
@@ -29,7 +29,7 @@ func TestIsDML_RejectsDMLVerbs(t *testing.T) {
 	}
 	for _, sql := range tests {
 		t.Run("dml:"+sql[:min(30, len(sql))], func(t *testing.T) {
-			assert.True(t, db.IsDML(sql), "expected DML detection for %q", sql)
+			assert.True(t, db.IsDMLOn("postgres", sql), "expected DML detection for %q", sql)
 		})
 	}
 }
@@ -51,7 +51,7 @@ func TestIsDML_AllowsSelectAndDDL(t *testing.T) {
 	}
 	for _, sql := range tests {
 		t.Run("allow:"+sql[:min(30, len(sql))], func(t *testing.T) {
-			assert.False(t, db.IsDML(sql), "expected no DML detection for %q", sql)
+			assert.False(t, db.IsDMLOn("postgres", sql), "expected no DML detection for %q", sql)
 		})
 	}
 }
@@ -68,7 +68,7 @@ func TestIsDML_CommentsBeforeDML(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.sql[:min(30, len(tt.sql))], func(t *testing.T) {
-			assert.Equal(t, tt.isDML, db.IsDML(tt.sql))
+			assert.Equal(t, tt.isDML, db.IsDMLOn("postgres", tt.sql))
 		})
 	}
 }

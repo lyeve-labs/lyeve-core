@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
 )
 
 // TableSetState is what the catalog says about a TableSet.
@@ -118,19 +120,100 @@ func (s TableSet) Check(ctx context.Context, q Querier, dialect string) (TableSe
 		strings.Join(missing, ", "), len(found))
 }
 
-// catalogSchema is the predicate that holds a catalog read to the schema an
-// unqualified name resolves to on the connection. On MySQL information_schema
-// spans every database on the server, so the read is held to the one the
-// connection is using.
-func catalogSchema(dialect string) string {
-	switch dialect {
-	case "mysql":
-		return "table_schema = DATABASE()"
-	case "mssql":
-		return "table_schema = SCHEMA_NAME()"
-	default:
-		return "table_schema = current_schema()"
+// catalogRead builds the MySQL and SQL Server read of an information_schema
+// view for tables, holding each name to the database a statement naming it
+// reaches. A tenant-scoped connection there has switched to the tenant's
+// database, and the querier qualifies every engine table (sys_* and the
+// registered shared tables) with the engine's own database, so an engine
+// table is read in that database and every other table in the current one.
+// A querier that cannot name the engine's database reads every table in the
+// current one. On MySQL information_schema spans every database on the
+// server, so the read names the database. On SQL Server each database has its
+// own information_schema, so the read is made in the engine's.
+func catalogRead(q Querier, dialect, columns, view string, tables []string) (string, []any) {
+	sysDB := sysDatabaseOf(q)
+	var engine, current []string
+	for _, t := range tables {
+		if sysDB != "" && engineTable(t) {
+			engine = append(engine, t)
+		} else {
+			current = append(current, t)
+		}
 	}
+	var args []any
+	marks := func(names []string) string {
+		m := make([]string, len(names))
+		for i, n := range names {
+			args = append(args, strings.ToLower(n))
+			m[i] = fmt.Sprintf("$%d", len(args))
+		}
+		return strings.Join(m, ", ")
+	}
+	var parts []string
+	if len(engine) > 0 {
+		from, schema := "information_schema."+view, "table_schema = SCHEMA_NAME()"
+		if dialect == "mysql" {
+			args = append(args, sysDB)
+			schema = fmt.Sprintf("table_schema = $%d", len(args))
+		} else {
+			from = "[" + strings.ReplaceAll(sysDB, "]", "]]") + "]." + from
+		}
+		parts = append(parts, `SELECT `+columns+` FROM `+from+catalogHint(dialect)+`
+WHERE `+schema+` AND LOWER(table_name) IN (`+marks(engine)+`)`)
+	}
+	if len(current) > 0 {
+		schema := "table_schema = SCHEMA_NAME()"
+		if dialect == "mysql" {
+			schema = "table_schema = DATABASE()"
+		}
+		parts = append(parts, `SELECT `+columns+` FROM information_schema.`+view+catalogHint(dialect)+`
+WHERE `+schema+` AND LOWER(table_name) IN (`+marks(current)+`)`)
+	}
+	return strings.Join(parts, "\nUNION ALL\n"), args
+}
+
+// sysDatabaseOf names the database the engine's own tables live in, or "" when
+// q cannot say. A querier that wraps another passes the question through.
+func sysDatabaseOf(q Querier) string {
+	if n, ok := q.(interface{ SysDatabase() string }); ok {
+		return n.SysDatabase()
+	}
+	return ""
+}
+
+// engineTable reports whether the querier qualifies a statement's reference
+// to name with the engine's own database.
+func engineTable(name string) bool {
+	return (strings.HasPrefix(name, "sys_") && len(name) > len("sys_")) || sqlx.IsSharedTable(name)
+}
+
+// pgTables and pgColumns read the PostgreSQL catalog for the relation each
+// unqualified name resolves to. A tenant-scoped connection searches the
+// tenant's schema and then public, so current_schema() names the tenant's
+// schema while an unqualified sys_* table resolves to public, and a read held
+// to current_schema() reported the engine's tables absent. A relation is
+// visible when it is the first one of its name on the search path, which is
+// the one an unqualified statement reaches.
+const (
+	pgTables = `SELECT c.relname FROM pg_catalog.pg_class c
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND pg_catalog.pg_table_is_visible(c.oid) AND LOWER(c.relname) IN (%s)`
+	pgColumns = `SELECT c.relname, a.attname FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND pg_catalog.pg_table_is_visible(c.oid) AND a.attnum > 0 AND NOT a.attisdropped AND LOWER(c.relname) IN (%s)`
+)
+
+// catalogHint is the table hint a catalog read takes. On SQL Server a catalog
+// read takes locks that row versioning does not cover, so it waits on a table
+// another transaction created and has not committed. A tenant delete reads
+// the catalog while it holds the tenant's rows, and a schema change that then
+// waits on one of those rows closes a cycle the server breaks by failing one
+// of the two, often the delete. The read asks only whether tables a migration
+// created long before exist, which no uncommitted change decides, so on SQL
+// Server it reads without those locks.
+func catalogHint(dialect string) string {
+	if dialect == "mssql" {
+		return " WITH (NOLOCK)"
+	}
+	return ""
 }
 
 // presentTables reports which of tables exist in the schema an unqualified
@@ -142,8 +225,11 @@ func presentTables(ctx context.Context, q Querier, dialect string, tables []stri
 		args[i] = strings.ToLower(t)
 		marks[i] = fmt.Sprintf("$%d", i+1)
 	}
-	rows, err := q.Query(ctx, `SELECT table_name FROM information_schema.tables
-WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
+	query := fmt.Sprintf(pgTables, strings.Join(marks, ", "))
+	if dialect == "mysql" || dialect == "mssql" {
+		query, args = catalogRead(q, dialect, "table_name", "tables", tables)
+	}
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tables: %w", err)
 	}
@@ -165,17 +251,22 @@ WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks,
 // presentColumns reports which of columns exist, keyed in lower case.
 func presentColumns(ctx context.Context, q Querier, dialect string, columns []tableColumn) (map[tableColumn]bool, error) {
 	tableSeen := make(map[string]bool, len(columns))
+	var tables []string
 	var args []any
 	var marks []string
 	for _, c := range columns {
 		if k := strings.ToLower(c.table); !tableSeen[k] {
 			tableSeen[k] = true
+			tables = append(tables, c.table)
 			args = append(args, k)
 			marks = append(marks, fmt.Sprintf("$%d", len(args)))
 		}
 	}
-	rows, err := q.Query(ctx, `SELECT table_name, column_name FROM information_schema.columns
-WHERE `+catalogSchema(dialect)+` AND LOWER(table_name) IN (`+strings.Join(marks, ", ")+`)`, args...)
+	query := fmt.Sprintf(pgColumns, strings.Join(marks, ", "))
+	if dialect == "mysql" || dialect == "mssql" {
+		query, args = catalogRead(q, dialect, "table_name, column_name", "columns", tables)
+	}
+	rows, err := q.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list columns: %w", err)
 	}

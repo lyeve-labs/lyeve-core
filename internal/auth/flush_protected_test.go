@@ -14,6 +14,15 @@ import (
 )
 
 // Flush on the wrapper must not delete the underlying data.
+// casWrapper is what the wrapper offers over a backend with compare-and-set.
+type casWrapper interface {
+	core.CacheBackend
+	auth.CASBackend
+	Ping(ctx context.Context) error
+	AcquireLock(ctx context.Context, key string, ttl time.Duration) (func() error, error)
+	Backend() core.CacheBackend
+}
+
 func TestFlushProtectedBackend_FlushIsNoOp(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
@@ -21,7 +30,7 @@ func TestFlushProtectedBackend_FlushIsNoOp(t *testing.T) {
 	key := "cms:rt:family:abc123"
 	require.NoError(t, real.Set(ctx, key, []byte(`{"user_id":"u1"}`), time.Minute))
 
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	require.NoError(t, protected.Flush(ctx))
 
@@ -33,7 +42,7 @@ func TestFlushProtectedBackend_FlushIsNoOp(t *testing.T) {
 func TestFlushProtectedBackend_FlushProtectsRefreshTokenStore(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	store := auth.NewRefreshTokenStore(protected, "lyeve")
 
@@ -53,7 +62,7 @@ func TestFlushProtectedBackend_FlushProtectsRefreshTokenStore(t *testing.T) {
 func TestFlushProtectedBackend_GetSetDelete(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	require.NoError(t, protected.Set(ctx, "k1", []byte("v1"), time.Minute))
 
@@ -71,7 +80,7 @@ func TestFlushProtectedBackend_GetSetDelete(t *testing.T) {
 func TestFlushProtectedBackend_CASDelegate(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	require.NoError(t, protected.Set(ctx, "cas-key", []byte("old"), time.Minute))
 
@@ -89,7 +98,7 @@ func TestFlushProtectedBackend_CASDelegate(t *testing.T) {
 func TestFlushProtectedBackend_PingDelegate(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	// Ping should succeed (MemoryBackend always returns nil from Ping).
 	err := protected.Ping(ctx)
@@ -98,7 +107,7 @@ func TestFlushProtectedBackend_PingDelegate(t *testing.T) {
 
 func TestFlushProtectedBackend_AcquireLockDelegate(t *testing.T) {
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	// MemoryBackend doesn't implement AcquireLock: should return no-op release.
 	release, err := protected.AcquireLock(context.Background(), "lock-key", 5*time.Second)
@@ -109,7 +118,7 @@ func TestFlushProtectedBackend_AcquireLockDelegate(t *testing.T) {
 
 func TestFlushProtectedBackend_InterfaceSatisfaction(t *testing.T) {
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	var _ core.CacheBackend = protected
 	var _ auth.CASBackend = protected
@@ -123,7 +132,7 @@ func TestFlushProtectedBackend_InterfaceSatisfaction(t *testing.T) {
 
 func TestFlushProtectedBackend_BackendUnwrap(t *testing.T) {
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	assert.Equal(t, real, protected.Backend(), "Backend() should return the real backend")
 }
@@ -131,7 +140,7 @@ func TestFlushProtectedBackend_BackendUnwrap(t *testing.T) {
 func TestFlushProtectedBackend_ConcurrentSafety(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -153,7 +162,7 @@ func TestFlushProtectedBackend_ConcurrentSafety(t *testing.T) {
 func TestFlushProtectedBackend_RefreshTokenRotationEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	real := auth.NewMemoryBackend()
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	store := auth.NewRefreshTokenStore(protected, "lyeve")
 
@@ -189,7 +198,7 @@ func (b *countingBackend) Flush(ctx context.Context) error {
 func TestFlushProtectedBackend_RealFlushNotCalled(t *testing.T) {
 	ctx := context.Background()
 	real := &countingBackend{MemoryBackend: *auth.NewMemoryBackend()}
-	protected := auth.NewFlushProtectedBackend(real)
+	protected := auth.NewFlushProtectedBackend(real).(casWrapper)
 
 	require.NoError(t, protected.Set(ctx, "k", []byte("v"), time.Minute))
 	require.NoError(t, protected.Flush(ctx))
@@ -227,4 +236,45 @@ func TestFlushProtectedBackend_AuthBackendIsolation(t *testing.T) {
 
 	_, err = authBackend.Get(ctx, "lyeve:rt:family:"+rotated.FamilyID)
 	require.NoError(t, err, "family record must survive all flushes")
+}
+
+// plainBackend has no compare-and-set of its own.
+type plainBackend struct{ inner *auth.MemoryBackend }
+
+func (p plainBackend) Get(ctx context.Context, key string) ([]byte, error) {
+	return p.inner.Get(ctx, key)
+}
+func (p plainBackend) Set(ctx context.Context, key string, v []byte, ttl time.Duration) error {
+	return p.inner.Set(ctx, key, v, ttl)
+}
+func (p plainBackend) Delete(ctx context.Context, key string) error { return p.inner.Delete(ctx, key) }
+func (p plainBackend) Flush(ctx context.Context) error              { return p.inner.Flush(ctx) }
+
+// Over a backend with no compare-and-set, the wrapper must never report a
+// compare-and-set it could not check as won. Writing the value anyway lets two
+// replicas both win the rotation of one refresh token.
+func TestFlushProtectedBackend_NeverReportsAnUncheckedCASAsWon(t *testing.T) {
+	ctx := context.Background()
+	protected := auth.NewFlushProtectedBackend(plainBackend{inner: auth.NewMemoryBackend()})
+	require.NoError(t, protected.Set(ctx, "cas-key", []byte("current"), time.Minute))
+
+	if cas, ok := any(protected).(auth.CASBackend); ok {
+		err := cas.CompareAndSet(ctx, "cas-key", []byte("stale"), []byte("new"), time.Minute)
+		assert.Error(t, err, "a compare-and-set against a stale value reported success")
+	}
+	val, err := protected.Get(ctx, "cas-key")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("current"), val, "the stale compare-and-set overwrote the value")
+}
+
+// Replicas sharing a backend need its compare-and-set, so a shared one
+// without it is refused. A process-local one needs none.
+func TestCheckSharedBackend_RefusesASharedBackendWithoutCAS(t *testing.T) {
+	plain := auth.NewFlushProtectedBackend(plainBackend{inner: auth.NewMemoryBackend()})
+	withCAS := auth.NewFlushProtectedBackend(auth.NewMemoryBackend())
+
+	assert.ErrorIs(t, auth.CheckSharedBackend(plain, true), auth.ErrNoCompareAndSet)
+	assert.NoError(t, auth.CheckSharedBackend(plain, false))
+	assert.NoError(t, auth.CheckSharedBackend(withCAS, true))
+	assert.NoError(t, auth.CheckSharedBackend(nil, false))
 }

@@ -44,9 +44,9 @@ func (h *engineHost) RawDB() *sql.DB {
 func (h *engineHost) MigrationDB() *sql.DB { return h.rawDB }
 
 // WithDMLGuardedDB wires a DML-guarded *sql.DB to be served by RawDB().
-// The guarded DB rejects INSERT/UPDATE/DELETE/TRUNCATE/MERGE/REPLACE
-// while allowing SELECT and DDL (PluginMigrate). The real pool is
-// still served by MigrationDB() and AdminQuerier().
+// The guarded DB rejects a statement that opens with
+// INSERT/UPDATE/DELETE/TRUNCATE/MERGE/REPLACE and allows SELECT and DDL. The
+// real pool is still served by MigrationDB() and AdminQuerier().
 func (h *engineHost) WithDMLGuardedDB(db *sql.DB) { h.guardedDB = db }
 
 // WithLockDB wires the pool every DistLock this host issues holds its
@@ -175,6 +175,10 @@ func (q *poolQuerier) Exec(ctx context.Context, sql string, args ...any) (core.C
 	n, _ := tag.RowsAffected()
 	return core.CommandTag{RowsAffected: n}, nil
 }
+
+// SysDatabase names the database the pool qualifies engine tables with, for
+// the catalog read on a connection that switched to a tenant's database.
+func (q *poolQuerier) SysDatabase() string { return poolDatabaseName(q.pool) }
 
 func (q *poolQuerier) Begin(ctx context.Context) (core.Tx, error) {
 	tx, err := q.pool.Begin(ctx)

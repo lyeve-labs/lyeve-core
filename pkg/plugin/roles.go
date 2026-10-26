@@ -83,6 +83,7 @@ var wiredRoles = []Role{
 	sharedRole[compliance.SubjectExporterProvider](),
 	sharedRole[core.CustomValidatorProvider](),
 	sharedRole[compliance.HoldCheckerProvider](),
+	sharedRole[core.PanicReporter](),
 }
 
 // WiredRoles returns every role the engine wires. A build's wiring test holds

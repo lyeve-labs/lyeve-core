@@ -37,7 +37,7 @@ func TestRequestCapture_FailedBodyReadNeverReachesThePluginChain(t *testing.T) {
 		path  string
 		build func(t *testing.T, opts ...RouterOption) http.Handler
 	}{
-		{"api", "/api/v1/health", func(t *testing.T, opts ...RouterOption) http.Handler {
+		{"api", "/api/v1/auth/token", func(t *testing.T, opts ...RouterOption) http.Handler {
 			h, err := NewAPIRouter(&fakeDB{engine: "postgres"}, testConfig(), nil, append(opts, WithLifetime(testLifetime(t)))...)
 			require.NoError(t, err)
 			return h

@@ -107,20 +107,36 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := EnrichAttrs(ctx)
 
 	tenant := tenantFromCtx(ctx)
-	if tenant != "" {
-		attrs = append(attrs, slog.String("tenant_id", tenant))
-	}
 	plugin := PluginFromCtx(ctx)
-	if plugin != "" {
-		attrs = append(attrs, slog.String("plugin", plugin))
-	}
 
-	enriched := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
-	enriched.AddAttrs(attrs...)
+	// The console line follows the stored entry's rule below, so each key
+	// appears once: a context attribute gives way to the record's own value,
+	// and tenant_id and plugin come from the context alone, last. EnrichAttrs
+	// names tenant_id and plugin too, so those are left to this handler.
+	own := make(map[string]bool, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
+		own[a.Key] = true
+		return true
+	})
+	enriched := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
+	for _, a := range attrs {
+		if !own[a.Key] && a.Key != "tenant_id" && a.Key != "plugin" {
+			enriched.AddAttrs(a)
+		}
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		if (a.Key == "tenant_id" && tenant != "") || (a.Key == "plugin" && plugin != "") {
+			return true
+		}
 		enriched.AddAttrs(a)
 		return true
 	})
+	if tenant != "" {
+		enriched.AddAttrs(slog.String("tenant_id", tenant))
+	}
+	if plugin != "" {
+		enriched.AddAttrs(slog.String("plugin", plugin))
+	}
 
 	// The record's own attributes belong in the stored entry too, not only in
 	// the console. The stored log is the one an operator searches, and a sink

@@ -193,6 +193,13 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A password alone never becomes a session for an account that holds a
+	// second factor. The caller gets the same challenge the console's sign-in
+	// answers, and completes it at the mfa-verify route.
+	if _, answered := h.respondIfSecondFactorRequired(w, r, user, collectFingerprint(r), actingRoles, actingTenant); answered {
+		return
+	}
+
 	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)

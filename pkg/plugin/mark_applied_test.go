@@ -107,11 +107,11 @@ func TestMarkPluginMigrationApplied_RefusesAPluginItCannotResolve(t *testing.T) 
 	RegisterPlugin("mark-undeclared", func() core.Plugin { return newFakePlugin("mark-undeclared") })
 	t.Cleanup(func() { UnregisterPlugin("mark-undeclared") })
 
-	_, err := MarkPluginMigrationApplied(ctx, nil, "postgres", "mark-absent", "001_init")
+	_, err := MarkPluginMigrationApplied(ctx, nil, "postgres", "mark-absent", "001_init", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not compiled into this binary")
 
-	_, err = MarkPluginMigrationApplied(ctx, nil, "postgres", "mark-undeclared", "001_init")
+	_, err = MarkPluginMigrationApplied(ctx, nil, "postgres", "mark-undeclared", "001_init", "")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "does not declare its migrations")
 }
@@ -150,7 +150,7 @@ func TestMarkPluginMigrationApplied_MarksTheTreeThatShipsTheVersion(t *testing.T
 			_, err := db.ExecContext(ctx, "DELETE FROM mkp_lost_migrations")
 			require.NoError(t, err)
 
-			table, err := MarkPluginMigrationApplied(ctx, db, d.name, "mark-declared-"+d.name, "001_init")
+			table, err := MarkPluginMigrationApplied(ctx, db, d.name, "mark-declared-"+d.name, "001_init", "")
 			require.NoError(t, err)
 			assert.Equal(t, "mkp_lost_migrations", table, "the tree that ships the version is the one marked")
 
@@ -177,9 +177,10 @@ func TestMarkPluginMigrationApplied_RefusesAVersionInMoreThanOneTree(t *testing.
 			second, _ := lostRecord(t, d.name, "mkp_second_migrations")
 			registerDeclaringPlugin(t, "mark-ambiguous-"+d.name, first, second)
 
-			_, err := MarkPluginMigrationApplied(ctx, db, d.name, "mark-ambiguous-"+d.name, "001_init")
+			_, err := MarkPluginMigrationApplied(ctx, db, d.name, "mark-ambiguous-"+d.name, "001_init", "")
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "mkp_first_migrations, mkp_second_migrations")
+			assert.Contains(t, err.Error(), "--table", "the refusal names the flag that resolves it")
 
 			for _, table := range []string{first.Table, second.Table} {
 				_, err := recordedVersions(ctx, db, table)
@@ -187,4 +188,49 @@ func TestMarkPluginMigrationApplied_RefusesAVersionInMoreThanOneTree(t *testing.
 			}
 		})
 	}
+}
+
+// Two trees of one plugin can both ship 001, as a plugin with a store of its
+// own beside a retention store does. Naming the table marks that tree and no
+// other, and the boot failure for either table names the table.
+func TestMarkPluginMigrationApplied_TheTableNamesOneOfTwoTreesWithTheVersion(t *testing.T) {
+	for _, d := range bookkeepingDialects() {
+		t.Run(d.name, func(t *testing.T) {
+			db := d.open(t)
+			ctx := context.Background()
+			first, _ := lostRecord(t, d.name, "mkt_first_migrations")
+			second, script := lostRecord(t, d.name, "mkt_second_migrations")
+			name := "mark-table-" + d.name
+			registerDeclaringPlugin(t, name, first, second)
+			require.NoError(t, PluginMigrate(ctx, db, d.name, first.Files, first.Table))
+			require.NoError(t, PluginMigrate(ctx, db, d.name, second.Files, second.Table))
+			_, err := db.ExecContext(ctx, "DELETE FROM mkt_second_migrations")
+			require.NoError(t, err)
+
+			assert.Equal(t, "lyeve migrate mark-applied --plugin "+name+" --version 001_init --table mkt_second_migrations",
+				markAppliedCommand(second.Table, "001_init"), "the boot failure names the table it stopped on")
+
+			table, err := MarkPluginMigrationApplied(ctx, db, d.name, name, "001_init", second.Table)
+			require.NoError(t, err)
+			assert.Equal(t, second.Table, table)
+			recorded, err := recordedVersions(ctx, db, second.Table)
+			require.NoError(t, err)
+			assert.Equal(t, map[string]recordedVersion{
+				"001_init": {completed: true, checksum: scriptChecksum(script)},
+			}, recorded)
+			assert.NoError(t, PluginMigrate(ctx, db, d.name, second.Files, second.Table))
+
+			_, err = MarkPluginMigrationApplied(ctx, db, d.name, name, "001_init", "mkt_unknown_migrations")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "declares no tree with the table mkt_unknown_migrations")
+		})
+	}
+}
+
+// A plugin with one tree keeps the short command.
+func TestMarkAppliedCommand_OneTreeNeedsNoTable(t *testing.T) {
+	tree, _ := lostRecord(t, "postgres", "mkt_single_migrations")
+	registerDeclaringPlugin(t, "mark-single", tree)
+	assert.Equal(t, "lyeve migrate mark-applied --plugin mark-single --version 001_init",
+		markAppliedCommand(tree.Table, "001_init"))
 }

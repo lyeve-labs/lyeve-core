@@ -941,8 +941,7 @@ body (json, newline):
             "application/json": {
               "schema": {
                 "example": {
-                  "identifier": "user@example.com",
-                  "identifier_type": "email"
+                  "identifier": "user@example.com"
                 },
                 "type": "object"
               }
@@ -962,6 +961,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
           }
         },
         "security": [
@@ -988,8 +990,7 @@ body (json, newline):
             "application/json": {
               "schema": {
                 "example": {
-                  "identifier": "user@example.com",
-                  "identifier_type": "email"
+                  "identifier": "user@example.com"
                 },
                 "type": "object"
               }
@@ -1009,6 +1010,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
           }
         },
         "security": [
@@ -2087,6 +2091,7 @@ body (json, newline):
     },
     "/api/v1/auth/token": {
       "post": {
+        "description": "Returns `mfa_required: true` and a `challenge_token` in place of a token when the user has MFA enabled. Exchange the challenge for a session via `/api/admin/auth/mfa-verify`.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3184,6 +3189,7 @@ body (json, newline):
     },
     "/api/v1/auth/token": {
       "post": {
+        "description": "Returns `mfa_required: true` and a `challenge_token` in place of a token when the user has MFA enabled. Exchange the challenge for a session via `/api/admin/auth/mfa-verify`.",
         "requestBody": {
           "content": {
             "application/json": {

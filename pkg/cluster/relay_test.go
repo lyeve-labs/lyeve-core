@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/pkg/cluster"
 )
 
@@ -184,6 +185,28 @@ func TestRelay_HandlerPanicDoesNotStopDelivery(t *testing.T) {
 	tb.poll(ctx)
 	if len(got.topics()) != 1 {
 		t.Error("a panicking handler kept the next handler from running")
+	}
+}
+
+// The relay contains a subscriber's panic so the next subscriber still runs,
+// and the panic it contains is reported like any other the engine recovers.
+func TestRelay_ReportsAHandlerPanic(t *testing.T) {
+	var got []panicreport.Panic
+	panicreport.Set(func(p panicreport.Panic) { got = append(got, p) })
+	t.Cleanup(func() { panicreport.Set(nil) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	shared := &board{}
+	a, _ := replicaOn(t, ctx, shared, "replica-a")
+	b, tb := replicaOn(t, ctx, shared, "replica-b")
+	b.Subscribe("t", func(context.Context, cluster.Message) { panic("subscriber bug") })
+	if err := a.Broadcast(ctx, "t", nil); err != nil {
+		t.Fatalf("Broadcast: %v", err)
+	}
+	tb.poll(ctx)
+	if len(got) != 1 || got[0].Value != "subscriber bug" || !strings.HasPrefix(got[0].Goroutine, "cluster-relay/") {
+		t.Fatalf("reports = %+v, want the subscriber's panic under the relay", got)
 	}
 }
 

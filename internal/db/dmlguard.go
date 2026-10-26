@@ -1,11 +1,19 @@
 // Package db DMLGuardConnector wraps a driver.Connector and intercepts Prepare/Exec to
-// reject INSERT, UPDATE, DELETE, TRUNCATE, MERGE, and REPLACE. SELECT, DDL,
-// and transaction control pass through. Mutations must go through
-// host.Querier(ctx) or host.AdminQuerier(ctx).
+// reject a statement that opens with INSERT, UPDATE, DELETE, TRUNCATE, MERGE or
+// REPLACE. SELECT, DDL and transaction control pass through. Mutations go
+// through host.Querier(ctx) or host.AdminQuerier(ctx).
+//
+// The guard catches a plugin's own mistake: an unscoped write sent to RawDB
+// by accident. It is not a sandbox, and SQL written outside the engine must
+// never reach it. It reads only how each statement opens, so it passes a
+// write that starts with a WITH clause, a write run inside a procedure, EXEC
+// or DO block, a function that writes, and on SQL Server a second statement
+// with no semicolon before it. DDL passes by design, DROP TABLE included. A
+// plugin allowed RawDB is also allowed MigrationDB, which has no guard.
 //
 // NewDMLGuardDB opens a tiny-pool (max 2 conns) *sql.DB with the guard wired
-// into every connection. Use for PluginMigrate (DDL). Runtime queries use the
-// primary pool via Querier/AdminQuerier.
+// into every connection, served by RawDB. PluginMigrate runs on MigrationDB,
+// and runtime queries use the primary pool through Querier and AdminQuerier.
 package db
 
 import (
@@ -15,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	mssql "github.com/microsoft/go-mssqldb"
@@ -33,25 +42,151 @@ var ErrDMLRejected = errDMLRejected
 var dmlPrefixRe = regexp.MustCompile(
 	`(?i)^\s*(?:/\*.*?\*/\s*|--[^\n]*\n\s*)*(?:INSERT\b|UPDATE\b|DELETE\b|TRUNCATE\b|MERGE\b|REPLACE\b)`)
 
-// IsDML reports whether the SQL statement starts with a DML verb after
-// stripping leading whitespace and comments. Exported for test packages
-// that verify DML-guarded connection behavior.
-func IsDML(query string) bool {
-	return dmlPrefixRe.MatchString(query)
+// IsDMLOn reports whether any statement in query starts with a DML verb, read
+// the way engine's server reads it. A query can carry several statements: the
+// MySQL guard pools allow them, PostgreSQL runs them on an Exec with no
+// arguments, and SQL Server runs a batch. Reading only the first let
+// "SELECT 1; DELETE FROM sys_users" through.
+//
+// A statement starts at the beginning of the query and after each semicolon
+// that is not inside a string, a quoted identifier or a comment. Where the
+// dialects differ on what quotes or comments, each engine's own rule is used,
+// and text the server would run is never read as quoted. SQL Server can also
+// run two statements with no semicolon between them, which this does not
+// see.
+func IsDMLOn(engine, query string) bool {
+	for _, start := range statementStarts(engine, query) {
+		if dmlPrefixRe.MatchString(query[start:]) {
+			return true
+		}
+	}
+	return false
 }
 
-// isDML is IsDML for callers inside this package.
-func isDML(query string) bool { return IsDML(query) }
+// statementStarts returns the offset of each statement's first token in query.
+func statementStarts(engine, q string) []int {
+	var starts []int
+	atStart := true
+	for i := 0; i < len(q); {
+		c := q[i]
+		switch {
+		case isSQLSpace(c):
+			i++
+			continue
+		case c == '-' && strings.HasPrefix(q[i:], "--") && (engine != "mysql" || len(q) == i+2 || isSQLSpace(q[i+2])):
+			// MySQL reads "--" as a comment only before whitespace.
+			i = lineEnd(q, i)
+			continue
+		case c == '#' && engine == "mysql":
+			i = lineEnd(q, i)
+			continue
+		case c == '/' && strings.HasPrefix(q[i:], "/*") && !(engine == "mysql" && strings.HasPrefix(q[i:], "/*!")):
+			// MySQL runs the text of a /*! comment, so it is read as code.
+			// A nested comment ends here at its first close, which only
+			// reads more of the query as code.
+			if end := strings.Index(q[i+2:], "*/"); end >= 0 {
+				i += end + 4
+			} else {
+				i = len(q)
+			}
+			continue
+		}
+		if atStart {
+			starts = append(starts, i)
+			atStart = false
+		}
+		switch {
+		case c == ';':
+			atStart = true
+			i++
+		case c == '\'':
+			i = quotedEnd(q, i, '\'', engine == "mysql" || isEscapeString(engine, q, i))
+		case c == '"':
+			i = quotedEnd(q, i, '"', engine == "mysql")
+		case c == '`' && engine == "mysql":
+			i = quotedEnd(q, i, '`', false)
+		case c == '[' && engine == "mssql":
+			i = quotedEnd(q, i, ']', false)
+		case c == '$' && engine == "postgres" && (i == 0 || !isIdentByte(q[i-1])):
+			i = dollarQuotedEnd(q, i)
+		default:
+			i++
+		}
+	}
+	return starts
+}
+
+func isSQLSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'
+}
+
+func isIdentByte(c byte) bool {
+	return c == '_' || c == '$' || c >= 0x80 || ('0' <= c && c <= '9') || ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
+// lineEnd returns the offset after the line comment that starts at i.
+func lineEnd(q string, i int) int {
+	if nl := strings.IndexByte(q[i:], '\n'); nl >= 0 {
+		return i + nl + 1
+	}
+	return len(q)
+}
+
+// isEscapeString reports whether the quote at i opens a PostgreSQL E'...'
+// string, the one form in which a backslash escapes the quote.
+func isEscapeString(engine, q string, i int) bool {
+	if engine != "postgres" || i == 0 || (q[i-1] != 'E' && q[i-1] != 'e') {
+		return false
+	}
+	return i == 1 || !isIdentByte(q[i-2])
+}
+
+// quotedEnd returns the offset after the quoted text that opens at i and
+// closes at closer. A doubled closer stands for itself, and with backslash a
+// backslash escapes the byte after it. An unclosed quote runs to the end.
+func quotedEnd(q string, i int, closer byte, backslash bool) int {
+	for j := i + 1; j < len(q); j++ {
+		switch {
+		case backslash && q[j] == '\\':
+			j++
+		case q[j] == closer:
+			if j+1 < len(q) && q[j+1] == closer {
+				j++
+				continue
+			}
+			return j + 1
+		}
+	}
+	return len(q)
+}
+
+// dollarQuotedEnd returns the offset after the PostgreSQL dollar-quoted string
+// that opens at i, or i+1 when the dollar opens none, as in a $1 parameter.
+func dollarQuotedEnd(q string, i int) int {
+	j := i + 1
+	for j < len(q) && q[j] != '$' && isIdentByte(q[j]) && !(j == i+1 && '0' <= q[j] && q[j] <= '9') {
+		j++
+	}
+	if j >= len(q) || q[j] != '$' {
+		return i + 1
+	}
+	tag := q[i : j+1]
+	if end := strings.Index(q[j+1:], tag); end >= 0 {
+		return j + 1 + end + len(tag)
+	}
+	return len(q)
+}
 
 // DMLGuardConnector wraps a driver.Connector and returns guarded connections
 // that reject DML statements. Use with sql.OpenDB to create a guarded *sql.DB.
 type DMLGuardConnector struct {
-	inner driver.Connector
+	inner  driver.Connector
+	engine string
 }
 
 // NewDMLGuardConnector wraps c so every connection it produces rejects DML.
-func newDMLGuardConnector(c driver.Connector) *DMLGuardConnector {
-	return &DMLGuardConnector{inner: c}
+func newDMLGuardConnector(c driver.Connector, engine string) *DMLGuardConnector {
+	return &DMLGuardConnector{inner: c, engine: engine}
 }
 
 // Connect implements driver.Connector.
@@ -60,7 +195,7 @@ func (g *DMLGuardConnector) Connect(ctx context.Context) (driver.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dml_guard: connect: %w", err)
 	}
-	return &dmlGuardConn{inner: conn}, nil
+	return &dmlGuardConn{inner: conn, engine: g.engine}, nil
 }
 
 // Driver implements driver.Connector.
@@ -72,12 +207,13 @@ func (g *DMLGuardConnector) Driver() driver.Driver {
 // and on ExecContext (for drivers that support direct exec). All other calls
 // forward to the inner connection.
 type dmlGuardConn struct {
-	inner driver.Conn
+	inner  driver.Conn
+	engine string
 }
 
 // Prepare is required by driver.Conn.
 func (c *dmlGuardConn) Prepare(query string) (driver.Stmt, error) {
-	if isDML(query) {
+	if IsDMLOn(c.engine, query) {
 		return nil, errDMLRejected
 	}
 	return c.inner.Prepare(query)
@@ -93,7 +229,7 @@ func (c *dmlGuardConn) Begin() (driver.Tx, error) { return c.inner.Begin() }
 
 // PrepareContext implements the optional driver.ConnPrepareContext.
 func (c *dmlGuardConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
-	if isDML(query) {
+	if IsDMLOn(c.engine, query) {
 		return nil, errDMLRejected
 	}
 	if pc, ok := c.inner.(driver.ConnPrepareContext); ok {
@@ -104,7 +240,7 @@ func (c *dmlGuardConn) PrepareContext(ctx context.Context, query string) (driver
 
 // ExecContext implements the optional driver.ExecerContext and guards DML.
 func (c *dmlGuardConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
-	if isDML(query) {
+	if IsDMLOn(c.engine, query) {
 		return nil, errDMLRejected
 	}
 	if ec, ok := c.inner.(driver.ExecerContext); ok {
@@ -183,7 +319,7 @@ func openGuarded(ctx context.Context, engine, dsn string, maxOpen, maxIdle int) 
 	if err != nil {
 		return nil, fmt.Errorf("dml_guard: create connector: %w", err)
 	}
-	guarded := sql.OpenDB(newDMLGuardConnector(connector))
+	guarded := sql.OpenDB(newDMLGuardConnector(connector, engine))
 	guarded.SetMaxOpenConns(maxOpen)
 	guarded.SetMaxIdleConns(maxIdle)
 	guarded.SetConnMaxLifetime(0)

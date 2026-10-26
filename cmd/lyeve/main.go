@@ -13,6 +13,7 @@ import (
 	"github.com/lyeve-labs/lyeve-libs/licenseprovider"
 	"github.com/lyeve-labs/lyeve-libs/orphanpurge"
 	"github.com/lyeve-labs/lyeve-libs/schemacarry"
+	"github.com/redis/go-redis/v9"
 
 	// Plugins compiled into this build
 	_ "github.com/lyeve-labs/lyeve-plugin-ab-testing/plugin"
@@ -100,6 +101,7 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+	redis.SetLogger(redisLog{})
 
 	logger.Info("starting lyeve cms", "version", version, "commit", commit, "build_date", buildDate)
 

@@ -181,6 +181,17 @@ func (s *ContentStore) FlushCaches(ctx context.Context) {
 	}
 }
 
+// FlushWritten drops every cached item and list after a write the store did
+// not make, such as a batch a plugin inserted with its own SQL, and tells the
+// other replicas as the store's own writes do. The written ids are unknown,
+// so every cached item goes along with the lists.
+func (s *ContentStore) FlushWritten(ctx context.Context, schemaName string) {
+	if s.onInvalidate != nil && (s.itemCache != nil || s.listCache != nil) {
+		s.onInvalidate(ctx, schemaName)
+	}
+	s.FlushCaches(ctx)
+}
+
 // Insert creates a new row in the collection table, tagged with the request's
 // tenant. Only keys matching defined (non-system) field names are written,
 // with _status on a schema with draft and publish. Unknown keys are ignored.
@@ -320,14 +331,46 @@ func (s *ContentStore) insertRowWithID(ctx context.Context, sc *domain.Schema, s
 // existing row or inserting a missing one. It is the mirror primitive behind
 // core.ContentWriter: a caller with its own source of truth keeps the
 // per-schema table, which the public routes read, aligned with it.
+//
+// A soft-deleted row under id is refused with domain.ErrConflict. The update
+// skips it as every reader does, and an insert under its id would fail on the
+// key it still holds. A write that reaches a deleted row is racing its delete,
+// so the row stays deleted rather than coming back.
 func (s *ContentStore) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
 	if _, err := s.Update(ctx, schemaName, id, data, time.Time{}); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrContentConflict) && !errors.Is(err, domain.ErrNotFound) {
 		return err
 	}
-	_, err := s.InsertWithID(ctx, schemaName, id, data)
+	deleted, err := s.softDeleted(ctx, schemaName, id)
+	if err != nil {
+		return err
+	}
+	if deleted {
+		return fmt.Errorf("content %s %s was deleted: %w", schemaName, id, domain.ErrConflict)
+	}
+	_, err = s.InsertWithID(ctx, schemaName, id, data)
 	return err
+}
+
+// softDeleted reports whether the caller's tenant holds a soft-deleted row
+// under id.
+func (s *ContentStore) softDeleted(ctx context.Context, schemaName string, id uuid.UUID) (bool, error) {
+	sc, table, err := s.table(ctx, schemaName)
+	if err != nil || !sc.WithSoftDelete {
+		return false, err
+	}
+	row, err := s.pool.QueryRow(ctx,
+		fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NOT NULL`, table),
+		id, tenant.ID(ctx))
+	if err != nil {
+		return false, fmt.Errorf("content deleted row: %w", err)
+	}
+	var n int
+	if err := row.Scan(&n); err != nil {
+		return false, fmt.Errorf("content deleted row: %w", err)
+	}
+	return n > 0, nil
 }
 
 // List returns up to limit rows from the calling tenant's collection table,
@@ -606,6 +649,11 @@ func (s *ContentStore) updateRow(ctx context.Context, sc *domain.Schema, schemaN
 	if !expectedUpdatedAt.IsZero() {
 		args = append(args, expectedUpdatedAt)
 		where = fmt.Sprintf("WHERE id = $%d AND updated_at = $%d AND tenant_id = $%d", len(args)-2, len(args), len(args)-1)
+	}
+	// A soft-deleted row is gone for every reader, so an update matches it no
+	// more than it matches a removed row.
+	if sc.WithSoftDelete {
+		where += " AND deleted_at IS NULL"
 	}
 
 	if s.pool.Engine() == "postgres" {

@@ -1,6 +1,9 @@
 package testdb
 
-import "sync"
+import (
+	"sync"
+	"testing"
+)
 
 // Postgres clones each test database from a migrated template in one
 // statement. MySQL and SQL Server have no template, so each test database is
@@ -23,6 +26,28 @@ type readyDB struct {
 	err        error
 }
 
+// preparing is held for reading while a database is prepared, and for writing
+// by HoldPreparation.
+var preparing sync.RWMutex
+
+// HoldPreparation stops the preparation of test databases until the test
+// ends, for a test that changes process-wide state a preparation reads, such
+// as time.Local, which a migration reads through time.Now. A preparation
+// already running finishes first. Take the test's databases before calling
+// it: a test that asks for one while it holds preparation waits forever.
+func HoldPreparation(t testing.TB) {
+	t.Helper()
+	preparing.Lock()
+	t.Cleanup(preparing.Unlock)
+}
+
+// prepareHeld runs prepare under the read side of preparing.
+func prepareHeld(prepare func() readyDB) readyDB {
+	preparing.RLock()
+	defer preparing.RUnlock()
+	return prepare()
+}
+
 // readyQueue prepares databases for one dialect.
 type readyQueue struct {
 	once sync.Once
@@ -37,7 +62,7 @@ func (q *readyQueue) start(prepare func() readyDB) {
 			// lyeve:bare-goroutine a panic while preparing must fail the test binary, not be logged and lost
 			go func() {
 				for {
-					q.ch <- prepare()
+					q.ch <- prepareHeld(prepare)
 				}
 			}()
 		}
@@ -53,6 +78,6 @@ func (q *readyQueue) take(prepare func() readyDB) readyDB {
 	case r := <-q.ch:
 		return r
 	default:
-		return prepare()
+		return prepareHeld(prepare)
 	}
 }

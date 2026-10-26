@@ -107,7 +107,8 @@ type LicenseHost interface {
 // record's id, so the mirrored row and the source record stay aligned.
 type ContentWriter interface {
 	// UpsertContent writes a content row under an explicit id, updating an
-	// existing row or inserting a missing one.
+	// existing row or inserting a missing one. A soft-deleted row under the
+	// id is ErrConflict, and the row stays deleted.
 	UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error
 	// DeleteContent removes a content row by id, scoped to the caller's tenant.
 	DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error
@@ -120,6 +121,28 @@ type ContentWriter interface {
 	// status outside the three is ErrValidation. The write publishes the
 	// after_update lifecycle event with the row as it now reads.
 	SetContentStatus(ctx context.Context, schemaName string, id uuid.UUID, status string) error
+}
+
+// ContentCacheFlusher drops the content read caches after a write to
+// schemaName's table, on every replica. Only writes through ContentWriter
+// flush the lists and rows the read routes cache, so a plugin that writes a
+// content table with its own SQL, such as a batch import, calls it once each
+// write has committed. Until then a list read before the write keeps serving
+// the old rows for the cache's lifetime.
+type ContentCacheFlusher interface {
+	FlushContentCache(ctx context.Context, schemaName string)
+}
+
+// ContentUpdater writes to an existing content row and never creates one, for
+// a caller that read a row and then writes it. UpdateContent applies data to
+// the row id holds for the caller's tenant. A row that is missing or
+// soft-deleted is ErrNotFound and nothing is written, so a delete that lands
+// between the read and the write is reported instead of being undone or
+// written into. A schema the tenant never defined is ErrNotFound, and a value
+// the store refuses is ErrValidation, as for ContentWriter. A host that can
+// write content implements it.
+type ContentUpdater interface {
+	UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error
 }
 
 // ContentReader pages through a schema's generated content table, every row

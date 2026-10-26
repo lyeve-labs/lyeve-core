@@ -71,13 +71,13 @@ func (s *hostSignIn) account(t *testing.T, home string, roles []string) string {
 
 // signIn is one password sign-in through the tenant middleware.
 type signIn struct {
-	code    int
-	body    string
-	header  http.Header
-	cookie  bool
-	tenant  string
-	roles   []string
-	elapsed time.Duration
+	code   int
+	body   string
+	header http.Header
+	cookie bool
+	tenant string
+	roles  []string
+	cost   time.Duration
 }
 
 // host names where a request arrives: a mapped domain, the instance host of
@@ -116,9 +116,8 @@ func (s *hostSignIn) send(t *testing.T, door string, h host, email, password, bo
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(h(req.Context()))
 	rec := httptest.NewRecorder()
-	start := time.Now()
-	apimw.TenantHeader(true)(s.door(door)).ServeHTTP(rec, req)
-	out := signIn{code: rec.Code, body: rec.Body.String(), header: rec.Header(), cookie: len(rec.Result().Cookies()) > 0, elapsed: time.Since(start)}
+	cost := signInCost(t, func() { apimw.TenantHeader(true)(s.door(door)).ServeHTTP(rec, req) })
+	out := signIn{code: rec.Code, body: rec.Body.String(), header: rec.Header(), cookie: len(rec.Result().Cookies()) > 0, cost: cost}
 	if rec.Code == http.StatusOK {
 		var resp map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -150,8 +149,8 @@ func TestPasswordSignIn_AnotherTenantsAccountOnADomainAnswersAsAnUnknownAddress(
 					assert.Equal(t, want.body, got.body, "%s: body", door)
 					assert.Equal(t, want.header, got.header, "%s: headers", door)
 					assert.False(t, got.cookie, "%s: a session cookie was set", door)
-					foreignTimes = append(foreignTimes, got.elapsed)
-					unknownTimes = append(unknownTimes, want.elapsed)
+					foreignTimes = append(foreignTimes, got.cost)
+					unknownTimes = append(unknownTimes, want.cost)
 				}
 			}
 			ratio := float64(median(foreignTimes)) / float64(median(unknownTimes))

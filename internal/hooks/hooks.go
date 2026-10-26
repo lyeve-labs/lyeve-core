@@ -65,6 +65,11 @@ type Event struct {
 	// Source names the publisher. A subscriber that also writes content
 	// reads it to skip the events its own writes produce.
 	Source string
+	// ActorID is the id the caller behind the event authenticated as, empty
+	// when there was none.
+	ActorID string
+	// ActorKind names the credential ActorID came from.
+	ActorKind string
 }
 
 // Hook is a function that runs on a lifecycle event.
@@ -296,13 +301,15 @@ func (r *Registry) Run(ctx context.Context, event Event) error {
 // from the public event to the internal one, whoever publishes.
 func (r *Registry) Publish(ctx context.Context, event core.Event) error {
 	return r.Run(ctx, Event{
-		Type:     EventType(event.Type),
-		Schema:   event.Schema,
-		Data:     event.Data,
-		OldData:  event.OldData,
-		TenantID: event.TenantID,
-		RecordID: event.RecordID,
-		Source:   event.Source,
+		Type:      EventType(event.Type),
+		Schema:    event.Schema,
+		Data:      event.Data,
+		OldData:   event.OldData,
+		TenantID:  event.TenantID,
+		RecordID:  event.RecordID,
+		Source:    event.Source,
+		ActorID:   event.ActorID,
+		ActorKind: event.ActorKind,
 	})
 }
 

@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 )
 
 // DefaultShutdownTimeout bounds Shutdown. It matches the budget the engine
@@ -325,10 +327,12 @@ func (p *WorkerPool) dispatch(ctx context.Context, fn func(context.Context) erro
 	defer func() {
 		if r := recover(); r != nil {
 			p.failed.Add(1)
+			stack := debug.Stack()
 			slog.Error("workerpool task panicked",
 				"panic", fmt.Sprintf("%v", r),
-				"stack", string(debug.Stack()),
+				"stack", string(stack),
 			)
+			panicreport.Report(panicreport.Panic{Goroutine: "workerpool", Value: r, Stack: stack})
 		}
 	}()
 

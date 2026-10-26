@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
@@ -73,7 +75,11 @@ func pluginConfigSaveHandler(store *db.PluginConfigStore, provider PluginSchemaP
 		// Refuse to store configuration for a plugin that declares no schema:
 		// the keys would be unreadable by anything and the editor would show an
 		// operator settings that do nothing.
-		if provider == nil || provider.PluginSchema(name) == nil {
+		var schema map[string]any
+		if provider != nil {
+			schema = provider.PluginSchema(name)
+		}
+		if schema == nil {
 			httpx.ErrorReq(w, r, http.StatusNotFound, "no configuration schema for plugin: "+name)
 			return
 		}
@@ -96,6 +102,14 @@ func pluginConfigSaveHandler(store *db.PluginConfigStore, provider PluginSchemaP
 					"this setting is set only by the operator, through an environment variable or the configuration file")
 				return
 			}
+		}
+		// Every plugin's stored keys are merged into one configuration that
+		// every plugin reads, so a key the named plugin does not declare would
+		// set another plugin's setting from a screen that never shows it.
+		if undeclared := undeclaredKeys(schema, cfg); len(undeclared) > 0 {
+			httpx.ErrorReq(w, r, http.StatusUnprocessableEntity,
+				"not a setting of plugin "+name+": "+strings.Join(undeclared, ", "))
+			return
 		}
 
 		if err := store.Set(r.Context(), name, cfg, actorID(r)); err != nil {
@@ -120,6 +134,20 @@ func pluginConfigSaveHandler(store *db.PluginConfigStore, provider PluginSchemaP
 		w.Header().Set("Cache-Control", "no-store")
 		respond(w, http.StatusOK, saved)
 	}
+}
+
+// undeclaredKeys returns, sorted, the keys of cfg that schema does not list
+// among its properties.
+func undeclaredKeys(schema, cfg map[string]any) []string {
+	props, _ := schema["properties"].(map[string]any)
+	var out []string
+	for key := range cfg {
+		if _, ok := props[key]; !ok {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // pluginConfigResetHandler drops a plugin's stored configuration, returning it

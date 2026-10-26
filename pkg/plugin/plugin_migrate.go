@@ -9,9 +9,12 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/sqlx"
@@ -172,18 +175,33 @@ const maxMigrationAttempts = 4
 // the affected plugin simply does not start. Backoff is linear and short: the
 // contention lasts as long as the other plugin's transaction, not longer.
 func applyScriptWithRetry(ctx context.Context, db *sql.DB, dialect, tableName string, sc migrationScript) error {
-	var lastErr error
-	for attempt := 1; attempt <= maxMigrationAttempts; attempt++ {
-		err := applyScript(ctx, db, dialect, tableName, sc)
+	return retryMigration(ctx, tableName, sc.version, func() error {
+		return applyScript(ctx, db, dialect, tableName, sc)
+	})
+}
+
+// retryMigration runs apply up to maxMigrationAttempts times while it fails
+// with a transient concurrency error, and returns after the last attempt
+// without waiting again.
+//
+// A MySQL lock wait timeout returns at once. It arrives only after the script
+// waited innodb_lock_wait_timeout, 50 seconds by default, on a lock another
+// session holds, so each retry would stall the boot that long again.
+func retryMigration(ctx context.Context, tableName, version string, apply func() error) error {
+	for attempt := 1; ; attempt++ {
+		err := apply()
 		if err == nil {
 			return nil
 		}
-		if !isRetryableTxError(err) {
+		if !isRetryableTxError(err) || isLockWaitTimeout(err) {
 			return err
 		}
-		lastErr = err
+		if attempt == maxMigrationAttempts {
+			return fmt.Errorf("plugin migrate: %s failed after %d attempts: %w",
+				version, maxMigrationAttempts, err)
+		}
 		slog.Warn("plugin migrate: transient conflict, retrying",
-			"plugin_table", tableName, "version", sc.version,
+			"plugin_table", tableName, "version", version,
 			"attempt", attempt, "err", err)
 		select {
 		case <-ctx.Done():
@@ -191,8 +209,13 @@ func applyScriptWithRetry(ctx context.Context, db *sql.DB, dialect, tableName st
 		case <-time.After(time.Duration(attempt) * 100 * time.Millisecond):
 		}
 	}
-	return fmt.Errorf("plugin migrate: %s failed after %d attempts: %w",
-		sc.version, maxMigrationAttempts, lastErr)
+}
+
+// isLockWaitTimeout reports MySQL error 1205. SQL Server uses the same number
+// for a deadlock victim, which returns at once and stays worth a retry.
+func isLockWaitTimeout(err error) bool {
+	var myErr *mysql.MySQLError
+	return errors.As(err, &myErr) && myErr.Number == 1205
 }
 
 // isRetryableTxError reports whether err is a transient concurrency failure the
@@ -659,7 +682,12 @@ func MarkMigrationApplied(ctx context.Context, db *sql.DB, dialect string, migra
 // the named plugin that ships it, and returns that tree's bookkeeping table.
 // The plugin has to be compiled into this binary and declare its trees through
 // core.MigrationDeclarer. It is read from an instance that never starts.
-func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, pluginName, version string) (string, error) {
+//
+// table names the tree by its bookkeeping table. Empty means the one tree
+// that ships the version, and a version two trees ship is refused with the
+// tables to choose from, because the boot failure names the table it stopped
+// on.
+func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, pluginName, version, table string) (string, error) {
 	factory := LookupPlugin(pluginName)
 	if factory == nil {
 		return "", fmt.Errorf("plugin migrate: %q is not compiled into this binary", pluginName)
@@ -669,7 +697,12 @@ func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, plugin
 		return "", fmt.Errorf("plugin migrate: %s does not declare its migrations, so none can be marked", pluginName)
 	}
 	var matches []core.MigrationTree
+	var declared []string
 	for _, tree := range declarer.MigrationTrees() {
+		declared = append(declared, tree.Table)
+		if table != "" && tree.Table != table {
+			continue
+		}
 		_, ok, err := findScript(tree.Files, dialect, version)
 		if err != nil {
 			return "", err
@@ -678,8 +711,15 @@ func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, plugin
 			matches = append(matches, tree)
 		}
 	}
+	if table != "" && !slices.Contains(declared, table) {
+		return "", fmt.Errorf("plugin migrate: %s declares no tree with the table %s (it declares %s)",
+			pluginName, table, strings.Join(declared, ", "))
+	}
 	switch len(matches) {
 	case 0:
+		if table != "" {
+			return "", fmt.Errorf("plugin migrate: %s ships no migration %s in %s for this database", pluginName, version, table)
+		}
 		return "", fmt.Errorf("plugin migrate: %s ships no migration %s for this database", pluginName, version)
 	case 1:
 		return matches[0].Table, MarkMigrationApplied(ctx, db, dialect, matches[0].Files, matches[0].Table, version)
@@ -688,7 +728,7 @@ func MarkPluginMigrationApplied(ctx context.Context, db *sql.DB, dialect, plugin
 		for i, m := range matches {
 			tables[i] = m.Table
 		}
-		return "", fmt.Errorf("plugin migrate: %s ships %s in more than one tree (%s), so it cannot say which to mark",
+		return "", fmt.Errorf("plugin migrate: %s ships %s in more than one tree (%s): name the one to mark with --table",
 			pluginName, version, strings.Join(tables, ", "))
 	}
 }
@@ -720,10 +760,17 @@ func markAppliedCommand(tableName, version string) string {
 		if !ok {
 			continue
 		}
-		for _, tree := range declarer.MigrationTrees() {
-			if tree.Table == tableName {
-				return fmt.Sprintf("lyeve migrate mark-applied --plugin %s --version %s", name, version)
+		trees := declarer.MigrationTrees()
+		for _, tree := range trees {
+			if tree.Table != tableName {
+				continue
 			}
+			// A plugin with more than one tree can ship the version in
+			// several, so the command names the table the boot stopped on.
+			if len(trees) > 1 {
+				return fmt.Sprintf("lyeve migrate mark-applied --plugin %s --version %s --table %s", name, version, tableName)
+			}
+			return fmt.Sprintf("lyeve migrate mark-applied --plugin %s --version %s", name, version)
 		}
 	}
 	return ""

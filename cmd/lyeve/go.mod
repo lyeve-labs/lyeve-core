@@ -6,7 +6,7 @@ module github.com/lyeve-labs/lyeve-core/cmd/lyeve
 
 // No toolchain directive: go mod tidy removes one that equals the go
 // directive below, so declaring it leaves this file permanently untidy.
-go 1.27.2
+go 1.27.3
 
 // Resolved from checkouts beside this repository. A go.work file can pin the
 // same paths.
@@ -270,7 +270,7 @@ require (
 	github.com/prometheus/common v0.71.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/rabbitmq/amqp091-go v1.14.0 // indirect
-	github.com/redis/go-redis/v9 v9.22.0 // indirect
+	github.com/redis/go-redis/v9 v9.22.0
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/russellhaering/goxmldsig v1.6.1 // indirect
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect

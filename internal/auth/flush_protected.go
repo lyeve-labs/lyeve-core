@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -15,17 +16,45 @@ import (
 // unchanged. Optional interfaces (CASBackend, Ping, AcquireLock) are delegated
 // so that RefreshTokenStore's internal type assertions keep working.
 //
-// When the underlying backend does not support a given optional interface,
-// the wrapper provides a safe fallback (plain Set for CAS, sentinel-write for
-// Ping, no-op for AcquireLock).
+// When the underlying backend does not support Ping or AcquireLock, the
+// wrapper provides a safe fallback (sentinel-write for Ping, no-op for
+// AcquireLock). Compare-and-set has no safe fallback, so the wrapper offers
+// CASBackend only when the backend does. A plain Set reported as a won
+// compare-and-set would let two replicas both win.
 type FlushProtectedBackend struct {
 	backend core.CacheBackend
 }
 
+// flushProtectedCAS is the wrapper for a backend with compare-and-set.
+type flushProtectedCAS struct {
+	*FlushProtectedBackend
+	cas CASBackend
+}
+
 // NewFlushProtectedBackend wraps backend so every core.CacheBackend call passes
-// through except Flush, which is a no-op.
-func NewFlushProtectedBackend(backend core.CacheBackend) *FlushProtectedBackend {
-	return &FlushProtectedBackend{backend: backend}
+// through except Flush, which is a no-op. The result implements CASBackend
+// exactly when backend does.
+func NewFlushProtectedBackend(backend core.CacheBackend) core.CacheBackend {
+	w := &FlushProtectedBackend{backend: backend}
+	if cas, ok := backend.(CASBackend); ok {
+		return &flushProtectedCAS{FlushProtectedBackend: w, cas: cas}
+	}
+	return w
+}
+
+// ErrNoCompareAndSet refuses a refresh token store whose backend every
+// replica shares but which cannot compare and set. Two replicas could then
+// both rotate one token, and each hand out a successor.
+var ErrNoCompareAndSet = errors.New("the shared cache backend has no compare-and-set")
+
+// CheckSharedBackend refuses a backend that replicas share and that has no
+// compare-and-set. A process-local backend needs none: the store's keyed
+// mutex already serializes every rotation it sees.
+func CheckSharedBackend(backend core.CacheBackend, shared bool) error {
+	if _, ok := backend.(CASBackend); shared && !ok {
+		return ErrNoCompareAndSet
+	}
+	return nil
 }
 
 // Backend returns the underlying (unwrapped) core.CacheBackend. Callers that need
@@ -65,14 +94,9 @@ func (b *FlushProtectedBackend) Flush(_ context.Context) error {
 // otherwise.
 
 // CompareAndSet implements CASBackend (cross-replica rotation-race
-// protection). When the underlying backend supports CAS, it delegates. Otherwise
-// it falls back to a plain Set: matching the existing fallback in casSave.
-func (b *FlushProtectedBackend) CompareAndSet(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
-	if cas, ok := b.backend.(CASBackend); ok {
-		return cas.CompareAndSet(ctx, key, oldVal, newVal, ttl)
-	}
-	// Fall back to plain Set: same as casSave's default path.
-	return b.backend.Set(ctx, key, newVal, ttl)
+// protection) by delegating to the backend's own.
+func (b *flushProtectedCAS) CompareAndSet(ctx context.Context, key string, oldVal, newVal []byte, ttl time.Duration) error {
+	return b.cas.CompareAndSet(ctx, key, oldVal, newVal, ttl)
 }
 
 // Ping delegates to the underlying backend's Ping method when available.
@@ -99,4 +123,4 @@ func (b *FlushProtectedBackend) AcquireLock(ctx context.Context, key string, ttl
 
 // Compile-time interface satisfaction checks.
 var _ core.CacheBackend = (*FlushProtectedBackend)(nil)
-var _ CASBackend = (*FlushProtectedBackend)(nil)
+var _ CASBackend = (*flushProtectedCAS)(nil)
