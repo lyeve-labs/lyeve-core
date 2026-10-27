@@ -172,7 +172,7 @@ func TestRunSubjectErasure_ResolvesOnlyEmailAddresses(t *testing.T) {
 		compliance.RegisterSubjectEraser(compliance.NewDeclaredEraser("links", host, compliance.SubjectErasure{
 			Tables: []string{"sys_users"},
 			Addresses: func(ctx context.Context, host core.Host, accountID string) ([]string, error) {
-				return []string{"gh-" + tag + "@example.com", "Jane " + tag, "jane-" + tag + "@localhost"}, nil
+				return []string{"gh-" + tag + "@example.com", "Jane " + tag, "Jane <jane-" + tag + "@example.com>"}, nil
 			},
 			Erase: func(ctx context.Context, host core.Host, identifier string) (int64, error) { return 0, nil },
 		}))
