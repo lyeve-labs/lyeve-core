@@ -158,9 +158,17 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 }
 
 // EraseResponse is the JSON response for POST /api/admin/gdpr/erase.
+//
+// Complete is true only when every eraser ran and succeeded. Otherwise Failed
+// names each eraser that failed or never ran, and the account is among them:
+// the erasure signs the subject out and locks the account first, and
+// anonymizes it only once every other eraser has succeeded. Repeating the
+// request runs every eraser again and finishes the erasure.
 type EraseResponse struct {
 	Identifier string   `json:"identifier"`
 	TotalRows  int64    `json:"total_rows"`
+	Complete   bool     `json:"complete"`
+	Failed     []string `json:"failed,omitempty"`
 	Errors     []string `json:"errors"`
 	// Holds names the active legal holds that stopped the erasure. Non-empty
 	// means nothing was erased: a zero row count on its own reads as "there
@@ -202,20 +210,40 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 			"legal hold status is unavailable; erasure was not attempted")
 		return
 	}
+	// A sign-out that failed is a database failure with nothing erased, so
+	// it is refused the same way, and repeating the request is the remedy.
+	if errors.Is(err, compliance.ErrSubjectNotSignedOut) {
+		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
+			"the subject could not be signed out; erasure was not attempted")
+		return
+	}
 
 	resp := EraseResponse{
 		Identifier: body.Identifier,
 		TotalRows:  result.Rows,
+		Complete:   err == nil && len(result.Holds) == 0,
 		Holds:      result.Holds,
 	}
+	status := http.StatusOK
 	if err != nil {
-		resp.Errors = []string{"one or more erasers failed"}
+		// A partial erasure must not read as a finished one, to a caller
+		// reading the body or only the status. 207 keeps it a success for a
+		// client that shows the errors, and keeps it off 200. The failed
+		// erasers are named by their owner, and the driver text stays in the
+		// log.
+		status = http.StatusMultiStatus
+		resp.Failed = result.Failed
+		resp.Errors = []string{
+			"not finished: " + strings.Join(result.Failed, ", "),
+			"the account was not erased: it is signed out and locked until every other part has erased",
+			"repeat the request to finish the erasure",
+		}
 	}
 
 	// Audit log.
 	h.writeAudit(r, "gdpr.erase", "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 
-	httpx.JSON(w, http.StatusOK, resp)
+	httpx.JSON(w, status, resp)
 }
 
 // writeAudit records the DSAR operation in the audit trail.
