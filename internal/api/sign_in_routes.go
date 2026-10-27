@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 )
 
@@ -26,24 +27,37 @@ type signInRoute struct {
 //
 // The list is read from the declarations this router mounted, so it follows
 // a license change the way the routes do: the router is built again, and
-// this answer with it.
-func signInRoutesHandler(pluginRoutes []plugin.PluginRoutes) http.HandlerFunc {
-	routes := []signInRoute{}
+// this answer with it. A plugin withheld from the caller's tenant refuses its
+// routes there, so the answer leaves them out for that tenant. A route with a
+// path parameter is a later step reached from a link or a redirect, never a
+// choice on the page, so the answer does not name it.
+func signInRoutesHandler(pluginRoutes []plugin.PluginRoutes, withholds func(tenant, name string) bool) http.HandlerFunc {
+	type mounted struct {
+		plugin string
+		route  signInRoute
+	}
+	all := []mounted{}
 	for _, pr := range pluginRoutes {
 		for _, rd := range pr.Routes {
-			if rd.Group == plugin.GroupPublic && strings.HasPrefix(rd.Pattern, signInPrefix) {
-				routes = append(routes, signInRoute{Method: strings.ToUpper(rd.Method), Path: rd.Pattern})
+			if rd.Group == plugin.GroupPublic && strings.HasPrefix(rd.Pattern, signInPrefix) && !strings.Contains(rd.Pattern, "{") {
+				all = append(all, mounted{plugin: pr.Name, route: signInRoute{Method: strings.ToUpper(rd.Method), Path: rd.Pattern}})
 			}
 		}
 	}
-	sort.Slice(routes, func(i, j int) bool {
-		if routes[i].Path != routes[j].Path {
-			return routes[i].Path < routes[j].Path
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].route.Path != all[j].route.Path {
+			return all[i].route.Path < all[j].route.Path
 		}
-		return routes[i].Method < routes[j].Method
+		return all[i].route.Method < all[j].route.Method
 	})
-	body := map[string]any{"routes": routes}
-	return func(w http.ResponseWriter, _ *http.Request) {
-		respond(w, http.StatusOK, body)
+	return func(w http.ResponseWriter, r *http.Request) {
+		tenant := core.TenantIDFromCtx(r.Context())
+		routes := []signInRoute{}
+		for _, m := range all {
+			if withholds == nil || !withholds(tenant, m.plugin) {
+				routes = append(routes, m.route)
+			}
+		}
+		respond(w, http.StatusOK, map[string]any{"routes": routes})
 	}
 }

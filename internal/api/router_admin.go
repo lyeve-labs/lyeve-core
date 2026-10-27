@@ -286,7 +286,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		// coming back as a malformed-body 400.
 		jsonGuard := apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes)
 		r.Get("/setup", authHandler.SetupStatus)
-		r.Get("/auth/sign-in-routes", signInRoutesHandler(o.pluginRoutes))
+		r.Get("/auth/sign-in-routes", signInRoutesHandler(o.pluginRoutes, o.entitlements.Withholds))
 		r.With(jsonGuard).Post("/setup", authHandler.Setup)
 		if publicRL != nil {
 			r.With(jsonGuard, publicRL.WrapFunc("POST", "/api/admin/auth/login")).Post("/auth/login", authHandler.Login)
