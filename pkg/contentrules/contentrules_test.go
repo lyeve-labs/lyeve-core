@@ -80,15 +80,15 @@ func TestValidatePatch_LocalizesTheEnginesFailures(t *testing.T) {
 	assert.Equal(t, patch, rules.patched)
 }
 
-// A failure the engine leaves without a code still reaches the caller as a
-// sentence rather than an empty message.
-func TestValidatePatch_FailureWithNoCodeReadsAsUnknownField(t *testing.T) {
+// A failure the engine leaves without a code or a message still reaches the
+// caller as a sentence rather than an empty message.
+func TestValidatePatch_FailureWithNoCodeReadsAsAFailedField(t *testing.T) {
 	host := rulesHost{rules: &cannedRules{errs: []core.SchemaValidationError{{Field: "ghost", Rule: "custom"}}}}
 	errs, err := ValidatePatch(context.Background(), host, &core.Schema{}, map[string]any{"ghost": 1}, nil)
 	require.NoError(t, err)
 	require.Len(t, errs, 1)
 	assert.Equal(t, "VALIDATION_UNKNOWN_FIELD", errs[0].Code)
-	assert.NotEmpty(t, errs[0].Message)
+	assert.Equal(t, "The field ghost failed validation.", errs[0].Message)
 }
 
 // With nothing to say whether a write is valid, the write is refused. It is

@@ -46,7 +46,7 @@ type SchemaValidationError struct {
 	Code    string         `json:"code"`
 	Rule    string         `json:"rule"`
 	Value   any            `json:"value,omitempty"`
-	Message string         `json:"message"` // pre-localized message from the bridge
+	Message string         `json:"message"` // shown as written unless the kernel localizes the code
 	Params  map[string]any `json:"-"`
 }
 
@@ -196,9 +196,17 @@ func NoSchemaEngine(src SchemaSource) bool {
 // engine says they mean. The kernel applies them on every content write and
 // stores nothing they have not passed.
 //
-// A failure carries a code from the kernel's message catalog and the
-// parameters its message names. The kernel renders the message in the
-// caller's locale, so an engine leaves Message to it.
+// The kernel renders a failure in the caller's locale when its code is one
+// the kernel's catalog holds, from the code and the parameters its message
+// names, and the engine's Message is then ignored. The content codes it holds
+// are VALIDATION_REQUIRED, VALIDATION_MIN_LENGTH, VALIDATION_MAX_LENGTH,
+// VALIDATION_MIN_VALUE, VALIDATION_MAX_VALUE, VALIDATION_EMAIL,
+// VALIDATION_UUID, VALIDATION_URL, VALIDATION_UNKNOWN_FIELD,
+// VALIDATION_FIELD_TYPE, VALIDATION_RELATION_TARGET, and SCHEMA_VALIDATION_
+// followed by EMAIL, URL, REGEX, ENUM, MIN, MAX, REQUIRED_WITH, LT_FIELD,
+// GT_FIELD, LTE_FIELD, GTE_FIELD, RANGE, CUSTOM or CROSS_FIELD. A failure with
+// any other code keeps the Message the engine wrote, so an engine with codes
+// of its own writes the sentence itself.
 type ContentRules interface {
 	// PrepareCreate fills every field data leaves out from its declared
 	// default and validates the result, in that order, so a required field
