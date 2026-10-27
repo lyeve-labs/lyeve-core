@@ -102,6 +102,7 @@ func BuildAdminLayer(rows []db.PluginConfigRow) AdminLayer {
 // request sees the new value immediately. One that cached it in Start sees it
 // when it reloads.
 func RefreshAdminLayer(ctx context.Context, store AdminConfigStore) (AdminLayer, error) {
+	ActiveResolver().offerAdminLayer()
 	if store == nil {
 		return AdminLayer{}, nil
 	}

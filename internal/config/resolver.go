@@ -95,6 +95,10 @@ type Resolution struct {
 	// OperatorOnly marks a key the admin layer may never set
 	// (core.OperatorOnlyKeys), whatever the other layers hold.
 	OperatorOnly bool
+
+	// ReadAtStart marks a key the engine reads only while it starts. A value
+	// stored for it applies at the next start rather than at once.
+	ReadAtStart bool
 }
 
 // Resolver answers configuration lookups from the layered sources.
@@ -123,6 +127,15 @@ type Resolver struct {
 	// liked on an admin screen.
 	mu   sync.RWMutex
 	read map[string]struct{}
+
+	// atStart holds the keys read before the admin layer was offered or while
+	// boot re-reads its settings, and readLive those read after. A key only in
+	// atStart is consumed at boot, so a stored value for it waits for the next
+	// start.
+	atStart   map[string]struct{}
+	readLive  map[string]struct{}
+	offered   atomic.Bool
+	rereading atomic.Bool
 }
 
 // NewResolver builds a resolver over a loaded file layer. Pass nil for an
@@ -168,6 +181,7 @@ func (r *Resolver) SetAdminLayer(values map[string]string) {
 	if r == nil {
 		return
 	}
+	r.offered.Store(true)
 	upper := make(map[string]string, len(values))
 	for k, v := range values {
 		upper[normalizeKey(k)] = v
@@ -186,6 +200,7 @@ func (r *Resolver) Resolve(key string) Resolution {
 	if name == "" {
 		return res
 	}
+	res.ReadAtStart = r.readOnlyAtStart(name)
 
 	fv, inFile := r.fileValue(name)
 
@@ -293,7 +308,40 @@ func (r *Resolver) markRead(name string) {
 		r.read = make(map[string]struct{})
 	}
 	r.read[name] = struct{}{}
+	if r.offered.Load() && !r.rereading.Load() {
+		if r.readLive == nil {
+			r.readLive = make(map[string]struct{})
+		}
+		r.readLive[name] = struct{}{}
+	} else {
+		if r.atStart == nil {
+			r.atStart = make(map[string]struct{})
+		}
+		r.atStart[name] = struct{}{}
+	}
 	r.mu.Unlock()
+}
+
+// offerAdminLayer marks the point after which a read can see a stored value.
+// It is set even when loading the stored layer fails, because a save then
+// installs one, and every read after this point would pick it up.
+func (r *Resolver) offerAdminLayer() {
+	if r != nil {
+		r.offered.Store(true)
+	}
+}
+
+// readOnlyAtStart reports whether the engine read the key only while it
+// started.
+func (r *Resolver) readOnlyAtStart(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, early := r.atStart[name]
+	_, live := r.readLive[name]
+	return early && !live
 }
 
 // ReadKeys returns the keys the engine has asked for, sorted. It is what the
