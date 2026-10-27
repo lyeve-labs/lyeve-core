@@ -305,6 +305,19 @@ func TestResolver_ProvenanceStillReportsALayerNobodyHasRead(t *testing.T) {
 	assert.Equal(t, []string{"FROM_ADMIN", "FROM_FILE"}, keys)
 }
 
+// A setting the engine reads that no layer sets yet still has a row, or the
+// admin can never save it for the first time.
+func TestResolver_ProvenanceReportsASettingNoLayerSets(t *testing.T) {
+	r := NewResolver(nil)
+	r.Get("NATS_URL")
+
+	got := r.Provenance()
+	require.Len(t, got, 1)
+	assert.Equal(t, "NATS_URL", got[0].Key)
+	assert.Equal(t, SourceNone, got[0].From)
+	assert.True(t, got[0].Overridable)
+}
+
 func TestResolver_ReadKeysRecordsEveryNameTheEngineAsksFor(t *testing.T) {
 	r := NewResolver(nil)
 	r.Get("DATABASE_URL")
