@@ -3,6 +3,7 @@ package db_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log/slog"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 )
 
 // The same address, spelled with a precomposed é and with e and a combining
@@ -61,7 +63,8 @@ func TestUserStore_AccountAddressIsCheckedAsAnAddress(t *testing.T) {
 	eachDialect(t, func(t *testing.T, pool db.DB) {
 		ctx := context.Background()
 		users := db.NewUserStore(pool)
-		for _, bad := range []string{"not-an-address", "Person <person@example.com>", "person@example.com, other@example.com", "@example.com"} {
+		for _, bad := range []string{"not-an-address", "Person <person@example.com>", "<person@example.com>", "person@example.com, other@example.com", "@example.com",
+			"person@example.com (comment)", "per son@example.com", `"person"@example.com`, ".person@example.com", "person.@example.com", "per..son@example.com", "person@example..com"} {
 			_, err := users.Create(ctx, bad, tenantLocalHash, nil, "acme")
 			assert.ErrorIs(t, err, domain.ErrValidation, "create %q", bad)
 			_, _, err = users.CreateTenantLocal(ctx, "acme", bad, "", nil, true)
@@ -72,6 +75,11 @@ func TestUserStore_AccountAddressIsCheckedAsAnAddress(t *testing.T) {
 		n, err := users.Count(ctx)
 		require.NoError(t, err)
 		assert.Zero(t, n)
+
+		local := "admin-" + uuid.NewString()[:8] + "@localhost"
+		u, err := users.Create(ctx, local, tenantLocalHash, nil, "acme")
+		require.NoError(t, err, "a domain without a dot is an address on a development install")
+		assert.Equal(t, local, u.Email)
 	})
 }
 
@@ -211,5 +219,54 @@ func TestNormalizeAccountEmails_ReportsAccountsThatCollide(t *testing.T) {
 		again, _ := normalizeAccountEmails(t, pool)
 		assert.Zero(t, again.Rewritten)
 		assert.ElementsMatch(t, report.Collisions, again.Collisions, "every run reports what an operator has not decided")
+	})
+}
+
+// A replica that boots while another holds the rewrite's lock skips the step
+// and leaves every row as it was.
+func TestNormalizeAccountEmails_SkipsWhileAnotherReplicaHoldsTheLock(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		_, decomposed := addressForms(t)
+		id := seedAccount(t, pool, "email", "acme", decomposed, time.Now().UTC().Add(-time.Hour))
+		require.NotEqual(t, uuid.Nil, id)
+
+		raw, ok := pool.(interface{ SQLDB() *sql.DB })
+		require.True(t, ok)
+		lock := engine.NewDistLock(db.AccountEmailFormLock)
+		held, err := lock.TryAcquire(ctx, raw.SQLDB(), pool.Engine())
+		require.NoError(t, err)
+		require.True(t, held)
+		t.Cleanup(func() { _ = lock.Release() })
+
+		report, err := db.NormalizeAccountEmails(ctx, pool, slog.New(slog.DiscardHandler))
+		require.NoError(t, err)
+		assert.True(t, report.Skipped)
+		assert.Zero(t, report.Rewritten)
+		assert.Equal(t, decomposed, storedAddress(t, pool, "email", id))
+	})
+}
+
+// The rewrite names the bytes it read, so a row another writer changed after
+// the read keeps the other writer's value.
+func TestNormalizeAccountEmails_LeavesARowChangedSinceItWasRead(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		composed, decomposed := addressForms(t)
+		id := seedAccount(t, pool, "email", "acme", decomposed, time.Now().UTC().Add(-time.Hour))
+		require.NotEqual(t, uuid.Nil, id)
+
+		changed := "changed-" + uuid.NewString()[:8] + "@example.com"
+		_, err := pool.Exec(ctx, `UPDATE sys_users SET email = $1 WHERE id = $2`, changed, id)
+		require.NoError(t, err)
+
+		taken, err := db.RewriteAccountAddress(ctx, pool, "email", "acme", id, decomposed, composed)
+		require.NoError(t, err)
+		assert.False(t, taken)
+		assert.Equal(t, changed, storedAddress(t, pool, "email", id))
+
+		taken, err = db.RewriteAccountAddress(ctx, pool, "email", "acme", id, changed, "other-"+changed)
+		require.NoError(t, err)
+		assert.True(t, taken, "the bytes it read still there, the row takes the form")
 	})
 }

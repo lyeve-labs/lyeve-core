@@ -86,7 +86,7 @@ func NormalizeAccountEmails(ctx context.Context, pool DB, logger *slog.Logger) (
 	ctx, cancel := context.WithTimeout(ctx, accountEmailFormBudget)
 	defer cancel()
 
-	if raw, ok := pool.(interface{ SQLDB() *sql.DB }); ok {
+	if raw, ok := pool.(interface{ SQLDB() *sql.DB }); ok && raw.SQLDB() != nil {
 		lock := engine.NewDistLock(accountEmailFormLock)
 		held, err := lock.TryAcquire(ctx, raw.SQLDB(), pool.Engine())
 		if err != nil {
@@ -98,6 +98,9 @@ func NormalizeAccountEmails(ctx context.Context, pool DB, logger *slog.Logger) (
 		}
 		defer func() { _ = lock.Release() }()
 	}
+	// A run cut short by an error or the deadline still reports what it
+	// rewrote and found.
+	defer func() { logAccountEmailForm(logger, report) }()
 
 	byColumn, err := accountAddressCandidates(ctx, pool)
 	if err != nil {
@@ -108,7 +111,6 @@ func NormalizeAccountEmails(ctx context.Context, pool DB, logger *slog.Logger) (
 			return report, err
 		}
 	}
-	logAccountEmailForm(logger, report)
 	return report, nil
 }
 
@@ -278,7 +280,7 @@ func logAccountEmailForm(logger *slog.Logger, report AccountEmailFormReport) {
 		for j, id := range c.AccountIDs {
 			ids[j] = id.String()
 		}
-		logger.Warn("accounts hold one address in different forms: the newer accounts keep their stored address and cannot sign in by it until an operator decides between them",
+		logger.Warn("accounts hold one address in different forms: the other accounts keep their stored address and cannot sign in by it until an operator decides between them",
 			"column", c.Column, "tenant_ids", c.TenantIDs, "holder_id", c.HolderID.String(), "account_ids", ids, "count", len(ids))
 	}
 	logger.Warn("account address collisions", "collisions", len(report.Collisions), "accounts", accounts)
