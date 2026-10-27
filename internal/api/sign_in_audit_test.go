@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Every password sign-in leaves an entry, whether it opened a session, asked
@@ -173,4 +175,57 @@ func TestAPIRouter_TokenSignInIsAudited(t *testing.T) {
 	e, ok := audit.actions()["auth.login"]
 	require.True(t, ok, "no auth.login entry")
 	assert.Equal(t, u.ID.String(), e.ResourceID)
+}
+
+// The audit writer waits on its caller's context when its queue is full, and
+// the sign-in records its entry before the response leaves. The entry is
+// written on a context of its own with a short deadline, so a stalled writer
+// costs the sign-in that deadline and never holds it.
+func TestAuthHandler_AStalledAuditWriterDoesNotHoldTheSignIn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+	stalled := &stalledAudit{}
+	compliance.RegisterAuditWriter(stalled)
+	t.Cleanup(compliance.ClearAuditWriter)
+
+	pool := testdb.Postgres(t)
+	const secret = "test-secret-at-least-32-bytes-long!!"
+	const password = "the-stalled-password"
+	u := seedUser(t, pool, "stalled@example.com", password, []string{"editor"})
+	h := NewAuthHandler(db.NewUserStore(pool), &simpleMFAStore{pool: pool, secret: secret}, pool, secret, 3600, false)
+	h.host = auditOnlyHost{}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", strings.NewReader(makeLoginBody(u.Email, password)))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	h.Login(rr, req)
+
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.Equal(t, int32(1), stalled.calls.Load(), "the sign-in reached the writer")
+	assert.Less(t, time.Duration(stalled.held.Load()), time.Second, "the sign-in waited on the audit writer")
+}
+
+// stalledAudit stands in for an audit writer whose queue is full: a write
+// waits until its caller's context ends, and held is how long the last one
+// waited. It gives up after five seconds, so a missing deadline fails the
+// test instead of hanging it.
+type stalledAudit struct {
+	calls atomic.Int32
+	held  atomic.Int64
+}
+
+func (s *stalledAudit) Writer(ctx context.Context, _ core.Host, _ compliance.AuditEntry) {
+	s.calls.Add(1)
+	start := time.Now()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+	}
+	s.held.Store(int64(time.Since(start)))
+}
+
+func (s *stalledAudit) WriterSync(ctx context.Context, h core.Host, e compliance.AuditEntry) error {
+	s.Writer(ctx, h, e)
+	return ctx.Err()
 }
