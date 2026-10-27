@@ -33,7 +33,7 @@ import (
 func (h *AuthHandler) SetupStatus(w http.ResponseWriter, r *http.Request) {
 	n, err := h.users.Count(r.Context())
 	if err != nil {
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	body := map[string]any{"setup_required": n == 0}
@@ -87,7 +87,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// under a lock, which is the one that decides.
 	n, err := h.users.Count(r.Context())
 	if err != nil {
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	if n > 0 {
@@ -101,7 +101,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	tenantID := ""
 	if h.multiTenant {
 		if err := h.ensureDefaultTenant(r.Context()); err != nil {
-			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+			respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 			return
 		}
 		tenantID = "default"
@@ -124,7 +124,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeUserCreateFailed, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeUserCreateFailed)
 		return
 	}
 	h.setupToken.Retire()
@@ -273,7 +273,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	attempt.account, attempt.tenant = user.ID, user.TenantID
@@ -480,8 +480,7 @@ func (h *AuthHandler) respondIfSecondFactorRequired(w http.ResponseWriter, r *ht
 			// MFA fail-closed: deny login instead of issuing a session. The
 			// store failed, not the credentials, so the answer is a 503 the
 			// client retries, as mfa-verify answers the same outage.
-			slog.Warn("mfa check query failed, failing closed: denying login", "err", mfaErr)
-			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeMFAStoreError, nil)
+			respondStoreErrCode(w, r, http.StatusServiceUnavailable, mfaErr, i18n.CodeMFAStoreError)
 			return risk, true
 		}
 	}

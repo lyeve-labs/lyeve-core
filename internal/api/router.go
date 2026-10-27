@@ -749,6 +749,14 @@ func respondErrCode(w http.ResponseWriter, r *http.Request, status int, code i18
 	})
 }
 
+// respondStoreErrCode answers a failed store call with status and code the
+// way respondErrCode does, after httpx.LogStoreFailure has recorded a 5xx,
+// because the body carries none of the cause.
+func respondStoreErrCode(w http.ResponseWriter, r *http.Request, status int, err error, code i18n.Code) {
+	httpx.LogStoreFailure(r, status, err)
+	respondErrCode(w, r, status, code, nil)
+}
+
 // buildPublicRateLimiter creates a PublicEndpointRateLimiter over the table
 // publicRateLimitTable assembles, or returns nil when that table holds no
 // entry and no global cap.

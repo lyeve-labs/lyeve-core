@@ -74,7 +74,7 @@ func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	users, err := h.users.List(r.Context(), limit, offset)
 	if err != nil {
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	out := make([]map[string]any, 0, len(users))
@@ -153,7 +153,7 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusConflict, i18n.CodeUserCreateFailed, nil)
 			return
 		}
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeUserCreateFailed, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeUserCreateFailed)
 		return
 	}
 	h.audit(r, "user.create", user.ID, user.TenantID, nil, map[string]any{"roles": user.Roles})
@@ -187,7 +187,7 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	h.audit(r, "user.roles.update", user.ID, user.TenantID, map[string]any{"roles": before.Roles}, map[string]any{"roles": user.Roles})
@@ -229,7 +229,7 @@ func admitAdminSeat(w http.ResponseWriter, r *http.Request, err error, upgrade f
 		httpx.CapExceeded(w, core.CapAdminSeats, capErr.Limit, capErr.Current, link)
 		return false
 	}
-	respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+	respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
 	return false
 }
 
@@ -291,7 +291,7 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	h.audit(r, "user.state.update", user.ID, user.TenantID, nil, map[string]any{"disabled": user.Disabled, "expires_at": user.ExpiresAt})
@@ -345,7 +345,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 			httpx.ErrorReq(w, r, http.StatusConflict, "this account signs in through a trusted issuer and has no password")
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	// The hash and the token version moved together above, so the change is
@@ -386,7 +386,7 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
 		return
 	}
 	if err := h.users.Delete(r.Context(), id); err != nil {
@@ -394,7 +394,7 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	h.audit(r, "user.delete", id, user.TenantID, map[string]any{"roles": user.Roles}, nil)

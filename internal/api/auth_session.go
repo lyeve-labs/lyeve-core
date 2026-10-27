@@ -130,7 +130,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	attempt.account, attempt.tenant = user.ID, user.TenantID
@@ -293,7 +293,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, auth.ErrBackendUnavailable):
 			// Nothing is known about the token, so 401 would be a lie that
 			// costs the caller its session. 503 asks it to come back.
-			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
+			respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeSessionStoreUnavailable)
 		case errors.Is(err, auth.ErrTokenRotated):
 			// Another request traded this token a moment ago. The client
 			// carries on with the successor, so the session stays.
@@ -349,7 +349,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		restore()
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 

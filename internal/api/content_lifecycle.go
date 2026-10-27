@@ -81,7 +81,7 @@ func (h *ContentHandler) setStatus(w http.ResponseWriter, r *http.Request, schem
 		before = existing.Data
 	}
 	if err := h.store.SetStatus(r.Context(), schemaName, id, status); err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), failure)
+		httpx.ErrorReq(w, r, storeFailureStatus(r, err), failure)
 		return
 	}
 	if after, err := h.store.GetByID(r.Context(), schemaName, id); err == nil && after != nil {
@@ -101,7 +101,7 @@ func revisionError(w http.ResponseWriter, r *http.Request, err error, failure st
 		httpx.PaymentRequired(w, refused.Plugin, refused.Feature, "")
 		return
 	}
-	httpx.ErrorReq(w, r, httpStatus(err), failure)
+	httpx.ErrorReq(w, r, storeFailureStatus(r, err), failure)
 }
 
 // ListRevisions returns the revision history for a content record.
@@ -195,7 +195,7 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	// read failure here is the caller's answer.
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), "failed to get content for restore")
+		httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to get content for restore")
 		return
 	}
 	// A revision can predate the content type's current rules, so it is
@@ -208,7 +208,7 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	item, err := h.store.Update(r.Context(), schemaName, id, restored, existing.UpdatedAt)
 	if err != nil {
 		if !relationRefused(w, r, err) {
-			httpx.ErrorReq(w, r, httpStatus(err), "failed to restore revision")
+			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to restore revision")
 		}
 		return
 	}
