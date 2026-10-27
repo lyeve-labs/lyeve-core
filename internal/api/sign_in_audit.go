@@ -3,12 +3,19 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
+
+// signInAuditWait bounds how long a sign-in waits to hand its entry to the
+// audit writer. A writer whose queue is full waits on the context it is
+// given, and a sign-in must not stall behind it, so past this the entry is
+// dropped and the writer logs the drop.
+const signInAuditWait = 50 * time.Millisecond
 
 // Sign-in audit actions. Every sign-in method files under these three names
 // and states its method in the entry, so one filter reads all sign-ins.
@@ -77,10 +84,11 @@ func (h *AuthHandler) auditSignIn(r *http.Request, a *signInAttempt) {
 	if a.account != uuid.Nil {
 		resourceID = a.account.String()
 	} else {
-		after["subject_ref"] = compliance.SubjectRef(core.NormalizeEmail(a.email))
+		after["subject_digest"] = compliance.SubjectDigest(core.NormalizeEmail(a.email))
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), signInAuditWait)
+	defer cancel()
 	if a.tenant != "" {
 		ctx = core.WithTenantID(ctx, a.tenant)
 	}

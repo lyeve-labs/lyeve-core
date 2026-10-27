@@ -23,7 +23,9 @@ import (
 // An auditor asks who created an account, changed its roles, disabled it,
 // set its password and deleted it. Each change is filed under the account's
 // tenant with the super admin who made it and the address they made it from,
-// and no entry carries the password.
+// and no entry carries the password. The super admin makes every change after
+// the create from another tenant, so the entry follows the account rather
+// than the request.
 func TestUsersHandler_AccountChangesAreAudited(t *testing.T) {
 	if !testdb.ShouldTest("postgres") {
 		t.Skip("CI_DIALECT excludes postgres")
@@ -39,13 +41,14 @@ func TestUsersHandler_AccountChangesAreAudited(t *testing.T) {
 	h := NewUsersHandler(db.NewUserStore(pool))
 	h.host = auditOnlyHost{}
 
-	const tenant = "audit-tenant"
+	const tenant, requester = "audit-tenant", "requester-tenant"
 	admin := uuid.New()
+	acting := tenant
 	call := func(method, path, body string, params map[string]string, handle http.HandlerFunc) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.RemoteAddr = "198.51.100.7:4100"
-		ctx := core.WithTenantID(r.Context(), tenant)
-		ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{UserID: admin.String(), Roles: []string{"super_admin"}, TenantID: tenant})
+		ctx := core.WithTenantID(r.Context(), acting)
+		ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{UserID: admin.String(), Roles: []string{"super_admin"}, TenantID: requester})
 		r = chiCtx(r.WithContext(ctx), params)
 		rr := httptest.NewRecorder()
 		handle(rr, r)
@@ -59,6 +62,7 @@ func TestUsersHandler_AccountChangesAreAudited(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
 	id := created["id"].(string)
 	params := map[string]string{"id": id}
+	acting = requester
 
 	rr = call(http.MethodPut, "/api/admin/users/"+id+"/roles", `{"roles":["admin"]}`, params, h.UpdateRoles)
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())

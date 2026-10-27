@@ -372,6 +372,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondTenantResolution(w, r, err)
 		return
 	}
+	attempt.tenant = actingTenant
 
 	fp := collectFingerprint(r)
 	risk, answered := h.respondIfSecondFactorRequired(w, r, user, fp, actingRoles, actingTenant)

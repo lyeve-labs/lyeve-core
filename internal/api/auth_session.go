@@ -197,6 +197,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondTenantResolution(w, r, err)
 		return
 	}
+	attempt.tenant = actingTenant
 
 	// A password alone never becomes a session for an account that holds a
 	// second factor. The caller gets the same challenge the console's sign-in

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -41,6 +42,13 @@ func TestAuthHandler_SignInsAreAudited(t *testing.T) {
 
 	h := NewAuthHandler(db.NewUserStore(pool), &simpleMFAStore{pool: pool, secret: secret}, pool, secret, 3600, false)
 	h.host = auditOnlyHost{}
+	// The second-factor account also belongs to another tenant and signs in
+	// there, so its entries have to follow the acting tenant, not its home.
+	const acting = "audit_acting"
+	members := newFakeMemberships()
+	_, err := members.Grant(context.Background(), withMFA.ID, acting, []string{"editor"})
+	require.NoError(t, err)
+	h.WithMemberships(members)
 
 	post := func(handle http.HandlerFunc, path string, body any) *httptest.ResponseRecorder {
 		raw, err := json.Marshal(body)
@@ -96,14 +104,16 @@ func TestAuthHandler_SignInsAreAudited(t *testing.T) {
 		e := last(t)
 		assert.Equal(t, "auth.login.refused", e.Action)
 		assert.Empty(t, e.ResourceID)
-		assert.Contains(t, e.AfterJSON, compliance.SubjectRef("nobody-here@example.com"))
+		assert.Contains(t, e.AfterJSON, `"subject_digest":"`+compliance.SubjectDigest("nobody-here@example.com")+`"`)
 		assert.NotContains(t, e.AfterJSON, "nobody-here@example.com")
 	})
 
 	t.Run("second factor", func(t *testing.T) {
-		rr := login(withMFA.Email, password)
-		require.Equal(t, http.StatusOK, rr.Code)
-		assertEntry(t, last(t), "auth.login.mfa_required", withMFA.ID, true)
+		rr := post(h.Login, "/api/admin/auth/login", map[string]string{"email": withMFA.Email, "password": password, "tenant": acting})
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		challenged := last(t)
+		assertEntry(t, challenged, "auth.login.mfa_required", withMFA.ID, true)
+		assert.Equal(t, acting, challenged.TenantID)
 		var challenge map[string]any
 		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &challenge))
 		token, _ := challenge["challenge_token"].(string)
@@ -123,6 +133,7 @@ func TestAuthHandler_SignInsAreAudited(t *testing.T) {
 		e = last(t)
 		assertEntry(t, e, "auth.login", withMFA.ID, true)
 		assert.Contains(t, e.AfterJSON, `"step":"second_factor"`)
+		assert.Equal(t, acting, e.TenantID, "the session's entry is filed where it acts")
 		assert.NotContains(t, e.AfterJSON, code)
 	})
 
@@ -135,4 +146,31 @@ func TestAuthHandler_SignInsAreAudited(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, rr.Code)
 		assertEntry(t, last(t), "auth.login.refused", plain.ID, false)
 	})
+}
+
+// The token sign-in is served by the API router, which reaches the audit
+// writer only through the host the runtime passes it.
+func TestAPIRouter_TokenSignInIsAudited(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test requires Docker (testcontainers)")
+	}
+	audit := &recordingAuditWriter{}
+	compliance.RegisterAuditWriter(audit)
+	t.Cleanup(compliance.ClearAuditWriter)
+
+	pool := testdb.Postgres(t)
+	const password = "the-audited-password"
+	u := seedUser(t, pool, "audited-api@example.com", password, []string{"editor"})
+	router, err := NewAPIRouter(pool, testConfig(), nil, WithLifetime(testLifetime(t)), WithScalingHost(auditOnlyHost{}))
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/token", strings.NewReader(makeLoginBody(u.Email, password)))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	e, ok := audit.actions()["auth.login"]
+	require.True(t, ok, "no auth.login entry")
+	assert.Equal(t, u.ID.String(), e.ResourceID)
 }
