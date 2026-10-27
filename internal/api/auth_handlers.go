@@ -232,6 +232,9 @@ func hasControlChars(s string) bool {
 // Body: {"email": "...", "password": "..."}
 // Auth: public (rate-limited).
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	attempt := watchSignIn(w, "password")
+	w = attempt
+	defer h.auditSignIn(r, attempt)
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -243,6 +246,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeInvalidBody, nil)
 		return
 	}
+	attempt.email = body.Email
 
 	// A control character cannot appear in a stored address, so this is an
 	// unknown email however the driver would react to it. Postgres rejects a
@@ -268,6 +272,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
+	attempt.account, attempt.tenant = user.ID, user.TenantID
 
 	// Account lockout check (before password verification)
 	//
@@ -420,6 +425,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if risk != nil {
 		resp["risk"] = risk
 	}
+	attempt.issued, attempt.tenant = true, actingTenant
 	h.setSessionCookie(w, token)
 	h.setCSRFCookie(w, csrfToken)
 	respond(w, http.StatusOK, resp)
@@ -533,6 +539,9 @@ const mfaDefaultTenantKeyID = "default"
 // Body: {"challenge_token": "...", "code": "..."}
 // Auth: public (rate-limited).
 func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
+	attempt := watchSignIn(w, "second_factor")
+	w = attempt
+	defer h.auditSignIn(r, attempt)
 	// When no MFA store is wired, return 501 so the caller degrades
 	// gracefully rather than panicking.
 	if h.mfaStore == nil {
@@ -592,6 +601,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeInternalError, nil)
 		return
 	}
+	attempt.account, attempt.tenant = userID, claims.TenantID
 
 	// MFA lockout checks
 	// Check per-user lockout first, then challenge-level exhaustion.
@@ -787,6 +797,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	attempt.issued, attempt.tenant = true, liveTenantID
 	h.setSessionCookie(w, token)
 	h.setCSRFCookie(w, csrfToken)
 

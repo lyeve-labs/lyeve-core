@@ -92,6 +92,9 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 // Body: {"email": "...", "password": "..."}
 // Auth: public (rate-limited).
 func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
+	attempt := watchSignIn(w, "password")
+	w = attempt
+	defer h.auditSignIn(r, attempt)
 	var body struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -103,6 +106,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeInvalidBody, nil)
 		return
 	}
+	attempt.email = body.Email
 
 	if body.Email == "" || body.Password == "" {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
@@ -129,6 +133,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
+	attempt.account, attempt.tenant = user.ID, user.TenantID
 
 	// Account lockout check (before password verification)
 	if h.lockoutChecker != nil {
@@ -206,6 +211,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	attempt.issued, attempt.tenant = true, actingTenant
 	respond(w, http.StatusOK, map[string]any{
 		"token":      token,
 		"expires_in": h.expirySecs,
