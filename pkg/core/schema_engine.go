@@ -36,6 +36,10 @@ type SchemaEngine interface {
 	// ValidateContent validates content data against a schema's validation rules.
 	// Returns nil when all rules pass, or a slice of validation errors keyed by
 	// i18n error codes for the caller to localize.
+	//
+	// It checks a whole entry by schema name and fills no defaults. The
+	// kernel's own content writes go through ContentRules instead, and an
+	// engine that supplies both answers them from one set of rules.
 	ValidateContent(ctx context.Context, schemaName string, data map[string]any) ([]SchemaValidationError, error)
 }
 
@@ -207,6 +211,10 @@ func NoSchemaEngine(src SchemaSource) bool {
 // GT_FIELD, LTE_FIELD, GTE_FIELD, RANGE, CUSTOM or CROSS_FIELD. A failure with
 // any other code keeps the Message the engine wrote, so an engine with codes
 // of its own writes the sentence itself.
+//
+// ContentRules is what the kernel's content writes use. A plugin that checks
+// a whole entry before writing it calls SchemaEngine.ValidateContent, which
+// applies the same rules without filling defaults.
 type ContentRules interface {
 	// PrepareCreate fills every field data leaves out from its declared
 	// default and validates the result, in that order, so a required field
