@@ -148,7 +148,8 @@ func RequestCaptureWithPolicy(sink observability.CaptureSink, withholds func(*ht
 
 			respBody := crw.body.Bytes()
 			respTruncated := crw.body.Truncated()
-			if captureWithholdsBodies(r.URL.Path) || (withholds != nil && withholds(r)) {
+			withheld := captureWithholdsBodies(r.URL.Path) || (withholds != nil && withholds(r))
+			if withheld {
 				reqBody, respBody = nil, nil
 			}
 
@@ -165,6 +166,7 @@ func RequestCaptureWithPolicy(sink observability.CaptureSink, withholds func(*ht
 				TTL:             ttl,
 				TenantID:        tenantID,
 				Truncated:       reqTruncated || respTruncated,
+				BodiesWithheld:  withheld,
 			})
 		})
 	}
