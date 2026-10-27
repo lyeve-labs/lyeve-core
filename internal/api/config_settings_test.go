@@ -200,6 +200,27 @@ func TestConfigSave_RefusesAnOperatorOnlyKey(t *testing.T) {
 	assert.Empty(t, out.Saved)
 }
 
+func TestConfigSave_RefusesAKeyTheEngineReadsAtStart(t *testing.T) {
+	// The token lifetime is read once at boot, before the stored layer is
+	// installed, so a stored value would be reported as saved and never used.
+	withResolver(t, nil)
+	config.ActiveResolver().Get("JWT_EXPIRY_SECS")
+	config.ActiveResolver().SetAdminLayer(map[string]string{})
+	store := configStore(t)
+
+	rec, out := saveSettings(t, store, `{"values":{"jwt_expiry_secs":"1800"}}`)
+
+	require.Equal(t, http.StatusConflict, rec.Code)
+	require.Len(t, out.Refused, 1)
+	assert.Equal(t, "JWT_EXPIRY_SECS", out.Refused[0].Key)
+	assert.Contains(t, out.Refused[0].Reason, "when the engine starts")
+	assert.Empty(t, out.Saved)
+
+	item := settingResponse(config.ActiveResolver().Resolve("JWT_EXPIRY_SECS"))
+	assert.False(t, item.Editable)
+	assert.True(t, item.ReadAtStart)
+}
+
 type schemaFor map[string]map[string]any
 
 func (s schemaFor) PluginSchema(name string) map[string]any { return s[name] }

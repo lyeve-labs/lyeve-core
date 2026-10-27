@@ -40,6 +40,10 @@ type configSettingResponse struct {
 	// write-only field rather than an empty one.
 	Secret bool `json:"secret,omitempty"`
 
+	// ReadAtStart marks a setting the engine reads once at boot, from the
+	// environment or the configuration file only.
+	ReadAtStart bool `json:"read_at_start,omitempty"`
+
 	// Description says what the setting does, and Default what applies when
 	// no layer sets it. Both are empty for a key the engine does not describe.
 	Description string `json:"description,omitempty"`
@@ -83,11 +87,12 @@ func configProvenanceHandler() http.HandlerFunc {
 func settingResponse(res config.Resolution) configSettingResponse {
 	secret := core.IsSecretKey(res.Key)
 	item := configSettingResponse{
-		Key:      res.Key,
-		Source:   res.From.String(),
-		Origin:   res.Origin,
-		Editable: res.Overridable,
-		Secret:   secret,
+		Key:         res.Key,
+		Source:      res.From.String(),
+		Origin:      res.Origin,
+		Editable:    res.Overridable,
+		Secret:      secret,
+		ReadAtStart: res.ReadAtStart,
 	}
 	if !secret {
 		item.Value = res.Value
@@ -197,6 +202,9 @@ type configSaveResponse struct {
 func overrideRefusalReason(res config.Resolution) string {
 	if res.OperatorOnly {
 		return "set only by the operator, through an environment variable or the configuration file"
+	}
+	if res.ReadAtStart {
+		return "read only when the engine starts, so set it in an environment variable or the configuration file and restart"
 	}
 	if res.From == config.SourceEnv {
 		// Name the way out: the opt-in and where it is declared.
