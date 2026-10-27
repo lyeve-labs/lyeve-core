@@ -44,16 +44,32 @@ func TestValidatePermissionResource_Shapes(t *testing.T) {
 	}
 }
 
+// A resource that is not the wildcard and belongs to no registered kind has
+// to be a name a schema could carry. A rule may still name a schema that does
+// not exist yet, but a typo, a path or a near miss of a kind's prefix is
+// refused instead of stored as a rule that matches nothing.
+func TestValidatePermissionResource_RefusesNamesNoSchemaCanHave(t *testing.T) {
+	registerReportsAndVaults(t)
+	for _, ok := range []string{"not_created_yet", "Orders", "_private", "a1", strings.Repeat("a", 63)} {
+		assert.True(t, ValidatePermissionResource(ok), ok)
+	}
+	for _, bad := range []string{"Bad Name", "../x", "reports:x", "bogus:x", "1abc", "has-dash", "a.b", "**", strings.Repeat("a", 64)} {
+		assert.False(t, ValidatePermissionResource(bad), "%q", bad)
+	}
+}
+
 // With no kind registered every resource reads as a schema, so a build that
-// links no plugin owning a kind gives no resource the treatment of one.
+// links no plugin owning a kind gives no resource the treatment of one, and a
+// kind's resource there is a name no schema can carry.
 func TestValidatePermissionResource_NoKindReadsEverythingAsASchema(t *testing.T) {
 	keepPermissionKinds(t)
 	permissionKinds.mu.Lock()
 	permissionKinds.kinds = nil
 	permissionKinds.mu.Unlock()
 
+	assert.True(t, ValidatePermissionResource("reports"))
+	assert.False(t, ValidatePermissionResource("report:weekly"))
 	for _, res := range []string{"reports", "report:weekly", "vault:main"} {
-		assert.True(t, ValidatePermissionResource(res), res)
 		assert.False(t, IsPluginPermissionResource(res), res)
 		assert.Equal(t, PermissionResourceAll, GeneralPermissionResource(res), res)
 		assert.Equal(t, []string{"create", "read", "update", "delete"}, PermissionActionsFor(res), res)
