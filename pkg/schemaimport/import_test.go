@@ -283,6 +283,9 @@ func TestApplyBundle_AppliesNothingWhenTheEngineRefusesADefinition(t *testing.T)
 	var invalid *InvalidSchemaError
 	require.ErrorAs(t, err, &invalid)
 	assert.Equal(t, "article", invalid.Name)
+	var named interface{ SchemaName() string }
+	require.ErrorAs(t, err, &named)
+	assert.Equal(t, "article", named.SchemaName())
 	assert.ErrorIs(t, err, core.ErrValidation)
 	assert.Equal(t, `schema "article": field "title": unknown field_type`, err.Error())
 	assert.Empty(t, eng.applied)

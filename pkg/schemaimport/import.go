@@ -102,6 +102,10 @@ func (e *InvalidSchemaError) Error() string {
 
 func (e *InvalidSchemaError) Unwrap() error { return e.Err }
 
+// SchemaName names the definition the engine refused, so a caller matching
+// the error by behavior can report it against that definition.
+func (e *InvalidSchemaError) SchemaName() string { return e.Name }
+
 // PlanImport works out what importing a bundle would do without changing
 // anything.
 //
