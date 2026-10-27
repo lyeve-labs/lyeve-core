@@ -12,7 +12,9 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
-// oneRevision accepts snapshots and serves one stored revision for any id.
+// oneRevision accepts snapshots and serves one stored revision for any id. A
+// restore writes a revision only into the record it was taken from, so the
+// stored revision names the record the test restores.
 type oneRevision struct {
 	core.RecordRevisionStore
 	rev core.RecordRevision
@@ -49,7 +51,8 @@ func TestContentHandler_UpdateAndRestoreKeepTheStatus(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, readerStatus(), "a reader read the draft after an update")
 
 		fx.content.revisions = fakeRevisionProvider{oneRevision{rev: core.RecordRevision{
-			ID: uuid.New(), Data: map[string]any{"title": "as published", "_status": "published"},
+			ID: uuid.New(), SchemaName: "drafts", RecordID: uuid.MustParse(id),
+			Data: map[string]any{"title": "as published", "_status": "published"},
 		}}}
 		revID := uuid.NewString()
 		rr = fx.send(t, asEditor(fx.ctx), http.MethodPut, "/api/v1/content/drafts/"+id+"/revisions/"+revID+"/restore",

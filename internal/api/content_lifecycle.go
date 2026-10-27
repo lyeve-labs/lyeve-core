@@ -185,6 +185,12 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 		revisionError(w, r, err, "failed to get revision")
 		return
 	}
+	// The permission check covered the path's type and record only, so a
+	// revision of any other record is as absent as an unknown id.
+	if rev.SchemaName != schemaName || rev.RecordID != id {
+		httpx.ErrorReq(w, r, http.StatusNotFound, "failed to get revision")
+		return
+	}
 	// The restore needs the record's current version to write against, so a
 	// read failure here is the caller's answer.
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
