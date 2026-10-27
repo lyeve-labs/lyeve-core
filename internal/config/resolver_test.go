@@ -309,6 +309,7 @@ func TestResolver_ProvenanceStillReportsALayerNobodyHasRead(t *testing.T) {
 // admin can never save it for the first time.
 func TestResolver_ProvenanceReportsASettingNoLayerSets(t *testing.T) {
 	r := NewResolver(nil)
+	r.SetAdminLayer(nil)
 	r.Get("NATS_URL")
 
 	got := r.Provenance()

@@ -221,6 +221,7 @@ func TestConfigSave_StoresAKeyTheEngineReadsAtStartForTheNextStart(t *testing.T)
 
 func TestConfigProvenance_ListsAnUnsetSettingTheFirstSaveFills(t *testing.T) {
 	withResolver(t, nil)
+	config.ActiveResolver().SetAdminLayer(map[string]string{})
 	config.ActiveResolver().Get("EVENT_BUS")
 	store := configStore(t)
 
