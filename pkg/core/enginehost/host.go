@@ -62,7 +62,9 @@ type engineHost struct {
 	storage core.Storage
 
 	// suppliedSchema is the only engine there is. Nothing here builds one.
-
+	// A plugin reload writes it through Stop and Start while content writes
+	// read it, so schemaMu guards every read and write.
+	schemaMu       sync.RWMutex
 	suppliedSchema core.SchemaEngine
 
 	// Built at construction over a reader that resolves per read, so a plugin
