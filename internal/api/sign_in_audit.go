@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bufio"
 	"context"
+	"net"
 	"net/http"
 	"time"
 
@@ -58,6 +60,32 @@ func (a *signInAttempt) Write(b []byte) (int, error) {
 }
 
 func (a *signInAttempt) Unwrap() http.ResponseWriter { return a.ResponseWriter }
+
+// Flush passes a streaming response through.
+func (a *signInAttempt) Flush() {
+	if f, ok := a.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack hands the connection to a handler that wants to take it over. A
+// sign-in route is served over a real connection like any other, so a
+// wrapper that swallowed this would make an upgrade fail on the sign-in
+// routes and work everywhere else.
+func (a *signInAttempt) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := a.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return h.Hijack()
+}
+
+// Compile-time check that signInAttempt keeps http.Flusher and http.Hijacker,
+// so a wrapper that drops one fails to build instead of failing at run time.
+var (
+	_ http.Flusher  = (*signInAttempt)(nil)
+	_ http.Hijacker = (*signInAttempt)(nil)
+)
 
 // watchSignIn wraps w for a sign-in at the given step, "password" or
 // "second_factor". The caller defers auditSignIn with the result.
