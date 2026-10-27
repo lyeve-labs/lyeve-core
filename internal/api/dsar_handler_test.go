@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 )
@@ -405,5 +407,140 @@ func TestDSARHandler_Erase_SignOutFailedIsRetryable(t *testing.T) {
 	}
 	if strings.Contains(body, "127.0.0.1") {
 		t.Errorf("raw driver error text leaked into response: %s", body)
+	}
+}
+
+// slowEraser holds the fan-out for a fixed time, or until its context ends,
+// and records whether it ran to the end.
+type slowEraser struct {
+	started chan struct{}
+	release chan struct{}
+	hold    time.Duration
+	mu      sync.Mutex
+	ran     bool
+}
+
+func (e *slowEraser) EraseSubject(ctx context.Context, _ string) (int64, error) {
+	if e.started != nil {
+		close(e.started)
+	}
+	if e.release != nil {
+		<-e.release
+	}
+	select {
+	case <-time.After(e.hold):
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+	e.mu.Lock()
+	e.ran = true
+	e.mu.Unlock()
+	return 1, nil
+}
+
+func (e *slowEraser) finished() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.ran
+}
+
+// An erasure that outlasts the listener's write timeout still finished, but
+// the caller read EOF with no status, so it could not tell a complete erasure
+// from a partial one.
+func TestDSARHandler_Erase_OutlastsTheWriteTimeout(t *testing.T) {
+	compliance.RegisterSubjectEraser(&slowEraser{hold: 400 * time.Millisecond})
+	defer compliance.ResetSubjectErasers()
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(NewDSARHandler(nil, nil, nil).Erase))
+	srv.Config.WriteTimeout = 100 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	res, err := srv.Client().Post(srv.URL, "application/json", strings.NewReader(`{"identifier": "user@example.com"}`))
+	if err != nil {
+		t.Fatalf("the erasure answered nothing: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", res.StatusCode)
+	}
+	var resp EraseResponse
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		t.Fatalf("the answer has no readable body: %v", err)
+	}
+	if !resp.Complete || resp.TotalRows != 1 {
+		t.Errorf("answer = %+v, want a complete erasure of one row", resp)
+	}
+}
+
+// A caller or proxy that gives up canceled the request's context, and the
+// erasure stopped partway. The run now finishes, and its outcome is in the
+// log and the audit trail although nobody read the answer.
+func TestDSARHandler_Erase_ClientDisconnectDoesNotStopIt(t *testing.T) {
+	first := &slowEraser{started: make(chan struct{}), release: make(chan struct{}), hold: 300 * time.Millisecond}
+	second := &slowEraser{}
+	compliance.RegisterSubjectEraser(first)
+	compliance.RegisterSubjectEraser(second)
+	defer compliance.ResetSubjectErasers()
+
+	cap := captureAccessLog(t)
+	audit := &mockAuditWriter{}
+	handler := NewDSARHandler(audit, nil, nil)
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(done)
+		handler.Erase(w, r)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL, strings.NewReader(`{"identifier": "user@example.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	go func() {
+		<-first.started
+		cancel()
+		close(first.release)
+	}()
+	if res, err := srv.Client().Do(req); err == nil {
+		_ = res.Body.Close()
+		t.Fatal("the request was answered before the client went away")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the erasure did not finish")
+	}
+	if !first.finished() || !second.finished() {
+		t.Fatalf("the disconnect stopped the erasure: first ran %v, second ran %v", first.finished(), second.finished())
+	}
+	if len(audit.calls) != 1 || audit.calls[0].Action != "gdpr.erase" {
+		t.Errorf("audit calls = %+v, want one gdpr.erase", audit.calls)
+	}
+
+	cap.mu.Lock()
+	raw := cap.buf.String()
+	cap.mu.Unlock()
+	var outcome map[string]any
+	for _, line := range strings.Split(raw, "\n") {
+		var rec map[string]any
+		if json.Unmarshal([]byte(line), &rec) == nil && rec["msg"] == "subject_erasure_outcome" {
+			outcome = rec
+		}
+	}
+	if outcome == nil {
+		t.Fatal("no log line records the outcome of an erasure whose answer was not read")
+	}
+	if outcome["status"] != float64(http.StatusOK) || outcome["complete"] != true {
+		t.Errorf("outcome = %v, want status 200 and complete", outcome)
+	}
+	if outcome["subject_ref"] != compliance.SubjectRef("user@example.com") {
+		t.Errorf("outcome subject_ref = %v, want the erasure's subject reference", outcome["subject_ref"])
+	}
+	if strings.Contains(raw, "user@example.com") {
+		t.Error("the log carries the subject identifier")
 	}
 }

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -83,6 +85,12 @@ type ExportRequest struct {
 	// hands one controller another person's records.
 	AllTenants bool `json:"all_tenants"`
 }
+
+// erasureRunLimit bounds one admin erasure. A scan of five million rows
+// takes about a minute on the slowest dialect, and a run makes several, so
+// fifteen minutes leaves room for the largest tenant while still ending a
+// run that is stuck rather than slow.
+const erasureRunLimit = 15 * time.Minute
 
 // EraseRequest is the JSON body for POST /api/admin/gdpr/erase.
 type EraseRequest struct {
@@ -200,38 +208,68 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := compliance.RunSubjectErasureWithHolds(r.Context(), body.Identifier)
-
-	// A hold check that cannot answer is not a failed erasure, it is an
-	// unanswerable one. Refusing keeps held evidence intact and tells the
-	// requester to come back, which is recoverable. Erasing on a guess is not.
-	if errors.Is(err, compliance.ErrHoldCheckUnavailable) {
-		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
-			"legal hold status is unavailable; erasure was not attempted")
-		return
+	// A large tenant can take longer to erase than the listener's write
+	// timeout, and past it the answer is lost although the run finishes, so
+	// this response alone has no write deadline. A failure to clear it is
+	// logged rather than refused, because the erasure itself is unaffected.
+	if err := http.NewResponseController(w).SetWriteDeadline(time.Time{}); err != nil {
+		slog.WarnContext(r.Context(), "erasure answer keeps the listener write timeout", "err", err)
 	}
-	// A sign-out that failed is a database failure with nothing erased, so
-	// it is refused the same way, and repeating the request is the remedy.
-	if errors.Is(err, compliance.ErrSubjectNotSignedOut) {
-		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
-			"the subject could not be signed out; erasure was not attempted")
+	// Erasure commits as it goes, so a caller or proxy that gives up must not
+	// stop a run partway. The run keeps the request's values and ignores its
+	// cancellation. The bound exists because nothing else ends the run now: a
+	// call stuck on a lock or a dead peer would hold its goroutine and
+	// connection for good.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), erasureRunLimit)
+	defer cancel()
+	result, err := compliance.RunSubjectErasureWithHolds(ctx, body.Identifier)
+	complete := err == nil && len(result.Holds) == 0
+	status := http.StatusOK
+	var refusal string
+	switch {
+	case errors.Is(err, compliance.ErrHoldCheckUnavailable):
+		// A hold check that cannot answer is not a failed erasure, it is an
+		// unanswerable one. Refusing keeps held evidence intact and tells the
+		// requester to come back, which is recoverable. Erasing on a guess is
+		// not.
+		status = http.StatusServiceUnavailable
+		refusal = "legal hold status is unavailable; erasure was not attempted"
+	case errors.Is(err, compliance.ErrSubjectNotSignedOut):
+		// A sign-out that failed is a database failure with nothing erased,
+		// so it is refused the same way, and repeating the request is the
+		// remedy.
+		status = http.StatusServiceUnavailable
+		refusal = "the subject could not be signed out; erasure was not attempted"
+	case err != nil:
+		status = http.StatusMultiStatus
+	}
+	// The caller may be gone by now, so the outcome is logged whether or not
+	// anyone reads the answer. The subject is named by its reference only.
+	slog.InfoContext(ctx, "subject_erasure_outcome",
+		"subject_ref", compliance.SubjectRef(body.Identifier),
+		"status", status,
+		"complete", complete,
+		"holds", len(result.Holds),
+		"rows", result.Rows,
+		"failed", result.Failed,
+	)
+	if refusal != "" {
+		httpx.ErrorReq(w, r, status, refusal)
 		return
 	}
 
 	resp := EraseResponse{
 		Identifier: body.Identifier,
 		TotalRows:  result.Rows,
-		Complete:   err == nil && len(result.Holds) == 0,
+		Complete:   complete,
 		Holds:      result.Holds,
 	}
-	status := http.StatusOK
 	if err != nil {
 		// A partial erasure must not read as a finished one, to a caller
 		// reading the body or only the status. 207 keeps it a success for a
 		// client that shows the errors, and keeps it off 200. The failed
 		// erasers are named by their owner, and the driver text stays in the
 		// log.
-		status = http.StatusMultiStatus
 		resp.Failed = result.Failed
 		resp.Errors = []string{
 			"not finished: " + strings.Join(result.Failed, ", "),
