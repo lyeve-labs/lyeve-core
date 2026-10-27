@@ -219,6 +219,39 @@ func TestConfigSave_StoresAKeyTheEngineReadsAtStartForTheNextStart(t *testing.T)
 	assert.Empty(t, out.Refused)
 }
 
+func TestConfigProvenance_ListsAnUnsetSettingTheFirstSaveFills(t *testing.T) {
+	withResolver(t, nil)
+	config.ActiveResolver().SetAdminLayer(map[string]string{})
+	config.ActiveResolver().Get("EVENT_BUS")
+	store := configStore(t)
+
+	before := readProvenance(t)
+	require.Contains(t, before, "EVENT_BUS", "a setting nothing has saved needs a row to save it from")
+	assert.Equal(t, "default", before["EVENT_BUS"].Source)
+	assert.True(t, before["EVENT_BUS"].Editable)
+
+	rec, _ := saveSettings(t, store, `{"values":{"event_bus":"nats"}}`)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	after := readProvenance(t)
+	assert.Equal(t, "admin", after["EVENT_BUS"].Source)
+	assert.Equal(t, "nats", after["EVENT_BUS"].Value)
+}
+
+func readProvenance(t *testing.T) map[string]configSettingResponse {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	configProvenanceHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/admin/config", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	var out configProvenanceResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &out))
+	byKey := map[string]configSettingResponse{}
+	for _, s := range out.Settings {
+		byKey[s.Key] = s
+	}
+	return byKey
+}
+
 type schemaFor map[string]map[string]any
 
 func (s schemaFor) PluginSchema(name string) map[string]any { return s[name] }

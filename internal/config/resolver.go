@@ -117,10 +117,9 @@ type Resolver struct {
 
 	// read holds every key the engine has asked for, which is what this build
 	// treats as configuration. Provenance needs it to report a setting the
-	// environment alone supplies: such a key is in no layer it can walk, so
-	// without this it is invisible to the admin API while the save handler
-	// refuses it as env-pinned, and a page cannot tell that from a setting
-	// nobody has set.
+	// environment alone supplies, or one nothing supplies yet: such a key is in
+	// no layer it can walk, so without this it is invisible to the admin API,
+	// and a page can neither show it pinned nor save it for the first time.
 	//
 	// Only Get records. Resolve is also called with names that arrive in a
 	// request body, and recording those would let a caller put anything it
@@ -362,9 +361,9 @@ func (r *Resolver) ReadKeys() []string {
 	return out
 }
 
-// Provenance reports every key any layer knows about, sorted by key. The admin
-// UI uses it to show which settings it may edit and which are pinned by the
-// deployment.
+// Provenance reports every key any layer knows about or the engine reads,
+// sorted by key. The admin UI uses it to show which settings it may edit and
+// which are pinned by the deployment.
 //
 // Secret values are not redacted here. Callers that expose this over HTTP must
 // redact before responding. See the plugin configuration endpoints.
@@ -381,19 +380,14 @@ func (r *Resolver) Provenance() []Resolution {
 			seen[k] = struct{}{}
 		}
 	}
-	// The environment is listed only where it supplies a key the engine
-	// actually reads. The full environment of a container is not configuration
-	// and would put unrelated process state on an admin screen, which is why
-	// this is bounded by the read set rather than by os.Environ.
-	//
-	// Leaving it out entirely would be worse. A .env file becomes process
-	// environment, so on an install configured that way no setting would
-	// appear at all, while the save handler would refuse each one as env-pinned.
+	// Every key the engine reads is listed, whichever layer supplies it or
+	// none. A setting nothing has set yet needs a row, or the admin can never
+	// save it for the first time. The list is bounded by the read set rather
+	// than by os.Environ, because the full environment of a container is not
+	// configuration and would put unrelated process state on an admin screen.
 	r.mu.RLock()
 	for k := range r.read {
-		if _, ok := os.LookupEnv(k); ok {
-			seen[k] = struct{}{}
-		}
+		seen[k] = struct{}{}
 	}
 	r.mu.RUnlock()
 
