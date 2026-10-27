@@ -37,7 +37,7 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 		return
 	case err != nil:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 		return
 	case hidden.Names(fieldName):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")

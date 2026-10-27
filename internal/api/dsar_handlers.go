@@ -134,7 +134,7 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 		var tenants []string
 		tenants, err = h.tenants(r.Context())
 		if err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "could not enumerate tenants")
+			httpx.StoreError(w, r, err, "could not enumerate tenants")
 			return
 		}
 		result, err = compliance.RunSubjectExportAcrossTenants(
@@ -150,7 +150,7 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "export failed")
+		httpx.StoreError(w, r, err, "export failed")
 		return
 	}
 

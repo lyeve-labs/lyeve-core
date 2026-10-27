@@ -167,7 +167,7 @@ func configSaveHandler(store *db.PluginConfigStore, reloader PluginConfigReloade
 					"cannot store a credential without an encryption key: set ENCRYPTION_KEY")
 				return
 			}
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save settings")
+			httpx.StoreError(w, r, err, "failed to save settings")
 			return
 		}
 		applyStoredConfig(r.Context(), store, reloader)

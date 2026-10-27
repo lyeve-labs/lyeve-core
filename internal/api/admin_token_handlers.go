@@ -18,7 +18,6 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
-	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -137,8 +136,7 @@ func (h *adminTokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, total, err := h.store.List(r.Context(), tenant, owner, limit, offset)
 	if err != nil {
-		slog.WarnContext(r.Context(), "list admin tokens failed", "err", err)
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to list admin tokens")
+		httpx.StoreError(w, r, err, "failed to list admin tokens")
 		return
 	}
 	httpx.Paginated(w, tokens, total, limit, offset)
@@ -210,8 +208,7 @@ func (h *adminTokenHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Create(r.Context(), tok); err != nil {
-		slog.WarnContext(logging.ContextAbout(r.Context(), tenant), "create admin token failed", "err", err)
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to create admin token")
+		httpx.StoreError(w, r, err, "failed to create admin token")
 		return
 	}
 	tok.OwnerEmail = owner.Email
@@ -257,7 +254,7 @@ func (h *adminTokenHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	}
 	old, err := h.store.Get(r.Context(), tenant, id)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "admin token not found")
+		httpx.StoreError(w, r, err, "admin token not found")
 		return
 	}
 	// Only the owner rotates: the successor is shown to whoever asks, and it
@@ -285,10 +282,7 @@ func (h *adminTokenHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Rotate(r.Context(), tenant, old.ID, tok, now.Add(adminTokenRotationOverlap)); err != nil {
-		if !errors.Is(err, core.ErrNotFound) {
-			slog.WarnContext(r.Context(), "rotate admin token failed", "err", err)
-		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to rotate admin token")
+		httpx.StoreError(w, r, err, "failed to rotate admin token")
 		return
 	}
 	tok.OwnerEmail = owner.Email
@@ -314,7 +308,7 @@ func (h *adminTokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, err := h.store.Get(r.Context(), tenant, id)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "admin token not found")
+		httpx.StoreError(w, r, err, "admin token not found")
 		return
 	}
 	if tok.OwnerUserID.String() != caller.UserID && !caller.HasRole("super_admin") {
@@ -326,8 +320,7 @@ func (h *adminTokenHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 			httpx.ErrorReq(w, r, http.StatusConflict, "This admin token is already revoked.")
 			return
 		}
-		slog.WarnContext(r.Context(), "revoke admin token failed", "err", err)
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to revoke admin token")
+		httpx.StoreError(w, r, err, "failed to revoke admin token")
 		return
 	}
 	h.audit(r, "admin_token.revoke", tok)
@@ -357,7 +350,7 @@ func (h *adminTokenHandler) Requests(w http.ResponseWriter, r *http.Request) {
 	}
 	tok, err := h.store.Get(r.Context(), tenant, id)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "admin token not found")
+		httpx.StoreError(w, r, err, "admin token not found")
 		return
 	}
 	if tok.OwnerUserID.String() != caller.UserID && !caller.HasRole("super_admin") {
@@ -366,8 +359,7 @@ func (h *adminTokenHandler) Requests(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, total, err := h.store.ListRequests(r.Context(), tenant, id, limit, offset)
 	if err != nil {
-		slog.WarnContext(r.Context(), "list admin token requests failed", "err", err)
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to list admin token requests")
+		httpx.StoreError(w, r, err, "failed to list admin token requests")
 		return
 	}
 	httpx.Paginated(w, rows, total, limit, offset)
@@ -409,12 +401,12 @@ func (h *adminTokenHandler) owner(w http.ResponseWriter, r *http.Request, caller
 			httpx.ErrorReq(w, r, http.StatusUnauthorized, "session invalidated")
 			return nil, false
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "account check unavailable")
+		httpx.StoreError(w, r, err, "account check unavailable")
 		return nil, false
 	}
 	roles, err := ownerRolesIn(r.Context(), h.members, u, tenant)
 	if err != nil && !errors.Is(err, errNotAMember) {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "account check unavailable")
+		httpx.StoreError(w, r, err, "account check unavailable")
 		return nil, false
 	}
 	if !hasRole(roles, "admin") && !hasRole(roles, "super_admin") {

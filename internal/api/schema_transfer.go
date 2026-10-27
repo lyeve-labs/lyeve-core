@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -49,7 +48,7 @@ func schemaExportHandler(host core.Host) http.HandlerFunc {
 
 		bundle, err := schemaimport.ExportBundle(r.Context(), eng, instanceSource(host))
 		if err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to export content types")
+			httpx.StoreError(w, r, err, "failed to export content types")
 			return
 		}
 
@@ -137,7 +136,7 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 				return
 			}
 			if err != nil {
-				httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to plan the import")
+				httpx.StoreError(w, r, err, "failed to plan the import")
 				return
 			}
 			out.Plan = plan
@@ -163,8 +162,7 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 			// The engine's error wraps the database's, which names tables,
 			// constraints and columns, so it goes to the log and the answer
 			// is fixed.
-			slog.ErrorContext(r.Context(), "schema import: apply failed", "err", err)
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to apply the import")
+			httpx.StoreError(w, r, err, "failed to apply the import")
 			return
 		}
 		out.Applied = true

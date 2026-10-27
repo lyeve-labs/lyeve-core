@@ -50,7 +50,7 @@ func pluginConfigHandler(store *db.PluginConfigStore) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to load plugin configuration")
+			httpx.StoreError(w, r, err, "failed to load plugin configuration")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -118,7 +118,7 @@ func pluginConfigSaveHandler(store *db.PluginConfigStore, provider PluginSchemaP
 					"cannot store a credential without an encryption key: set ENCRYPTION_KEY")
 				return
 			}
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save plugin configuration")
+			httpx.StoreError(w, r, err, "failed to save plugin configuration")
 			return
 		}
 		applyStoredConfig(r.Context(), store, reloader)
@@ -128,7 +128,7 @@ func pluginConfigSaveHandler(store *db.PluginConfigStore, provider PluginSchemaP
 		// will see.
 		saved, err := store.Get(r.Context(), name)
 		if err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save plugin configuration")
+			httpx.StoreError(w, r, err, "failed to save plugin configuration")
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
@@ -165,7 +165,7 @@ func pluginConfigResetHandler(store *db.PluginConfigStore, provider PluginSchema
 			return
 		}
 		if err := store.Delete(r.Context(), name); err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to reset plugin configuration")
+			httpx.StoreError(w, r, err, "failed to reset plugin configuration")
 			return
 		}
 		applyStoredConfig(r.Context(), store, reloader)

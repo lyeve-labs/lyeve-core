@@ -270,7 +270,7 @@ func (h *ContentHandler) checkPermission(w http.ResponseWriter, r *http.Request,
 	case errors.Is(err, errPermissionDenied):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
 	default:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 	}
 	return false
 }
@@ -310,7 +310,7 @@ func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema 
 	case errors.Is(err, errNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 	default:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 	}
 	return nil, false
 }
@@ -393,7 +393,7 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 	}
 	_ = h.store.PopulateGated(r.Context(), items, cfg, gate) // err suppressed: a relation the store cannot read is served empty
 	if ruleErr != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(ruleErr), "database error")
+		httpx.StoreError(w, r, ruleErr, "database error")
 		return false
 	}
 	return true
