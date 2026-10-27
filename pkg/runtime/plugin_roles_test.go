@@ -61,6 +61,7 @@ func TestRun_RefusesARoleTwoRunningPluginsClaim(t *testing.T) {
 		t.Cleanup(func() { plugin.UnregisterPlugin(name) })
 	}
 
+	forgetBootRegistries(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)

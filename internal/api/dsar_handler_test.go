@@ -72,7 +72,7 @@ func TestDSARHandler_Export_Success(t *testing.T) {
 			},
 		},
 	})
-	defer compliance.RegisterSubjectExporter(nil)
+	t.Cleanup(compliance.ResetSubjectExporters)
 
 	audit := &mockAuditWriter{}
 	handler := NewDSARHandler(audit, nil, nil)
@@ -143,7 +143,7 @@ func TestDSARHandler_Export_EmptyIdentifier(t *testing.T) {
 
 func TestDSARHandler_Erase_Success(t *testing.T) {
 	compliance.RegisterSubjectEraser(&testEraser{affected: 5})
-	defer compliance.RegisterSubjectEraser(nil)
+	t.Cleanup(compliance.ResetSubjectErasers)
 
 	audit := &mockAuditWriter{}
 	handler := NewDSARHandler(audit, nil, nil)
@@ -330,7 +330,7 @@ func TestDSARHandler_Erase_MultipleFailuresSanitized(t *testing.T) {
 // subject's identifier ends up instead.
 func TestDSARHandler_Export_WithoutAuditWriterReportsTheGap(t *testing.T) {
 	compliance.RegisterSubjectExporter(&testExporter{data: map[string]any{"notes": []map[string]any{}}})
-	defer compliance.RegisterSubjectExporter(nil)
+	t.Cleanup(compliance.ResetSubjectExporters)
 
 	cap := captureAccessLog(t)
 	handler := NewDSARHandler(nil, nil, nil)
@@ -687,5 +687,29 @@ func TestDSARHandler_Erase_SharedAddressOffersNoErasureByAddress(t *testing.T) {
 	}
 	if byAddress.MatchString(published) {
 		t.Errorf("the published 207 offers an erasure by address: %q", published)
+	}
+}
+
+// An export whose subject addresses cannot be read lists nothing an exporter
+// keeps under an address. It answered 200 with a bundle that read as
+// complete. It is the retryable 503 the erasure answers.
+func TestDSARHandler_Export_UnresolvedAddressesIsRetryable(t *testing.T) {
+	compliance.RegisterSubjectEraser(unresolvableAccount{})
+	defer compliance.ResetSubjectErasers()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/export", bytes.NewBufferString(`{"identifier": "user@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Export(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "not attempted") {
+		t.Errorf("the answer does not say the export was not attempted: %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") {
+		t.Errorf("raw driver error text leaked into response: %s", body)
 	}
 }

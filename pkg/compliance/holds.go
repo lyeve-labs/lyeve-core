@@ -68,8 +68,8 @@ var ErrHoldCheckUnavailable = errors.New("legal hold status could not be determi
 var ErrSubjectNotSignedOut = errors.New("the subject could not be signed out")
 
 // ErrSubjectAddressesUnresolved is returned when the subject's addresses
-// could not be read. The erasure then runs no eraser, and repeating it is
-// safe.
+// could not be read. The erasure then runs no eraser and the export runs no
+// exporter, and repeating either is safe.
 var ErrSubjectAddressesUnresolved = errors.New("the subject's addresses could not be resolved")
 
 var (
