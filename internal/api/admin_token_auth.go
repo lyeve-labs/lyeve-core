@@ -158,8 +158,7 @@ func (a *adminTokenAuth) authenticate(next http.Handler) http.Handler {
 				httpx.ErrorReq(w, r, http.StatusUnauthorized, msgAdminTokenInvalid)
 				return
 			}
-			slog.WarnContext(r.Context(), "admin token lookup failed", "err", err)
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), msgAdminTokenCheckFailed)
+			httpx.StoreError(w, r, err, msgAdminTokenCheckFailed)
 			return
 		}
 

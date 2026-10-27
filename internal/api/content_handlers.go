@@ -519,7 +519,7 @@ func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Requ
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 		return false
 	case err != nil:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 		return false
 	}
 	for key := range filters {

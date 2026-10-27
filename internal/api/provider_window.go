@@ -40,7 +40,7 @@ func (h *providerWindowHandler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	days, err := h.windows.ProviderWindowDays(r.Context(), tenantID)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to read the provider window")
+		httpx.StoreError(w, r, err, "failed to read the provider window")
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
@@ -76,7 +76,7 @@ func (h *providerWindowHandler) put(w http.ResponseWriter, r *http.Request) {
 	prior, err := h.store.Merge(r.Context(), config.CoreSettingsOwner,
 		map[string]any{core.ProviderWindowSettingKey: days}, actorID(r))
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save the provider window")
+		httpx.StoreError(w, r, err, "failed to save the provider window")
 		return
 	}
 	compliance.RecordAuditFromRequestWithState(r, h.host, "auth.provider_window.update", "tenant", tenantID,
