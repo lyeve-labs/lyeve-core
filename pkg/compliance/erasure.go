@@ -128,29 +128,35 @@ func (r *SubjectEraserRegistry) Register(e SubjectEraser) {
 }
 
 // Erasers returns a snapshot copy of registered erasers, in the order the
-// fan-out must call them: everything else first, then the account erasers.
+// fan-out must call them: everything else first, then the erasures declared
+// Final, then the account erasers.
 //
 // See AccountEraser. An eraser that rewrites the address the others resolve
 // through has to go last or it takes the key away from them. Registration
 // order would put it first, because the engine registers before the plugin
-// activator runs.
+// activator runs. A Final erasure goes just before it, because the account
+// eraser resolves nothing once it has run.
 //
 // The rest keep the order they registered in, so this changes nothing for a
-// registry with no account eraser in it.
+// registry with no account eraser and no Final erasure in it.
 func (r *SubjectEraserRegistry) Erasers() []SubjectEraser {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	out := make([]SubjectEraser, 0, len(r.erasers))
-	var last []SubjectEraser
+	var final, last []SubjectEraser
 	for _, e := range r.erasers {
 		if _, isAccount := e.(AccountEraser); isAccount {
 			last = append(last, e)
 			continue
 		}
+		if d, ok := e.(*DeclaredEraser); ok && d.final {
+			final = append(final, e)
+			continue
+		}
 		out = append(out, e)
 	}
-	return append(out, last...)
+	return append(append(out, final...), last...)
 }
 
 // Len returns the number of registered erasers.
@@ -183,10 +189,17 @@ func SubjectErasers() []SubjectEraser {
 // an error and every one that never ran because the context ended. The error
 // a run returns is only the first of them, and a caller that records or
 // retries an incomplete erasure needs all of them.
+//
+// Shared counts the subject's addresses no eraser reached because another
+// account in the same tenant holds them too (see ResolveSubjectAddresses).
+// Rows under them stay, because they cannot be told apart from the other
+// account's data, so a run with any is unfinished although every eraser
+// succeeded.
 type ErasureResult struct {
 	Rows   int64
 	Holds  []HoldRef
 	Failed []string
+	Shared int
 }
 
 // RunSubjectErasure fans out the given identifier to all registered erasers
@@ -200,9 +213,11 @@ func RunSubjectErasure(ctx context.Context, identifier string) (int64, error) {
 
 // RunSubjectErasureWithHolds consults the registered legal-hold checker and
 // then fans the identifier out to all registered erasers. The subject is
-// signed out first. Each eraser is called independently, and a failure in one
-// stops none of the others except the account eraser, which runs only once
-// every other eraser has succeeded (see SessionEnder). Errors are
+// signed out first, and the subject's addresses are then resolved for every
+// eraser to read (see SubjectAddresses). Each eraser is called independently,
+// and a failure in one stops none of the others except the account eraser
+// and the erasures declared Final, which run only once every other eraser has
+// succeeded (see SessionEnder). Errors are
 // logged and the first non-nil error is returned alongside the total rows
 // affected, and the result names every eraser that failed or never ran.
 //
@@ -210,6 +225,7 @@ func RunSubjectErasure(ctx context.Context, identifier string) (int64, error) {
 // returns zero rows and names the holds, so the requester is told their
 // request is deferred rather than quietly given a success that erased nothing.
 func RunSubjectErasureWithHolds(ctx context.Context, identifier string) (ErasureResult, error) {
+	identifier = canonicalSubject(identifier)
 	holds, err := CheckSubjectHolds(ctx, identifier)
 	if err != nil {
 		return ErasureResult{}, err
@@ -357,6 +373,23 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 		}
 	}
 
+	// The subject's addresses are read once, now, from the rows as they
+	// stand, and every eraser matches against the same set. A set that
+	// cannot be read is not guessed at: every eraser would miss what it left
+	// out, and the account eraser would then take the key to it away.
+	ctx, err := ResolveSubjectAddresses(ctx, identifier, erasers)
+	if err != nil {
+		slog.Error("subject_addresses_unresolved",
+			"subject_ref", ref,
+			"err", err,
+		)
+		for _, e := range erasers {
+			fail(e)
+		}
+		return res, fmt.Errorf("%w: %w", ErrSubjectAddressesUnresolved, err)
+	}
+	res.Shared = sharedSubjectAddresses(ctx)
+
 	var total int64
 	var firstErr error
 	othersFailed := false
@@ -380,9 +413,11 @@ func runSubjectErasureOn(ctx context.Context, reg *SubjectEraserRegistry, identi
 			return res, err
 		}
 		_, isAccount := eraser.(AccountEraser)
-		if isAccount && othersFailed {
+		declared, _ := eraser.(*DeclaredEraser)
+		if (isAccount || declared != nil && declared.final) && othersFailed {
 			// The account keeps the address the failed owners resolve the
-			// subject by, and the next run erases it.
+			// subject by, and the next run erases it. A Final erasure keeps
+			// the rows the next run reads the subject's addresses from.
 			slog.Warn("subject_erasure_account_deferred",
 				"eraser", EraserName(eraser),
 				"subject_ref", ref,

@@ -1046,7 +1046,7 @@ body (json, newline):
                 }
               }
             },
-            "description": "Partly erased: the account was not erased, failed names the owners left, and repeating the request finishes it"
+            "description": "Partly erased: either the account was not erased, failed names the owners left, and repeating the request finishes it, or some rows were kept because they cannot be told apart from another account's data"
           },
           "400": {
             "description": "Bad request"

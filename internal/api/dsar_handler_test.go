@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -542,5 +543,149 @@ func TestDSARHandler_Erase_ClientDisconnectDoesNotStopIt(t *testing.T) {
 	}
 	if strings.Contains(raw, "user@example.com") {
 		t.Error("the log carries the subject identifier")
+	}
+}
+
+// unresolvableAccount cannot read the subject's accounts.
+type unresolvableAccount struct{}
+
+func (unresolvableAccount) EraserName() string { return "account" }
+func (unresolvableAccount) SubjectAccounts(context.Context, string) ([]compliance.SubjectAccount, error) {
+	return nil, errors.New("connection refused: 127.0.0.1:5432")
+}
+func (unresolvableAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
+
+// An erasure whose subject addresses cannot be read erases nothing. It
+// answered 207 with every part listed as failed, which reads as a partial
+// erasure. It is the retryable 503 a failed sign-out answers.
+func TestDSARHandler_Erase_UnresolvedAddressesIsRetryable(t *testing.T) {
+	compliance.RegisterSubjectEraser(unresolvableAccount{})
+	compliance.RegisterSubjectEraser(&testEraser{affected: 3})
+	defer compliance.ResetSubjectErasers()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "user@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Erase(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if !strings.Contains(body, "not attempted") {
+		t.Errorf("the answer does not say the erasure was not attempted: %s", body)
+	}
+	if strings.Contains(body, "127.0.0.1") {
+		t.Errorf("raw driver error text leaked into response: %s", body)
+	}
+}
+
+// sharingAccount resolves the subject to one account in acme whose second
+// address another account holds when shared is set.
+type sharingAccount struct{ shared bool }
+
+func (sharingAccount) EraserName() string { return "account" }
+func (sharingAccount) SubjectAccounts(context.Context, string) ([]compliance.SubjectAccount, error) {
+	return []compliance.SubjectAccount{{ID: "6f1c2a0e-4b7d-4c1e-9a3f-2d5e8b7c1a90", Tenant: "acme", Addresses: []string{"own@example.com", "both@example.com"}}}, nil
+}
+func (a sharingAccount) AddressHolders(_ context.Context, tenant, address string) ([]compliance.SubjectAccount, error) {
+	if !a.shared || address != "both@example.com" {
+		return nil, nil
+	}
+	return []compliance.SubjectAccount{{ID: "0b9d7e4c-1a2f-4e6b-8c3d-5f7a9e1b2c40", Tenant: tenant, Addresses: []string{address}}}, nil
+}
+func (sharingAccount) EraseSubject(context.Context, string) (int64, error) { return 1, nil }
+
+// An address the subject shares with another account is left out of the
+// erasure, so rows under it stay. That erasure answered complete.
+func TestDSARHandler_Erase_SharedAddressIsUnfinished(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		shared   bool
+		status   int
+		complete bool
+	}{
+		{"shared address", true, http.StatusMultiStatus, false},
+		{"no shared address", false, http.StatusOK, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compliance.RegisterSubjectEraser(sharingAccount{shared: tc.shared})
+			defer compliance.ResetSubjectErasers()
+
+			req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "own@example.com"}`))
+			req.Header.Set("Content-Type", "application/json")
+			rr := httptest.NewRecorder()
+			NewDSARHandler(nil, nil, nil).Erase(rr, req)
+
+			if rr.Code != tc.status {
+				t.Fatalf("expected %d, got %d: %s", tc.status, rr.Code, rr.Body.String())
+			}
+			var resp EraseResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if resp.Complete != tc.complete {
+				t.Errorf("complete = %v, want %v: %s", resp.Complete, tc.complete, rr.Body.String())
+			}
+			if tc.shared && len(resp.Errors) == 0 {
+				t.Errorf("the answer gives no reason it is unfinished: %s", rr.Body.String())
+			}
+			if strings.Contains(rr.Body.String(), "both@") {
+				t.Errorf("the answer names the shared address: %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+// An erasure naming the shared address erases the other account that holds
+// it, so neither the 207 reason nor the published 207 text may send the caller
+// there, and the reason names neither the address nor either account.
+func TestDSARHandler_Erase_SharedAddressOffersNoErasureByAddress(t *testing.T) {
+	byAddress := regexp.MustCompile(`(?i)\berasure\b[^.]*\baddress\b`)
+
+	compliance.RegisterSubjectEraser(sharingAccount{shared: true})
+	defer compliance.ResetSubjectErasers()
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/gdpr/erase", bytes.NewBufferString(`{"identifier": "own@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	NewDSARHandler(nil, nil, nil).Erase(rr, req)
+	if rr.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp EraseResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, reason := range resp.Errors {
+		if byAddress.MatchString(reason) {
+			t.Errorf("the reason offers an erasure by address: %q", reason)
+		}
+		for _, name := range []string{"@", "6f1c2a0e-4b7d-4c1e-9a3f-2d5e8b7c1a90", "0b9d7e4c-1a2f-4e6b-8c3d-5f7a9e1b2c40"} {
+			if strings.Contains(reason, name) {
+				t.Errorf("the reason names %q: %q", name, reason)
+			}
+		}
+	}
+
+	raw, err := json.Marshal(buildOpenAPIDoc(nil, nil, openAPIOptions{}))
+	if err != nil {
+		t.Fatalf("marshal spec: %v", err)
+	}
+	var doc struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Description string `json:"description"`
+			} `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("decode spec: %v", err)
+	}
+	published := doc.Paths["/api/admin/gdpr/erase"]["post"].Responses["207"].Description
+	if published == "" {
+		t.Fatal("the spec publishes no 207 answer for the erase route")
+	}
+	if byAddress.MatchString(published) {
+		t.Errorf("the published 207 offers an erasure by address: %q", published)
 	}
 }

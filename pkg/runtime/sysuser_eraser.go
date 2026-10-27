@@ -32,6 +32,7 @@ func newSysUserEraser(host core.Host) *sysUserEraser {
 var _ compliance.SubjectEraser = (*sysUserEraser)(nil)
 var _ compliance.AccountEraser = (*sysUserEraser)(nil)
 var _ compliance.SessionEnder = (*sysUserEraser)(nil)
+var _ compliance.SubjectAccountResolver = (*sysUserEraser)(nil)
 
 // ErasesAccount puts this eraser at the end of the fan-out.
 //
@@ -226,6 +227,18 @@ func (e *sysUserEraser) revokeRefreshTokens(ctx context.Context, ids []uuid.UUID
 				"subject_ref", compliance.SubjectRef(identifier), "err", err)
 		}
 	}
+}
+
+// SubjectAccounts names the accounts the erasure resolves the subject's
+// addresses from, the ones EraseSubject anonymizes.
+func (e *sysUserEraser) SubjectAccounts(ctx context.Context, identifier string) ([]compliance.SubjectAccount, error) {
+	return compliance.SubjectAccounts(ctx, e.host, identifier)
+}
+
+// AddressHolders names the accounts of tenant that hold address, so the
+// erasure keeps an address two accounts hold away from both.
+func (e *sysUserEraser) AddressHolders(ctx context.Context, tenant, address string) ([]compliance.SubjectAccount, error) {
+	return compliance.AddressHolders(ctx, e.host, tenant, address)
 }
 
 // EndSessions signs the subject out of every unerased account that belongs
