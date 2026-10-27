@@ -583,6 +583,7 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 	}
 	locked, err := h.mfaLockoutChecker.CheckMFALockout(ctx, u.ID)
 	if err != nil {
+		httpx.LogStoreFailure(r, http.StatusServiceUnavailable, err)
 		return http.StatusServiceUnavailable, "account check unavailable"
 	}
 	if locked {
@@ -599,6 +600,7 @@ func (h *AuthHandler) stepUpCode(r *http.Request, u *domain.User, encSecret, cod
 	// gives back its own.
 	reservation, reserved, err := h.mfaLockoutChecker.ReserveMFAAttempt(ctx, u.ID)
 	if err != nil {
+		httpx.LogStoreFailure(r, http.StatusServiceUnavailable, err)
 		return http.StatusServiceUnavailable, "account check unavailable"
 	}
 	if !reserved {
