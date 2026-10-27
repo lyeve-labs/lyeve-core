@@ -1,7 +1,10 @@
 package compliance
 
 import (
+	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -10,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -276,11 +280,15 @@ func CheckSubjectHolds(ctx context.Context, identifier string) ([]HoldRef, error
 //
 // Erasure exists to remove the subject's data, so naming the subject in the
 // log undoes it where nobody thinks to look, and log retention usually outlives
-// the request that produced it. A truncated digest still correlates every line
-// belonging to one erasure run without recording who it was about.
+// the request that produced it. The reference is an HMAC of the identifier
+// under the install's subject reference key, so it correlates every line about
+// one subject, across replicas and restarts, and a list of candidate addresses
+// matches none of them without that key. Whoever holds the key can still
+// compute the reference for an address they already know.
 func subjectRef(identifier string) string {
-	sum := sha256.Sum256([]byte(identifier))
-	return hex.EncodeToString(sum[:6])
+	mac := hmac.New(sha256.New, *subjectRefKey.Load())
+	mac.Write([]byte(identifier))
+	return hex.EncodeToString(mac.Sum(nil)[:6])
 }
 
 // SubjectRef is the reference an eraser outside this package logs in place of
@@ -288,14 +296,39 @@ func subjectRef(identifier string) string {
 // the fan-out logs, so the lines of one erasure run still correlate.
 func SubjectRef(identifier string) string { return subjectRef(identifier) }
 
+// subjectRefKey keys subjectRef. It starts random for the process, so a
+// reference logged before the runtime installs the install's key, or by a
+// test or a tool that never does, matches nothing outside the process.
+var subjectRefKey atomic.Pointer[[]byte]
+
+func init() {
+	key := make([]byte, sha256.Size)
+	_, _ = rand.Read(key)
+	subjectRefKey.Store(&key)
+}
+
+// SetSubjectRefKey keys every later subject reference to key. The runtime
+// calls it once at boot with a key derived from a secret every replica shares
+// and the install keeps across restarts, so the references agree wherever and
+// whenever a line is written. An empty key is refused, because it is the same
+// on every install.
+func SetSubjectRefKey(key []byte) error {
+	if len(key) == 0 {
+		return fmt.Errorf("subject reference key is empty")
+	}
+	key = bytes.Clone(key)
+	subjectRefKey.Store(&key)
+	return nil
+}
+
 // SubjectDigest is how an audit entry names the subject of an export or an
 // erasure: "sha256:" and the hex SHA-256 of the identifier as the request
 // gave it. The audit log outlives the erasure, so it must not keep the
 // address the erasure removed, but it has to prove the request happened.
 // Anyone holding the identifier can recompute the digest and find the entry,
-// and the log alone does not say who it was about. The whole digest is kept,
-// unlike subjectRef's prefix, because the entry is evidence rather than a
-// correlation key.
+// and the log alone does not say who it was about. The digest is whole and
+// unkeyed, unlike subjectRef, because the entry is evidence that has to be
+// found from the identifier rather than a correlation key.
 func SubjectDigest(identifier string) string {
 	sum := sha256.Sum256([]byte(identifier))
 	return "sha256:" + hex.EncodeToString(sum[:])

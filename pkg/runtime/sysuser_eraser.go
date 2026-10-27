@@ -14,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
 )
 
 // sysUserEraser implements compliance.SubjectEraser for the sys_users table.
@@ -49,6 +50,33 @@ func (e *sysUserEraser) ErasesAccount() {}
 // registration happens beside the eraser itself.
 func registerSysUserEraser(host core.Host) {
 	compliance.RegisterSubjectEraser(newSysUserEraser(host))
+}
+
+// keySubjectRefs keys the reference every log line names a data subject by.
+// The references have to agree on every replica and across restarts for the
+// lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
+// or the JWT_SECRET it falls back to: every replica shares it, and stored
+// ciphertext depends on it, so the install keeps it. A stateless engine may
+// hold neither, and its references then stay keyed to the process. Lives here
+// for the same reason as the registration above.
+//
+// The key comes from the stretched key-encryption key, never from the secret
+// itself. One logged reference and one known address test a guessed secret,
+// and a right guess opens every stored ciphertext, so a guess has to cost what
+// it costs against a ciphertext. The derivation is cached, so the KeyStores
+// built later in the boot reuse it.
+func keySubjectRefs(secret string) error {
+	if secret == "" {
+		return nil
+	}
+	key, err := encryption.SubjectRefKey(secret)
+	if err != nil {
+		return fmt.Errorf("subject reference key: %w", err)
+	}
+	if err := compliance.SetSubjectRefKey(key); err != nil {
+		return fmt.Errorf("subject reference key: %w", err)
+	}
+	return nil
 }
 
 // logSubjectEraserRoster names every plugin the DSAR erasure fan-out will
