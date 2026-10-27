@@ -286,15 +286,23 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// The dummy compare is what closes the timing half. Without it this path
 	// answers in under two milliseconds against roughly fifty for every other
 	// rejection, which is measurable across a network.
+	//
+	// The attempt is counted here, before the password is checked, in the
+	// same step that reads the count, so concurrent wrong passwords cannot all
+	// read a count under the limit and all be checked. A correct password
+	// gives back its own attempt below.
+	var reservation Reservation
 	if h.lockoutChecker != nil {
-		count, lerr := h.lockoutChecker.CountRecentFailures(r.Context(), user.ID, time.Now().Add(-h.LockoutWindow))
+		var reserved bool
+		var lerr error
+		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
 		if lerr != nil {
 			slog.Warn("lockout check failed, failing closed", "err", lerr, "user_id", user.ID)
 			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 			return
 		}
-		if count >= h.MaxFailedAttempts {
+		if !reserved {
 			// The response above is deliberately indistinguishable from a wrong
 			// password, so a locked account is invisible to the caller. It must
 			// not be invisible to the operator as well: the lock lives in memory
@@ -303,7 +311,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			// line names it for the operator and changes no response.
 			slog.WarnContext(failedAttemptContext(r.Context(), user), "login refused: account is locked out",
 				"user_id", user.ID,
-				"failures", count,
+				"failures", reservation.Count,
 				"max_attempts", h.MaxFailedAttempts,
 				"window", h.LockoutWindow,
 				"note", h.lockoutScopeNote())
@@ -331,12 +339,6 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			"credential_supplied", body.Password != "",
 			"hash_present", user.PasswordHash != "",
 			"algo", h.passwordHashAlgo)
-		// Record failed attempt for lockout enforcement.
-		if h.lockoutChecker != nil {
-			if lerr := h.lockoutChecker.RecordFailedAttempt(r.Context(), user.ID); lerr != nil {
-				slog.Warn("failed to record lockout attempt", "err", lerr)
-			}
-		}
 		// Record failed attempt when risk assessor is available.
 		if h.deviceRiskAssessor != nil {
 			fp := collectFingerprint(r)
@@ -347,6 +349,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
+	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
 
 	// Account state enforcement (after password, before session)
 	// Answer exactly as a wrong password does. Collapsing disabled into
@@ -605,8 +608,9 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 	attempt.account, attempt.tenant = userID, claims.TenantID
 
 	// MFA lockout checks
-	// Check per-user lockout first, then challenge-level exhaustion.
-	// Both must pass before TOTP verification proceeds.
+	// Check per-user lockout first, then spend one of the challenge's
+	// attempts. Both must pass before TOTP verification proceeds, and the
+	// user's attempt is counted again, atomically, just before the code check.
 	challengeHash := sha256Hex(body.ChallengeToken)
 	// A limit that cannot be read fails closed with a retryable 503, the way
 	// the password path refuses when its counter is unreachable: letting codes
@@ -622,21 +626,18 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusTooManyRequests, i18n.CodeMFALockedOut, nil)
 		return
 	}
-	exhausted, cerr := h.mfaLockoutChecker.CheckChallengeLimit(r.Context(), challengeHash)
+	// Even a valid code consumes one of the challenge's attempts. The attempt
+	// is spent in the same step that checks the cap, so concurrent requests on
+	// one challenge cannot all find it unspent.
+	spent, cerr := h.mfaLockoutChecker.ReserveChallengeAttempt(r.Context(), challengeHash)
 	if cerr != nil {
 		slog.WarnContext(logCtx, "mfa challenge limit check failed, failing closed", "err", cerr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
 	}
-	if exhausted {
+	if !spent {
 		respondErrCode(w, r, http.StatusTooManyRequests, i18n.CodeMFALockedOut, nil)
 		return
-	}
-	// Record the challenge attempt: even a valid token consumes
-	// one of the allowed attempts. Done before TOTP verification so
-	// the attempt is counted regardless of the outcome.
-	if rerr := h.mfaLockoutChecker.RecordChallengeAttempt(r.Context(), challengeHash); rerr != nil {
-		slog.WarnContext(logCtx, "failed to record mfa challenge attempt", "err", rerr, "user_id", userID)
 	}
 
 	encSecret, _, err := h.mfaStore.GetEnabled(r.Context(), userID)
@@ -656,16 +657,38 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The user's attempt is counted before the code is checked, in the same
+	// step that reads the count, so concurrent wrong codes cannot all read a
+	// count under the cap and all be checked. A code that verifies gives back
+	// its own attempt.
+	reservation, reserved, rerr := h.mfaLockoutChecker.ReserveMFAAttempt(r.Context(), userID)
+	if rerr != nil {
+		slog.WarnContext(logCtx, "mfa lockout check failed, failing closed", "err", rerr, "user_id", userID)
+		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
+		return
+	}
+	if !reserved {
+		respondErrCode(w, r, http.StatusTooManyRequests, i18n.CodeMFALockedOut, nil)
+		return
+	}
+
 	outcome, terr := acceptTOTP(r.Context(), h.mfaStore, userID, plainSecret, body.Code)
 	if terr != nil {
+		h.releaseMFAAttempt(logCtx, userID, reservation)
 		slog.WarnContext(logCtx, "mfa code check failed, failing closed", "err", terr, "user_id", userID)
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 		return
 	}
 	// A replayed code falls through to the recovery code check like any other
-	// code that does not sign in, and fails there as an invalid code.
+	// code that does not sign in, and fails there as an invalid code. A code
+	// shaped like an authenticator code is not sent there: it is already
+	// judged wrong, and a recovery code store outage must not give its
+	// attempt back.
+	if outcome != totpAccepted && totpShaped(body.Code) {
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeMFAInvalidCode, nil)
+		return
+	}
 	if outcome != totpAccepted {
-		// Check backup codes as fallback.
 		codeHash := func(c string) string {
 			h2 := sha256.Sum256([]byte(c))
 			return hex.EncodeToString(h2[:])
@@ -675,20 +698,19 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		// spend that cannot be written refuses the sign-in.
 		found, spendErr := h.mfaStore.ConsumeBackupCode(r.Context(), userID, codeHash)
 		if spendErr != nil {
+			h.releaseMFAAttempt(logCtx, userID, reservation)
 			slog.WarnContext(logCtx, "mfa recovery code spend failed, failing closed", "err", spendErr, "user_id", userID)
 			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeSessionStoreUnavailable, nil)
 			return
 		}
 		if !found {
-			// Record the user-level failure so repeated bad codes
-			// trigger per-user lockout.
-			if rerr := h.mfaLockoutChecker.RecordMFAFailure(r.Context(), userID); rerr != nil {
-				slog.WarnContext(logCtx, "failed to record mfa failure", "err", rerr, "user_id", userID)
-			}
+			// The attempt reserved above stays counted, so repeated bad
+			// codes trigger per-user lockout.
 			respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeMFAInvalidCode, nil)
 			return
 		}
 	}
+	h.releaseMFAAttempt(logCtx, userID, reservation)
 
 	// The challenge is spent before anything is signed, by a write only one
 	// request wins. A completion that loses it, or cannot write it, is refused.
