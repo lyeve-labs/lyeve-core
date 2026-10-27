@@ -192,8 +192,14 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 		httpx.ErrorReq(w, r, httpStatus(err), "failed to get content for restore")
 		return
 	}
+	// A revision can predate the content type's current rules, so it is
+	// checked as an update of every field it holds before anything is written.
+	restored := withoutStatus(rev.Data)
+	if !h.validatePatch(w, r, schemaName, restored, existing.Data) {
+		return
+	}
 	h.snapshot(r, schemaName, id, existing.Data)
-	item, err := h.store.Update(r.Context(), schemaName, id, withoutStatus(rev.Data), existing.UpdatedAt)
+	item, err := h.store.Update(r.Context(), schemaName, id, restored, existing.UpdatedAt)
 	if err != nil {
 		if !relationRefused(w, r, err) {
 			httpx.ErrorReq(w, r, httpStatus(err), "failed to restore revision")
