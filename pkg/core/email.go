@@ -41,16 +41,20 @@ func NormalizeEmail(email string) string {
 // because what surrounds an address is the caller's to decide. Lowering is
 // all it folds: Unicode case folding would also take ſam@ for sam@, a
 // different address, and accents and ß stay significant.
+//
+// The form is applied again after lowering, because lowering a capital can
+// leave a base letter and a mark that compose: H and a macron below lower to
+// h and the mark, which is one precomposed letter in the form.
 func FoldAddress(address string) string {
-	return strings.ToLower(norm.NFC.String(address))
+	return norm.NFC.String(strings.ToLower(norm.NFC.String(address)))
 }
 
-// ValidEmail reports whether s is an email address, by the rule a schema field
-// of type email applies to what is written to it: net/mail parses it, and it
-// holds an at sign and a dot.
+// ValidEmail reports whether s is one plain address: net/mail parses it, and
+// the address it reads is s itself. That refuses a display name or angle
+// brackets, a comment, a space, a quoted local part, and a dot that leads,
+// ends or doubles in either part. The domain needs no dot, so admin@localhost
+// on a development install is an address.
 func ValidEmail(s string) bool {
-	if _, err := mail.ParseAddress(s); err != nil {
-		return false
-	}
-	return strings.Contains(s, "@") && strings.Contains(s, ".")
+	a, err := mail.ParseAddress(s)
+	return err == nil && a.Name == "" && a.Address == s
 }

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strings"
 	"time"
 
@@ -22,13 +21,12 @@ type UserStore struct{ pool DB }
 func NewUserStore(pool DB) *UserStore { return &UserStore{pool: pool} }
 
 // accountAddress returns the form an account stores address in, or an error
-// wrapping domain.ErrValidation when it is not one bare address. A display
+// wrapping domain.ErrValidation when it is not one plain address. A display
 // name or angle brackets would be stored as part of the address, and no
 // sign-in or subject request would ever name it that way.
 func accountAddress(address string) (string, error) {
 	address = core.NormalizeEmail(address)
-	parsed, err := mail.ParseAddress(address)
-	if err != nil || parsed.Name != "" || parsed.Address != address || !core.ValidEmail(address) {
+	if !core.ValidEmail(address) {
 		return "", fmt.Errorf("not an email address: %w", domain.ErrValidation)
 	}
 	return address, nil

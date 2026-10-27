@@ -27,8 +27,20 @@ func TestNormalizeEmail_IsStable(t *testing.T) {
 		"K@example.com",
 		"STRAẞE@example.com",
 		"zoë-josé@example.com",
+		"H\u0331@example.com",
 	} {
 		once := NormalizeEmail(spelling)
 		assert.Equal(t, once, NormalizeEmail(once), "%q", spelling)
+	}
+}
+
+func TestValidEmail_OnePlainAddress(t *testing.T) {
+	for _, ok := range []string{"person@example.com", "jo.hn@example.com", "admin@localhost", "jos\u00e9@example.com"} {
+		assert.True(t, ValidEmail(ok), "%q", ok)
+	}
+	for _, bad := range []string{"", "person", "@example.com", "Person <person@example.com>", "<person@example.com>",
+		"person@example.com (comment)", "per son@example.com", `"person"@example.com`,
+		".person@example.com", "person.@example.com", "per..son@example.com", "person@.example.com", "person@example.com.", "person@example..com"} {
+		assert.False(t, ValidEmail(bad), "%q", bad)
 	}
 }
