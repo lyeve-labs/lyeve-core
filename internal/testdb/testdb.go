@@ -110,22 +110,32 @@ var pgShared struct {
 	err        error
 }
 
+// postgresContainerOptions are the options the shared PostgreSQL container
+// starts with.
+func postgresContainerOptions() []testcontainers.ContainerCustomizer {
+	return []testcontainers.ContainerCustomizer{
+		postgres.WithDatabase("lyeve_test"),
+		postgres.WithUsername("lyeve"),
+		postgres.WithPassword("secret"),
+		// Each test database is a copy of the template that is dropped when
+		// its test ends, so the data directory lives in memory and the copies
+		// never reach the disk.
+		testcontainers.WithTmpfs(map[string]string{"/var/lib/postgresql/data": "rw"}),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60 * time.Second),
+		),
+	}
+}
+
 func ensurePostgres(t *testing.T) {
 	t.Helper()
 	testdialect.Require(t, "postgres")
 	pgShared.once.Do(func() {
 		ctx := context.Background()
 		pgShared.ctr, pgShared.err = postgres.Run(ctx,
-			containerImage("POSTGRES", "postgres:16-alpine"),
-			postgres.WithDatabase("lyeve_test"),
-			postgres.WithUsername("lyeve"),
-			postgres.WithPassword("secret"),
-			testcontainers.WithWaitStrategy(
-				wait.ForLog("database system is ready to accept connections").
-					WithOccurrence(2).
-					WithStartupTimeout(60*time.Second),
-			),
-		)
+			containerImage("POSTGRES", "postgres:16-alpine"), postgresContainerOptions()...)
 		if pgShared.err != nil {
 			return
 		}
@@ -511,6 +521,10 @@ func mssqlContainerOptions() []testcontainers.ContainerCustomizer {
 	return []testcontainers.ContainerCustomizer{
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng@Passw0rd"),
+		// Every test database is created and dropped within its test, so the
+		// data directory lives in memory. SQL Server opens its files with
+		// O_DIRECT, which tmpfs accepts.
+		testcontainers.WithTmpfs(map[string]string{"/var/opt/mssql": "rw"}),
 		testcontainers.WithWaitStrategyAndDeadline(mssqlStartupWait,
 			wait.ForListeningPort("1433/tcp").WithStartupTimeout(mssqlStartupWait),
 			wait.ForLog("Recovery is complete.").WithStartupTimeout(mssqlStartupWait),
