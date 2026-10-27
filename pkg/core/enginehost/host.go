@@ -90,6 +90,11 @@ type engineHost struct {
 	// plugins serve requests. Until then a plugin cannot complete a challenge.
 	mfaChallenges atomic.Pointer[mfaChallengeBox]
 
+	// Wired by SetStepUpChecker (the admin router, when it builds the token
+	// routes). Atomic for the same reason as mfaChallenges. Until then a
+	// plugin's step-up answers as an outage.
+	stepUps atomic.Pointer[stepUpBox]
+
 	// Wired by RegisterEmailSender (the registering plugin's Start). Nil-safe:
 	// EmailSender() returns nil when no plugin registered one.
 	emailSender core.EmailSender
@@ -217,6 +222,7 @@ var (
 	_ core.FlowInvokerProvider              = (*engineHost)(nil)
 	_ core.FlowInvokerRegistrar             = (*engineHost)(nil)
 	_ core.PermissionCheckerProvider        = (*engineHost)(nil)
+	_ core.StepUpChecker                    = (*engineHost)(nil)
 	_ core.PermissionCheckerRegistrar       = (*engineHost)(nil)
 	_ core.ContentLocalizerProvider         = (*engineHost)(nil)
 	_ core.ContentLocalizerRegistrar        = (*engineHost)(nil)
