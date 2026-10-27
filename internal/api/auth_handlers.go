@@ -119,6 +119,10 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusConflict, i18n.CodeSetupAlreadyComplete, nil)
 		return
 	}
+	if errors.Is(err, domain.ErrValidation) {
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationEmail, map[string]any{"field": "email"})
+		return
+	}
 	if err != nil {
 		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeUserCreateFailed, nil)
 		return

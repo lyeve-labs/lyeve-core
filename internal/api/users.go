@@ -138,6 +138,10 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !admitAdminSeat(w, r, seatErr, h.ceilingURL) {
 		return
 	}
+	if errors.Is(err, domain.ErrValidation) {
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationEmail, map[string]any{"field": "email"})
+		return
+	}
 	if err != nil {
 		// Detect unique-constraint violations across all dialects.
 		errMsg := strings.ToLower(err.Error())

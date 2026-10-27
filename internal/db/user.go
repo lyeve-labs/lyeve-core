@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -19,6 +20,19 @@ type UserStore struct{ pool DB }
 
 // NewUserStore constructs a UserStore backed by the given DB pool.
 func NewUserStore(pool DB) *UserStore { return &UserStore{pool: pool} }
+
+// accountAddress returns the form an account stores address in, or an error
+// wrapping domain.ErrValidation when it is not one bare address. A display
+// name or angle brackets would be stored as part of the address, and no
+// sign-in or subject request would ever name it that way.
+func accountAddress(address string) (string, error) {
+	address = core.NormalizeEmail(address)
+	parsed, err := mail.ParseAddress(address)
+	if err != nil || parsed.Name != "" || parsed.Address != address || !core.ValidEmail(address) {
+		return "", fmt.Errorf("not an email address: %w", domain.ErrValidation)
+	}
+	return address, nil
+}
 
 // Count returns the total number of users in the database.
 func (s *UserStore) Count(ctx context.Context) (int64, error) {
@@ -46,7 +60,10 @@ func (s *UserStore) Count(ctx context.Context) (int64, error) {
 // accounts for one person, and which one a sign-in reached would depend on the
 // door.
 func (s *UserStore) Create(ctx context.Context, email, passwordHash string, roles []string, tenantID string) (*domain.User, error) {
-	email = core.NormalizeEmail(email)
+	email, err := accountAddress(email)
+	if err != nil {
+		return nil, fmt.Errorf("create user: %w", err)
+	}
 	if _, err := s.GetByTenantProviderEmail(ctx, tenantID, email); err == nil {
 		return nil, fmt.Errorf("create user: a tenant-local account holds the address: %w", domain.ErrConflict)
 	} else if !errors.Is(err, domain.ErrNotFound) {
@@ -81,7 +98,10 @@ var ErrSetupComplete = fmt.Errorf("first admin already exists: %w", domain.ErrCo
 // and refuses with ErrSetupComplete. A locked known row serializes the same
 // way on all three dialects and at every isolation level the engine runs.
 func (s *UserStore) CreateFirstAdmin(ctx context.Context, email, passwordHash, tenantID string) (*domain.User, error) {
-	email = core.NormalizeEmail(email)
+	email, err := accountAddress(email)
+	if err != nil {
+		return nil, fmt.Errorf("create first admin: %w", err)
+	}
 	engine := s.pool.Engine()
 	rolesArg, err := encodeStringArray(engine, []string{"super_admin"})
 	if err != nil {
@@ -233,9 +253,9 @@ func (s *UserStore) GetByTenantAddress(ctx context.Context, tenantID, address st
 // back and returns it with created false. The savepoint keeps a serialized
 // write's transaction usable for that read on Postgres.
 func (s *UserStore) CreateTenantLocal(ctx context.Context, tenantID, address, passwordHash string, roles []string, seen bool) (u *domain.User, created bool, err error) {
-	address = core.NormalizeEmail(address)
-	if address == "" {
-		return nil, false, fmt.Errorf("create tenant-local user: no address: %w", domain.ErrValidation)
+	address, err = accountAddress(address)
+	if err != nil {
+		return nil, false, fmt.Errorf("create tenant-local user: %w", err)
 	}
 	if roles == nil {
 		roles = []string{"editor"}
@@ -506,9 +526,11 @@ const providerSeenRefresh = time.Hour
 
 // createExternalUser inserts a trusted issuer's account on first sight.
 func (s *UserStore) createExternalUser(ctx context.Context, id uuid.UUID, providerEmail, passwordHash string, roles []string, tenantID string) (*domain.User, error) {
-	providerEmail = core.NormalizeEmail(providerEmail)
+	// An asserted value that is not an address is kept as none, the way a
+	// machine token without one signs in under the key.
+	providerEmail, invalid := accountAddress(providerEmail)
 	var providerArg any
-	if providerEmail != "" {
+	if invalid == nil {
 		// Read whatever the outcome, so a tenant that holds the address and
 		// one that does not run the same statements before the insert.
 		if _, err := s.GetByTenantAddress(ctx, tenantID, providerEmail); err == nil {
