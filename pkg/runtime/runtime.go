@@ -960,8 +960,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}
 
 	// Custom schema validators
-	// A name no plugin claims falls back to the pattern interpreter, so this
-	// is logged only when a plugin actually gave a name its own meaning.
+	// A name no plugin claims is left to the schema engine, so this is
+	// logged only when a plugin actually gave a name its own meaning.
 	if n := activator.RegisterCustomValidators(); n > 0 {
 		logger.Info("custom schema validators registered from plugins", "validators", n)
 	}
