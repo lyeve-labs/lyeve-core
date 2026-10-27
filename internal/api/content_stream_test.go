@@ -370,7 +370,7 @@ func TestContentHandler_Stream_UnreadableSchemaWithholdsChanges(t *testing.T) {
 		// The writer reads the schema from the store itself, so only the
 		// stream's lookup fails.
 		writer := fx
-		writer.content = &ContentHandler{store: fx.content.store, schemas: fx.content.schemas, hooks: fx.content.hooks, perms: fx.content.perms}
+		writer.content = &ContentHandler{store: fx.content.store, schemas: fx.content.schemas, rules: fx.content.rules, hooks: fx.content.hooks, perms: fx.content.perms}
 		src := &failingSchemas{SchemaSource: fx.content.schemas}
 		fx.content.schemas = src
 		viewer := openStreamAs(t, fx.content, asReader(fx.ctx), "posts")

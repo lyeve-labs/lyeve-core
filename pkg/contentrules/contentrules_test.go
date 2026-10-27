@@ -2,6 +2,7 @@ package contentrules
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,95 +12,112 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
-// articleSchema has a required field with a default, a required field
-// without one, an enum, a bounded number and a cross-field rule.
-func articleSchema() *core.Schema {
-	return &core.Schema{
-		Name: "articles",
-		Fields: []core.SchemaField{
-			{Name: "id", FieldType: "uid", System: true},
-			{Name: "title", FieldType: "text", Required: true},
-			{Name: "status", FieldType: "text", Required: true, Default: "draft",
-				Validation: []core.ValidationRule{{Rule: "enum", Params: map[string]any{"values": []any{"draft", "live"}}}}},
-			{Name: "rating", FieldType: "number", Validation: []core.ValidationRule{{Rule: "max", Params: map[string]any{"max": 5}}}},
-			{Name: "starts", FieldType: "number"},
-			{Name: "ends", FieldType: "number"},
-		},
-		CrossFieldValidation: []core.CrossFieldRule{{Rule: "lt_field", Targets: []string{"starts", "ends"}}},
-	}
+// cannedRules answers every write with the same failures, and records what it
+// was asked, so a test reads what this package does with an engine's answer.
+type cannedRules struct {
+	fill    map[string]any
+	errs    []core.SchemaValidationError
+	err     error
+	patched map[string]any
 }
 
-// failures reduces each failure to field and rule, which is what a test can
-// hold steady across message wording.
-func failures(errs []core.SchemaValidationError) [][2]string {
-	out := make([][2]string, 0, len(errs))
-	for _, e := range errs {
-		out = append(out, [2]string{e.Field, e.Rule})
+func (c *cannedRules) PrepareCreate(_ context.Context, _ *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	for k, v := range c.fill {
+		data[k] = v
 	}
-	return out
+	return data, c.errs, c.err
 }
 
-func TestPrepareCreate_FillsDefaultsBeforeValidating(t *testing.T) {
-	data, errs := PrepareCreate(context.Background(), articleSchema(), map[string]any{"title": "Hello"})
-	assert.Empty(t, errs, "a required field with a default is satisfied by leaving it out")
-	assert.Equal(t, "draft", data["status"])
+func (c *cannedRules) ValidatePatch(_ context.Context, _ *core.Schema, patch, _ map[string]any) ([]core.SchemaValidationError, error) {
+	c.patched = patch
+	return c.errs, c.err
 }
 
-func TestPrepareCreate_RefusesWhatTheContentAPIRefuses(t *testing.T) {
-	cases := []struct {
-		name string
-		data map[string]any
-		want [][2]string
-	}{
-		{"required field missing", map[string]any{}, [][2]string{{"title", "required"}}},
-		{"explicit null is kept, not defaulted", map[string]any{"title": "x", "status": nil}, [][2]string{{"status", "required"}}},
-		{"enum", map[string]any{"title": "x", "status": "gone"}, [][2]string{{"status", "enum"}}},
-		{"max", map[string]any{"title": "x", "rating": float64(9)}, [][2]string{{"rating", "max"}}},
-		{"field type", map[string]any{"title": true}, [][2]string{{"title", "field_type"}}},
-		{"cross-field", map[string]any{"title": "x", "starts": float64(5), "ends": float64(1)}, [][2]string{{"starts,ends", "less_than_field"}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, errs := PrepareCreate(context.Background(), articleSchema(), tc.data)
-			assert.Equal(t, tc.want, failures(errs))
-			for _, e := range errs {
-				assert.NotEmpty(t, e.Message)
-				assert.NotEmpty(t, e.Code)
-			}
-		})
-	}
+// rulesHost is a host whose registered engine supplies rules.
+type rulesHost struct {
+	core.Host
+	rules core.ContentRules
 }
 
-func TestValidatePatch_ChecksOnlyWhatThePatchCarries(t *testing.T) {
-	// The stored row breaks two rules already. A patch that touches neither
-	// field is not refused for them.
-	current := map[string]any{"title": "", "rating": float64(9), "starts": float64(1), "ends": float64(3)}
-	assert.Empty(t, ValidatePatch(context.Background(), articleSchema(), map[string]any{"status": "live"}, current))
+func (h rulesHost) ContentRules() core.ContentRules { return h.rules }
 
-	cases := []struct {
-		name  string
-		patch map[string]any
-		want  [][2]string
-	}{
-		{"null on a required field", map[string]any{"title": nil}, [][2]string{{"title", "required"}}},
-		{"null on an optional field", map[string]any{"rating": nil}, [][2]string{}},
-		{"a value the rule refuses", map[string]any{"status": "gone"}, [][2]string{{"status", "enum"}}},
-		{"one side of a cross-field rule against the stored other", map[string]any{"starts": float64(7)}, [][2]string{{"starts,ends", "less_than_field"}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, failures(ValidatePatch(context.Background(), articleSchema(), tc.patch, current)))
-		})
-	}
+var required = []core.SchemaValidationError{{Field: "title", Code: "VALIDATION_REQUIRED", Rule: "required"}}
+
+func TestPrepareCreate_WritesWhatTheEngineReturns(t *testing.T) {
+	host := rulesHost{rules: &cannedRules{fill: map[string]any{"status": "draft"}}}
+	data, errs, err := PrepareCreate(context.Background(), host, &core.Schema{}, map[string]any{"title": "Hello"})
+	require.NoError(t, err)
+	assert.Empty(t, errs)
+	assert.Equal(t, map[string]any{"title": "Hello", "status": "draft"}, data)
 }
 
 func TestPrepareCreate_MessageInTheRequestLocale(t *testing.T) {
-	_, en := PrepareCreate(context.Background(), articleSchema(), map[string]any{})
+	host := rulesHost{rules: &cannedRules{errs: required}}
+
+	_, en, err := PrepareCreate(context.Background(), host, &core.Schema{}, map[string]any{})
+	require.NoError(t, err)
 	require.Len(t, en, 1)
 	assert.Equal(t, "The field title is required.", en[0].Message)
 	assert.Equal(t, "VALIDATION_REQUIRED", en[0].Code)
+	assert.Equal(t, "required", en[0].Rule)
 
-	_, fr := PrepareCreate(i18n.WithLocale(context.Background(), i18n.LocaleFR), articleSchema(), map[string]any{})
+	_, fr, err := PrepareCreate(i18n.WithLocale(context.Background(), i18n.LocaleFR), host, &core.Schema{}, map[string]any{})
+	require.NoError(t, err)
 	require.Len(t, fr, 1)
 	assert.Equal(t, "Le champ title est obligatoire.", fr[0].Message)
+}
+
+func TestValidatePatch_LocalizesTheEnginesFailures(t *testing.T) {
+	rules := &cannedRules{errs: []core.SchemaValidationError{{
+		Field: "rating", Code: "SCHEMA_VALIDATION_MAX", Rule: "max",
+		Params: map[string]any{"max": "5", "value": "9"},
+	}}}
+	patch := map[string]any{"rating": float64(9)}
+	errs, err := ValidatePatch(context.Background(), rulesHost{rules: rules}, &core.Schema{}, patch, nil)
+	require.NoError(t, err)
+	require.Len(t, errs, 1)
+	assert.Equal(t, "The field rating must not exceed 5.", errs[0].Message)
+	assert.Equal(t, patch, rules.patched)
+}
+
+// A failure the engine leaves without a code still reaches the caller as a
+// sentence rather than an empty message.
+func TestValidatePatch_FailureWithNoCodeReadsAsUnknownField(t *testing.T) {
+	host := rulesHost{rules: &cannedRules{errs: []core.SchemaValidationError{{Field: "ghost", Rule: "custom"}}}}
+	errs, err := ValidatePatch(context.Background(), host, &core.Schema{}, map[string]any{"ghost": 1}, nil)
+	require.NoError(t, err)
+	require.Len(t, errs, 1)
+	assert.Equal(t, "VALIDATION_UNKNOWN_FIELD", errs[0].Code)
+	assert.NotEmpty(t, errs[0].Message)
+}
+
+// With nothing to say whether a write is valid, the write is refused. It is
+// never handed back as valid.
+func TestContentRules_RefuseWithoutAnEngine(t *testing.T) {
+	hosts := map[string]core.Host{
+		"host without the role": rulesHost{}.Host,
+		"role answers nil":      rulesHost{},
+		"absent rules":          rulesHost{rules: core.AbsentContentRules{}},
+	}
+	for name, host := range hosts {
+		t.Run(name, func(t *testing.T) {
+			data, errs, err := PrepareCreate(context.Background(), host, &core.Schema{}, map[string]any{"title": "x"})
+			assert.ErrorIs(t, err, core.ErrNoContentRules)
+			assert.ErrorIs(t, err, core.ErrNoSchemaEngine)
+			assert.Nil(t, data)
+			assert.Nil(t, errs)
+
+			errs, err = ValidatePatch(context.Background(), host, &core.Schema{}, map[string]any{"title": "x"}, nil)
+			assert.ErrorIs(t, err, core.ErrNoContentRules)
+			assert.Nil(t, errs)
+		})
+	}
+}
+
+func TestPrepareCreate_EngineErrorRefusesTheWrite(t *testing.T) {
+	boom := errors.New("engine unavailable")
+	data, errs, err := PrepareCreate(context.Background(), rulesHost{rules: &cannedRules{err: boom}}, &core.Schema{}, map[string]any{})
+	assert.ErrorIs(t, err, boom)
+	assert.Nil(t, data)
+	assert.Nil(t, errs)
 }
