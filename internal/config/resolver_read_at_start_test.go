@@ -14,57 +14,98 @@ type rowsStore []db.PluginConfigRow
 
 func (s rowsStore) ListAll(context.Context) ([]db.PluginConfigRow, error) { return s, nil }
 
-// Load reads the token lifetime before the stored layer is installed, so a
-// value saved for it later never reaches the running engine. The resolver
-// must say so instead of offering the key as editable.
-func TestResolver_KeyReadOnlyAtStartIsNotEditable(t *testing.T) {
+func storeSettings(t *testing.T, values map[string]any) {
+	t.Helper()
+	_, err := RefreshAdminLayer(context.Background(), rowsStore{{PluginName: CoreSettingsOwner, Config: values}})
+	require.NoError(t, err)
+}
+
+// Load reads the token lifetime before the stored layer is installed. A value
+// saved for it stays editable and is reported as waiting for the next start.
+func TestResolver_KeyReadOnlyAtStartIsFlaggedAndStaysEditable(t *testing.T) {
 	r := NewResolver(nil)
 	prev := SetActiveResolver(r)
 	t.Cleanup(func() { SetActiveResolver(prev) })
 
 	r.Get("JWT_EXPIRY_SECS")
-	_, err := RefreshAdminLayer(context.Background(), rowsStore{
-		{PluginName: CoreSettingsOwner, Config: map[string]any{"JWT_EXPIRY_SECS": "1800"}},
-	})
-	require.NoError(t, err)
+	storeSettings(t, map[string]any{"JWT_EXPIRY_SECS": "1800"})
 
 	res := r.Resolve("JWT_EXPIRY_SECS")
-	assert.False(t, res.Overridable, "a save would not change what the engine uses")
+	assert.True(t, res.Overridable)
 	assert.True(t, res.ReadAtStart)
-	assert.Equal(t, SourceNone, res.From, "the stored value is not the one in effect")
-	assert.Equal(t, "", res.Value)
+	assert.Equal(t, SourceAdmin, res.From)
+	assert.Equal(t, "1800", res.Value)
 }
 
-func TestResolver_KeyReadAgainAfterTheStoredLayerStaysEditable(t *testing.T) {
+func TestResolver_KeyReadAgainAfterTheStoredLayerIsNotFlagged(t *testing.T) {
 	r := NewResolver(nil)
 	prev := SetActiveResolver(r)
 	t.Cleanup(func() { SetActiveResolver(prev) })
 
 	r.Get("EXAMPLE_HOST")
-	_, err := RefreshAdminLayer(context.Background(), rowsStore{
-		{PluginName: CoreSettingsOwner, Config: map[string]any{"EXAMPLE_HOST": "mail.example"}},
-	})
-	require.NoError(t, err)
+	storeSettings(t, map[string]any{"EXAMPLE_HOST": "mail.example"})
 
 	assert.Equal(t, "mail.example", r.Get("EXAMPLE_HOST"))
-	res := r.Resolve("EXAMPLE_HOST")
-	assert.True(t, res.Overridable)
-	assert.False(t, res.ReadAtStart)
+	assert.False(t, r.Resolve("EXAMPLE_HOST").ReadAtStart)
 }
 
-// A deployment that opened the key with LYEVE_OVERRIDABLE still cannot change
-// it from the admin layer once the engine has read it at start.
-func TestResolver_KeyReadAtStartIgnoresTheEnvironmentOptIn(t *testing.T) {
-	t.Setenv(OverridableEnvKey, "JWT_EXPIRY_SECS")
+// bootConfig loads the engine's settings from the environment alone, the way
+// boot does before the database is open.
+func bootConfig(t *testing.T) *Config {
+	t.Helper()
+	for k, v := range map[string]string{
+		"APP_ENV":        "development",
+		"DATABASE_URL":   "postgres://boot@localhost/boot",
+		"JWT_SECRET":     "stored-settings-jwt-secret-0123456789abcdef",
+		"ENCRYPTION_KEY": "stored-settings-encryption-key-0123456789ab",
+		"LYEVE_CONFIG":   t.TempDir(),
+	} {
+		t.Setenv(k, v)
+	}
+	prev := ActiveResolver()
+	t.Cleanup(func() { SetActiveResolver(prev) })
+	cfg, err := Load()
+	require.NoError(t, err)
+	return cfg
+}
+
+func TestApplyStoredSettings_StoredValueTakesEffectAtStart(t *testing.T) {
+	cfg := bootConfig(t)
+	require.Equal(t, int64(defaultJWTExpirySecs), cfg.JWTExpirySecs)
+
+	storeSettings(t, map[string]any{
+		"JWT_EXPIRY_SECS":          "1800",
+		"DATABASE_MAX_CONNECTIONS": "3",
+	})
+	changed, err := ApplyStoredSettings(cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, int64(1800), cfg.JWTExpirySecs)
+	assert.Equal(t, int32(defaultMaxConns), cfg.DatabaseMaxConns, "the pool was opened before the stored layer, so its size keeps the boot value")
+	assert.Equal(t, []string{"JWTExpirySecs"}, changed)
+	assert.True(t, ActiveResolver().Resolve("JWT_EXPIRY_SECS").ReadAtStart,
+		"the second read is part of starting, so a later save still waits for the next start")
+}
+
+func TestApplyStoredSettings_EnvironmentStillWins(t *testing.T) {
 	t.Setenv("JWT_EXPIRY_SECS", "600")
-	r := NewResolver(nil)
+	cfg := bootConfig(t)
 
-	r.Get("JWT_EXPIRY_SECS")
-	r.SetAdminLayer(map[string]string{"JWT_EXPIRY_SECS": "1800"})
+	storeSettings(t, map[string]any{"JWT_EXPIRY_SECS": "1800"})
+	changed, err := ApplyStoredSettings(cfg)
+	require.NoError(t, err)
 
-	res := r.Resolve("JWT_EXPIRY_SECS")
-	assert.Equal(t, "600", res.Value)
-	assert.Equal(t, SourceEnv, res.From)
-	assert.False(t, res.Overridable)
-	assert.True(t, res.ReadAtStart)
+	assert.Equal(t, int64(600), cfg.JWTExpirySecs)
+	assert.Empty(t, changed)
+}
+
+func TestApplyStoredSettings_InvalidStoredValueKeepsTheBootValues(t *testing.T) {
+	cfg := bootConfig(t)
+
+	storeSettings(t, map[string]any{"JWT_EXPIRY_SECS": "a week"})
+	changed, err := ApplyStoredSettings(cfg)
+	require.Error(t, err)
+
+	assert.Equal(t, int64(defaultJWTExpirySecs), cfg.JWTExpirySecs)
+	assert.Empty(t, changed)
 }

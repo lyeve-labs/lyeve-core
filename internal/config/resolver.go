@@ -96,9 +96,8 @@ type Resolution struct {
 	// (core.OperatorOnlyKeys), whatever the other layers hold.
 	OperatorOnly bool
 
-	// ReadAtStart marks a key the engine read before the admin layer was
-	// installed and has not read since. Its value was fixed at boot, so a
-	// stored one would never be used, even after a restart.
+	// ReadAtStart marks a key the engine reads only while it starts. A value
+	// stored for it applies at the next start rather than at once.
 	ReadAtStart bool
 }
 
@@ -129,12 +128,14 @@ type Resolver struct {
 	mu   sync.RWMutex
 	read map[string]struct{}
 
-	// atStart holds the keys read before the admin layer was offered, and
-	// readLive those read after it. A key only in atStart was consumed at boot,
-	// when no stored value could reach it.
-	atStart  map[string]struct{}
-	readLive map[string]struct{}
-	offered  atomic.Bool
+	// atStart holds the keys read before the admin layer was offered or while
+	// boot re-reads its settings, and readLive those read after. A key only in
+	// atStart is consumed at boot, so a stored value for it waits for the next
+	// start.
+	atStart   map[string]struct{}
+	readLive  map[string]struct{}
+	offered   atomic.Bool
+	rereading atomic.Bool
 }
 
 // NewResolver builds a resolver over a loaded file layer. Pass nil for an
@@ -199,6 +200,7 @@ func (r *Resolver) Resolve(key string) Resolution {
 	if name == "" {
 		return res
 	}
+	res.ReadAtStart = r.readOnlyAtStart(name)
 
 	fv, inFile := r.fileValue(name)
 
@@ -223,20 +225,6 @@ func (r *Resolver) Resolve(key string) Resolution {
 	// is LYEVE_OVERRIDABLE naming it.
 	if core.IsOperatorOnlyKey(name) {
 		res.OperatorOnly = true
-		switch {
-		case inEnv:
-			res.Value, res.From = envValue, SourceEnv
-		case inFile:
-			res.Value, res.From = fv.Value, SourceFile
-			res.Origin = fv.Origin
-		}
-		return res
-	}
-
-	// A key read only at boot keeps the value it had then. The admin layer did
-	// not exist yet, so a stored value would read as applied and change nothing.
-	if r.readOnlyAtStart(name) {
-		res.ReadAtStart = true
 		switch {
 		case inEnv:
 			res.Value, res.From = envValue, SourceEnv
@@ -302,12 +290,11 @@ func (r *Resolver) Lookup(key string) (string, bool) {
 
 // Get returns the effective value, or "" when no layer supplies the key.
 func (r *Resolver) Get(key string) string {
-	// Recorded before resolving, so a read after the admin layer is installed
-	// already counts as a live one and sees the stored value.
-	if name := normalizeKey(key); name != "" {
-		r.markRead(name)
+	res := r.Resolve(key)
+	if res.Key != "" {
+		r.markRead(res.Key)
 	}
-	return r.Resolve(key).Value
+	return res.Value
 }
 
 // markRead adds a key to the set this build treats as configuration. A nil
@@ -321,7 +308,7 @@ func (r *Resolver) markRead(name string) {
 		r.read = make(map[string]struct{})
 	}
 	r.read[name] = struct{}{}
-	if r.offered.Load() {
+	if r.offered.Load() && !r.rereading.Load() {
 		if r.readLive == nil {
 			r.readLive = make(map[string]struct{})
 		}
@@ -344,8 +331,8 @@ func (r *Resolver) offerAdminLayer() {
 	}
 }
 
-// readOnlyAtStart reports whether the engine read the key before the admin
-// layer was offered and never since.
+// readOnlyAtStart reports whether the engine read the key only while it
+// started.
 func (r *Resolver) readOnlyAtStart(name string) bool {
 	if r == nil {
 		return false

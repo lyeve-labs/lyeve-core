@@ -40,8 +40,8 @@ type configSettingResponse struct {
 	// write-only field rather than an empty one.
 	Secret bool `json:"secret,omitempty"`
 
-	// ReadAtStart marks a setting the engine reads once at boot, from the
-	// environment or the configuration file only.
+	// ReadAtStart marks a setting the engine reads only while it starts, so a
+	// value saved for it applies at the next start.
 	ReadAtStart bool `json:"read_at_start,omitempty"`
 
 	// Description says what the setting does, and Default what applies when
@@ -202,9 +202,6 @@ type configSaveResponse struct {
 func overrideRefusalReason(res config.Resolution) string {
 	if res.OperatorOnly {
 		return "set only by the operator, through an environment variable or the configuration file"
-	}
-	if res.ReadAtStart {
-		return "read only when the engine starts, so set it in an environment variable or the configuration file and restart"
 	}
 	if res.From == config.SourceEnv {
 		// Name the way out: the opt-in and where it is declared.

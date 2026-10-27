@@ -619,6 +619,13 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		loadPluginConfigOverlay(ctx,
 			db.NewPluginConfigStore(pool).WithSealer(db.NewConfigSealer(cfg.EncryptionKey)), logger)
 	}
+	// The settings Load read before the database was open take their stored
+	// values here, before the routers and middleware are built from them.
+	if changed, err := config.ApplyStoredSettings(cfg); err != nil {
+		logger.Error("stored settings not applied, starting on the environment and configuration file values", "err", err)
+	} else if len(changed) > 0 {
+		logger.Info("stored settings applied at start", "fields", changed)
+	}
 
 	// The account record is engine-owned, so no plugin exporter covers it and a
 	// DSAR bundle would report the subject as unknown while sys_users still
