@@ -95,6 +95,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
 	err503Locale := map[string]any{"description": "The translations could not be read"}
+	err422 := map[string]any{"description": "Validation failed"}
+	err503Rules := map[string]any{"description": "The content rules could not be checked, so nothing was stored"}
 
 	const base = "/api/v1/content/{schema}"
 	paths[base] = openAPIPath{
@@ -110,7 +112,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
 			Parameters:  []openAPIParameter{schema},
 			RequestBody: body,
-			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "422": map[string]any{"description": "Hook validation failed"}},
+			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "422": err422, "503": err503Rules},
 		}, writers...),
 	}
 	paths[base+"/cursor"] = openAPIPath{
@@ -141,7 +143,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Tags: []string{tag}, Summary: "Create records in bulk", Security: bearer,
 			Parameters:  []openAPIParameter{schema},
 			RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "array", "items": map[string]any{"type": "object"}}}}},
-			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "422": map[string]any{"description": "Validation failed"}},
+			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "422": err422, "503": err503Rules},
 		}, writers...),
 	}
 	paths[base+"/{id}"] = openAPIPath{
@@ -153,7 +155,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 		"put": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Update a record", Security: bearer,
 			Parameters: []openAPIParameter{schema, id}, RequestBody: body,
-			Responses: map[string]any{"200": ok200, "401": err401, "404": err404},
+			Responses: map[string]any{"200": ok200, "401": err401, "404": err404, "422": err422, "503": err503Rules},
 		}, writers...),
 		"delete": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Delete a record", Security: bearer,
@@ -185,7 +187,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 		"put": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Restore a revision", Description: "The record's current state becomes a new revision first, so a restore is itself undoable.", Security: bearer,
 			Parameters: []openAPIParameter{schema, id, {Name: "rev_id", In: "path", Required: true, Description: "Revision id", Schema: map[string]any{"type": "string", "format": "uuid"}}},
-			Responses:  map[string]any{"200": ok200, "401": err401, "404": err404},
+			Responses:  map[string]any{"200": ok200, "401": err401, "404": err404, "422": err422, "503": err503Rules},
 		}, writers...),
 	}
 	paths[base+"/{id}/publish"] = openAPIPath{
