@@ -249,3 +249,44 @@ func TestContentHandler_RestoreRevision_ChecksContentRules(t *testing.T) {
 		assert.Len(t, revs.rows, 1, "a refused restore recorded the state it did not replace")
 	})
 }
+
+func TestContentHandler_Revisions_RestoreRefusesAnotherRecordsRevision(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"notes", "surveys"}, func(t *testing.T, fx schemaContentFixture) {
+		h := *fx.content
+		store := &memRevisions{}
+		h.revisions = &revisionProvider{s: store}
+		wired := fx
+		wired.content = &h
+
+		target := createdID(t, fx.create(t, "notes", map[string]any{"title": "Target", "body": "target"}))
+		sibling := createdID(t, fx.create(t, "notes", map[string]any{"title": "Sibling", "body": "sibling"}))
+		survey := fx.createSurvey(t)
+		require.Equal(t, http.StatusOK, wired.update(t, "notes", sibling, map[string]any{"body": "sibling 2"}).Code)
+		require.Equal(t, http.StatusOK, wired.update(t, "surveys", survey, map[string]any{"name": "Renamed"}).Code)
+
+		var siblingRev, surveyRev core.RecordRevision
+		for _, rev := range store.rows {
+			switch rev.SchemaName {
+			case "notes":
+				siblingRev = rev
+			case "surveys":
+				surveyRev = rev
+			}
+		}
+		require.Equal(t, sibling, siblingRev.RecordID.String())
+		require.Equal(t, survey, surveyRev.RecordID.String())
+
+		assert.Equal(t, http.StatusNotFound,
+			fx.restoreRevision(t, &h, "notes", target, siblingRev.ID.String()).Code,
+			"a revision of another record of the same type")
+		assert.Equal(t, http.StatusNotFound,
+			fx.restoreRevision(t, &h, "notes", target, surveyRev.ID.String()).Code,
+			"a revision of a record of another type")
+
+		var out struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(fx.get(t, "notes", target).Body.Bytes(), &out))
+		assert.Equal(t, "target", out.Data["body"], "a refused restore writes nothing")
+	})
+}
