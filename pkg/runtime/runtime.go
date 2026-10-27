@@ -369,6 +369,15 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		logger.Info("migrations applied", "count", n)
 	}
 
+	// Account addresses
+	// Rows written before account addresses were stored in one Unicode form
+	// are rewritten into it, and accounts that collide in it are reported.
+	// A failure leaves the rows as they were and the next boot tries again,
+	// so it does not stop this one.
+	if _, err := db.NormalizeAccountEmails(ctx, pool, logger); err != nil {
+		logger.Warn("account addresses were not all normalized, and the next boot continues", "err", err)
+	}
+
 	// SQL Server snapshot reads
 	if ok, remedy, err := db.CheckSnapshotReads(ctx, pool); err != nil {
 		logger.Warn("could not read the snapshot isolation setting", "err", err)

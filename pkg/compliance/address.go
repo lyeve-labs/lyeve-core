@@ -12,6 +12,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Matching a subject's address
@@ -78,7 +80,7 @@ func AddressCandidates(column string, first int) string {
 // combining dot is confirmed by SameAddress but not selected on PostgreSQL
 // or SQL Server.
 func AddressForms(address string) []any {
-	lower := strings.ToLower(canonicalAddress(address))
+	lower := core.FoldAddress(strings.Trim(address, " "))
 	return []any{address, lower, norm.NFD.String(lower)}
 }
 
@@ -89,7 +91,7 @@ func AddressForms(address string) []any {
 // Lowering is all it folds. Unicode case folding would also take ſam@ for
 // sam@, a different address.
 func SameAddress(stored, requested string) bool {
-	return strings.ToLower(canonicalAddress(stored)) == strings.ToLower(canonicalAddress(requested)) //nolint:staticcheck // EqualFold would take ſ for s
+	return core.FoldAddress(strings.Trim(stored, " ")) == core.FoldAddress(strings.Trim(requested, " "))
 }
 
 // canonicalAddress trims the spaces around the address and puts it in
@@ -315,7 +317,7 @@ func holdsAddress(text, address string, escapes bool) bool {
 // SameAddress compares. It is not trimmed, because the characters around a
 // match decide whether it is the whole address.
 func foldedText(text string) string {
-	return strings.ToLower(norm.NFC.String(text))
+	return core.FoldAddress(text)
 }
 
 // The two sides of a match continue an address on different characters.
