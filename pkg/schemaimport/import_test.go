@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,6 +30,9 @@ type fakeEngine struct {
 	applied []string
 	defs    []domain.Schema
 	failOn  string
+	// invalid names a definition the engine refuses as invalid when it
+	// previews it, the way a real engine validates there.
+	invalid string
 }
 
 func newFakeEngine(existing ...domain.Schema) *fakeEngine {
@@ -60,6 +64,9 @@ func (e *fakeEngine) Apply(_ context.Context, name string, def json.RawMessage) 
 }
 
 func (e *fakeEngine) PreviewDDL(_ context.Context, name string, _ json.RawMessage) ([]core.DDLStatement, error) {
+	if name == e.invalid {
+		return nil, fmt.Errorf("%w: field \"title\": unknown field_type", core.ErrValidation)
+	}
 	return []core.DDLStatement{{SQL: "CREATE TABLE _" + name + " (...)"}}, nil
 }
 
@@ -261,4 +268,36 @@ func TestExportBundle_RoundTripsThroughImport(t *testing.T) {
 func TestExportBundle_RejectsANilEngine(t *testing.T) {
 	_, err := ExportBundle(context.Background(), nil, "test")
 	require.Error(t, err)
+}
+
+// An invalid definition is refused before anything is applied, so the target
+// never holds the part of a bundle that sorted ahead of it.
+func TestApplyBundle_AppliesNothingWhenTheEngineRefusesADefinition(t *testing.T) {
+	eng := newFakeEngine()
+	eng.invalid = "article"
+	_, err := ApplyBundle(context.Background(), eng, &Bundle{Schemas: []domain.Schema{
+		{Name: "article", Fields: []domain.SchemaField{relationField("author", "person", domain.RelBelongsTo)}},
+		textSchema("person"),
+	}})
+
+	var invalid *InvalidSchemaError
+	require.ErrorAs(t, err, &invalid)
+	assert.Equal(t, "article", invalid.Name)
+	assert.ErrorIs(t, err, core.ErrValidation)
+	assert.Equal(t, `schema "article": field "title": unknown field_type`, err.Error())
+	assert.Empty(t, eng.applied)
+}
+
+// A preview that fails for any other reason is not a refused definition.
+func TestPlanImport_OtherPreviewFailureIsNotAnInvalidSchema(t *testing.T) {
+	_, err := PlanImport(context.Background(), previewFails{newFakeEngine()}, &Bundle{Schemas: []domain.Schema{textSchema("article")}})
+	require.Error(t, err)
+	var invalid *InvalidSchemaError
+	assert.False(t, errors.As(err, &invalid))
+}
+
+type previewFails struct{ *fakeEngine }
+
+func (previewFails) PreviewDDL(context.Context, string, json.RawMessage) ([]core.DDLStatement, error) {
+	return nil, errors.New("database unavailable")
 }

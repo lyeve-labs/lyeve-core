@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -83,12 +84,34 @@ type Engine interface {
 	List(ctx context.Context) ([]json.RawMessage, error)
 }
 
+// InvalidSchemaError is an import the schema engine refused because one of
+// its definitions is invalid. Err is the engine's refusal, which names the
+// field it could not accept.
+type InvalidSchemaError struct {
+	Name string
+	Err  error
+}
+
+// Error names the schema and the engine's reason. An engine that wraps
+// core.ErrValidation leads its message with that sentinel's text, which this
+// error already conveys, so the prefix is left out.
+func (e *InvalidSchemaError) Error() string {
+	why := strings.TrimPrefix(e.Err.Error(), core.ErrValidation.Error()+": ")
+	return fmt.Sprintf("schema %q: %s", e.Name, why)
+}
+
+func (e *InvalidSchemaError) Unwrap() error { return e.Err }
+
 // PlanImport works out what importing a bundle would do without changing
 // anything.
 //
 // Always run before Apply on anything that matters: an import is a sequence of
 // DDL statements against a live database, and the point of a preview is to see
 // the destructive ones before they run rather than after.
+//
+// Every schema the import would create or change is previewed through the
+// engine, which validates it. A schema the engine refuses as invalid fails the
+// plan with an *InvalidSchemaError.
 func PlanImport(ctx context.Context, eng Engine, b *Bundle) (Plan, error) {
 	if eng == nil {
 		return Plan{}, errors.New("no schema engine")
@@ -138,7 +161,13 @@ func PlanImport(ctx context.Context, eng Engine, b *Bundle) (Plan, error) {
 			// A preview against a table whose dependency is absent would report
 			// the missing reference rather than the statements, and Missing
 			// already says that more usefully.
+			// The preview is also where the engine validates the definition,
+			// so a bundle holding an invalid schema is refused here, before
+			// ApplyBundle has applied any of it.
 			stmts, err := eng.PreviewDDL(ctx, s.Name, definition)
+			if errors.Is(err, core.ErrValidation) {
+				return Plan{}, &InvalidSchemaError{Name: s.Name, Err: err}
+			}
 			if err != nil {
 				return Plan{}, fmt.Errorf("preview %q: %w", s.Name, err)
 			}

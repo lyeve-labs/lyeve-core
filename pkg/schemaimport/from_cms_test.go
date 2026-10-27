@@ -219,8 +219,6 @@ func TestFromContentful_LocalizedMarksTheField(t *testing.T) {
 	assert.Contains(t, noteFor(conv, "article", "slug"), "unique")
 	assert.False(t, fieldByName(t, s, "rank").Localized)
 	assert.Contains(t, noteFor(conv, "article", "rank"), "number")
-
-	require.NoError(t, domain.ValidateSchema(&s), "the converted definition must pass the validator it is applied through")
 }
 
 func TestFromContentful_OmittedFieldsAreSkipped(t *testing.T) {

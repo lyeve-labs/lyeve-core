@@ -84,9 +84,9 @@ func ParseBundle(data []byte) (*Bundle, error) {
 	return &b, nil
 }
 
-// Validate checks every schema in the bundle against the same rules the schema
-// API applies, so a bad definition is reported against its file rather than
-// part-way through an import that has already created tables.
+// Validate checks what a bundle says about itself: that no schema is declared
+// twice. Whether each definition is valid is the schema engine's question, and
+// PlanImport asks it of every schema before ApplyBundle changes anything.
 func (b *Bundle) Validate() error {
 	seen := make(map[string]struct{}, len(b.Schemas))
 	for i := range b.Schemas {
@@ -95,9 +95,6 @@ func (b *Bundle) Validate() error {
 			return fmt.Errorf("schema %q is declared twice", s.Name)
 		}
 		seen[s.Name] = struct{}{}
-		if err := domain.ValidateSchema(s); err != nil {
-			return fmt.Errorf("schema %q: %w", s.Name, err)
-		}
 	}
 	return nil
 }
