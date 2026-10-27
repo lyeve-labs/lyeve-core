@@ -725,6 +725,19 @@ func (h *ScopedHost) SchemaSource() SchemaSource {
 	return AbsentSchemaSource{}
 }
 
+// ContentRules forwards to inner if it implements ContentRulesProvider. It is
+// the rules every content write passes, which are the registered engine's. A
+// host that provides none refuses the write rather than letting it through
+// unchecked.
+func (h *ScopedHost) ContentRules() ContentRules {
+	if p, ok := h.inner.(ContentRulesProvider); ok {
+		if r := p.ContentRules(); r != nil {
+			return r
+		}
+	}
+	return AbsentContentRules{}
+}
+
 // RegisterSchemaEngine forwards to inner if it implements
 // SchemaEngineRegistrar, for a plugin holding CapSchema. Every content read
 // and write goes through the engine. More than one plugin holds CapSchema

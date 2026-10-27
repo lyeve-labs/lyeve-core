@@ -239,6 +239,13 @@ func (h *engineHost) SchemaSource() core.SchemaSource {
 	return core.AbsentSchemaSource{}
 }
 
+// ContentRules implements core.ContentRulesProvider. It answers the rules of
+// whatever engine a plugin registered, and a refusal of every content write
+// when none has or the registered one supplies none.
+func (h *engineHost) ContentRules() core.ContentRules {
+	return core.ContentRulesOf(h.suppliedSchema)
+}
+
 // WithContentStore replaces the host's content store with the one the API
 // router serves reads from. They must be the same instance: a plugin write
 // through a different ContentStore cannot drop the read path's cached lists,

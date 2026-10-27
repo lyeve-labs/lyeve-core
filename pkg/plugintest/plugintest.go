@@ -288,6 +288,13 @@ func (h *testHost) RegisterOwnedRole(owner string, role core.HostRole, clear boo
 	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
 }
 
+// ContentRules implements core.ContentRulesProvider, answering the rules of
+// whatever engine was registered or supplied, and a refusal of every write
+// otherwise.
+func (h *testHost) ContentRules() core.ContentRules {
+	return core.ContentRulesOf(h.schema)
+}
+
 // SchemaSource implements core.SchemaSourceProvider, answering the registry
 // the content path reads. It is whatever engine was registered or supplied,
 // and no engine at all otherwise.

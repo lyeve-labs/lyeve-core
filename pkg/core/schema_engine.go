@@ -190,6 +190,96 @@ func NoSchemaEngine(src SchemaSource) bool {
 	}
 }
 
+// ContentRules is what a content write has to satisfy before it is stored:
+// the defaults a create fills in and the validation every write passes. The
+// schema engine supplies them, because a definition's rules mean what that
+// engine says they mean. The kernel applies them on every content write and
+// stores nothing they have not passed.
+//
+// A failure carries a code from the kernel's message catalog and the
+// parameters its message names. The kernel renders the message in the
+// caller's locale, so an engine leaves Message to it.
+type ContentRules interface {
+	// PrepareCreate fills every field data leaves out from its declared
+	// default and validates the result, in that order, so a required field
+	// with a default is satisfied by leaving it out. A field data carries is
+	// kept as sent, an explicit null included. It returns the data to write
+	// and the failures. An error means the rules could not be applied, and
+	// the write is refused.
+	PrepareCreate(ctx context.Context, sc *Schema, data map[string]any) (map[string]any, []SchemaValidationError, error)
+
+	// ValidatePatch validates a partial update. A field patch leaves out is
+	// not checked, and a field it carries gets every rule a create applies.
+	// A cross-field rule reads current with patch laid over it, and runs only
+	// when patch names one of its targets. No defaults are filled, because a
+	// field an update leaves out keeps what is stored.
+	ValidatePatch(ctx context.Context, sc *Schema, patch, current map[string]any) ([]SchemaValidationError, error)
+}
+
+// ContentRulesProvider is implemented by the engine host and forwarded by
+// ScopedHost. It answers the rules of whatever schema engine is registered,
+// and AbsentContentRules when none is or the registered one supplies none.
+// A caller reads it per write and never at Start, as it reads SchemaSource.
+type ContentRulesProvider interface {
+	ContentRules() ContentRules
+}
+
+// ErrNoContentRules is what a content write answers when nothing can say
+// whether it is valid. It wraps ErrNoSchemaEngine, because to a writer the
+// two are one condition: the write is refused rather than stored unchecked.
+var ErrNoContentRules = fmt.Errorf("%w, or it supplies no content rules", ErrNoSchemaEngine)
+
+// AbsentContentRules refuses every write with ErrNoContentRules. It is what
+// an install has with no schema engine, or with one that supplies no rules.
+type AbsentContentRules struct{}
+
+func (AbsentContentRules) PrepareCreate(context.Context, *Schema, map[string]any) (map[string]any, []SchemaValidationError, error) {
+	return nil, nil, ErrNoContentRules
+}
+
+func (AbsentContentRules) ValidatePatch(context.Context, *Schema, map[string]any, map[string]any) ([]SchemaValidationError, error) {
+	return nil, ErrNoContentRules
+}
+
+// ContentRulesOf answers the rules a SchemaEngine supplies, and
+// AbsentContentRules for a nil engine or one that does not implement
+// ContentRules.
+func ContentRulesOf(e SchemaEngine) ContentRules {
+	if r, ok := e.(ContentRules); ok {
+		return r
+	}
+	return AbsentContentRules{}
+}
+
+// LazyContentRules defers resolution to each call, for the same reason
+// LazySchemaSource does: the content path is built before any plugin starts
+// and registers its engine. A resolve that answers nil refuses the write.
+func LazyContentRules(resolve func() ContentRules) ContentRules {
+	return lazyContentRules{resolve: resolve}
+}
+
+type lazyContentRules struct {
+	resolve func() ContentRules
+}
+
+func (l lazyContentRules) now() ContentRules {
+	if l.resolve == nil {
+		return AbsentContentRules{}
+	}
+	if r := l.resolve(); r != nil {
+		return r
+	}
+	return AbsentContentRules{}
+}
+
+func (l lazyContentRules) PrepareCreate(ctx context.Context, sc *Schema, data map[string]any) (map[string]any, []SchemaValidationError, error) {
+	return l.now().PrepareCreate(ctx, sc, data)
+}
+
+func (l lazyContentRules) ValidatePatch(ctx context.Context, sc *Schema, patch, current map[string]any) ([]SchemaValidationError, error) {
+	return l.now().ValidatePatch(ctx, sc, patch, current)
+}
+
 // SchemaSourceOf reads definitions from a SchemaEngine by decoding what Get
 // and List answer. It is the fallback for an engine that does not provide a
 // SchemaSource of its own, so every engine can feed the content path whether
