@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -229,13 +230,14 @@ func TestHookBusAdapter_Publish_ForwardsActorID(t *testing.T) {
 // A subscriber orders and ages events by their timestamp and tells replicas
 // apart by the instance, so an event reaches it with both whoever published
 // it: the engine's own handlers through the registry, or a plugin through
-// the bus. A publisher's own timestamp is kept.
+// the host's publisher. The instance is the one the engine was configured
+// with, and a publisher's own timestamp is kept.
 func TestHookBusAdapter_Subscribe_CarriesTimestampAndInstance(t *testing.T) {
 	reg := hooks.NewRegistry()
-	adapter := &hookBusAdapter{registry: reg, instanceID: "replica-a"}
+	h := &engineHost{registry: reg, cfg: &config.Config{InstanceID: "replica-a"}}
 
 	var got []core.Event
-	sub := adapter.Subscribe("articles", core.AfterCreate, func(_ context.Context, e core.Event) error {
+	sub := h.Hooks().Subscribe("articles", core.AfterCreate, func(_ context.Context, e core.Event) error {
 		got = append(got, e)
 		return nil
 	})
@@ -243,9 +245,9 @@ func TestHookBusAdapter_Subscribe_CarriesTimestampAndInstance(t *testing.T) {
 
 	before := time.Now().UTC()
 	require.NoError(t, reg.Run(context.Background(), hooks.Event{Type: hooks.AfterCreate, Schema: "articles"}))
-	require.NoError(t, adapter.Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin}))
+	require.NoError(t, h.HookPublisher().Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin}))
 	stamped := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	require.NoError(t, adapter.Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin, Timestamp: stamped}))
+	require.NoError(t, h.HookPublisher().Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin, Timestamp: stamped}))
 	after := time.Now().UTC()
 
 	require.Len(t, got, 3)
