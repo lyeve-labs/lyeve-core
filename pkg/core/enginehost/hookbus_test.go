@@ -3,6 +3,7 @@ package enginehost
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -223,4 +224,35 @@ func TestHookBusAdapter_Publish_ForwardsActorID(t *testing.T) {
 
 	assert.Equal(t, "user-7", got.ActorID)
 	assert.Equal(t, core.ActorKindUser, got.ActorKind)
+}
+
+// A subscriber orders and ages events by their timestamp and tells replicas
+// apart by the instance, so an event reaches it with both whoever published
+// it: the engine's own handlers through the registry, or a plugin through
+// the bus. A publisher's own timestamp is kept.
+func TestHookBusAdapter_Subscribe_CarriesTimestampAndInstance(t *testing.T) {
+	reg := hooks.NewRegistry()
+	adapter := &hookBusAdapter{registry: reg, instanceID: "replica-a"}
+
+	var got []core.Event
+	sub := adapter.Subscribe("articles", core.AfterCreate, func(_ context.Context, e core.Event) error {
+		got = append(got, e)
+		return nil
+	})
+	defer sub.Unsubscribe()
+
+	before := time.Now().UTC()
+	require.NoError(t, reg.Run(context.Background(), hooks.Event{Type: hooks.AfterCreate, Schema: "articles"}))
+	require.NoError(t, adapter.Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin}))
+	stamped := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, adapter.Publish(context.Background(), core.Event{Type: core.AfterCreate, Schema: "articles", Source: core.SourcePlugin, Timestamp: stamped}))
+	after := time.Now().UTC()
+
+	require.Len(t, got, 3)
+	for i, e := range got[:2] {
+		assert.False(t, e.Timestamp.Before(before) || e.Timestamp.After(after), "event %d timestamp %s", i, e.Timestamp)
+		assert.Equal(t, "replica-a", e.InstanceID, "event %d", i)
+	}
+	assert.Equal(t, stamped, got[2].Timestamp)
+	assert.Equal(t, "replica-a", got[2].InstanceID)
 }

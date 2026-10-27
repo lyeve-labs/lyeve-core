@@ -332,8 +332,17 @@ func (h *engineHost) Config() core.Config {
 	return &configAdapter{cfg: h.cfg}
 }
 
+// instanceID is the replica name events carry, empty on a host built
+// without a config.
+func (h *engineHost) instanceID() string {
+	if h.cfg == nil {
+		return ""
+	}
+	return h.cfg.InstanceID
+}
+
 func (h *engineHost) Hooks() core.HookBus {
-	bus := core.HookBus(&hookBusAdapter{registry: h.registry})
+	bus := core.HookBus(&hookBusAdapter{registry: h.registry, instanceID: h.instanceID()})
 	if core.DebugHookBusFunc != nil {
 		bus = core.DebugHookBusFunc(bus)
 	}
@@ -344,7 +353,7 @@ func (h *engineHost) Hooks() core.HookBus {
 // core.HookPublisher. Only trusted callers should call Publish through this
 // interface.
 func (h *engineHost) HookPublisher() core.HookPublisher {
-	pub := core.HookPublisher(&hookBusAdapter{registry: h.registry})
+	pub := core.HookPublisher(&hookBusAdapter{registry: h.registry, instanceID: h.instanceID()})
 	if core.DebugHookPublisherFunc != nil {
 		pub = core.DebugHookPublisherFunc(pub)
 	}
