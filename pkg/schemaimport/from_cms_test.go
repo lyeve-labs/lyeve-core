@@ -111,6 +111,24 @@ func TestFromStrapi_SingleTypeIsReported(t *testing.T) {
 	assert.Contains(t, noteFor(conv, "homepage", ""), "limit it to one entry")
 }
 
+func TestFromStrapi_CarriesDraftAndPublish(t *testing.T) {
+	// Draft and publish decides whether an entry is public, so a type that
+	// lost it would publish every entry written into it.
+	conv, err := FromStrapi([]byte(`[
+	  {"info":{"singularName":"case-study"},"options":{"draftAndPublish":true},
+	   "attributes":{"title":{"type":"string"}}},
+	  {"info":{"singularName":"tag"},"options":{"draftAndPublish":false},
+	   "attributes":{"label":{"type":"string"}}},
+	  {"info":{"singularName":"author"},
+	   "attributes":{"name":{"type":"string"}}}]`))
+	require.NoError(t, err)
+
+	assert.True(t, schemaByName(t, conv.Bundle, "case_study").WithDraftPublish)
+	assert.False(t, schemaByName(t, conv.Bundle, "tag").WithDraftPublish)
+	assert.False(t, schemaByName(t, conv.Bundle, "author").WithDraftPublish,
+		"a schema with no options block converts as before")
+}
+
 func TestFromStrapi_RejectsUnrecognizedInput(t *testing.T) {
 	_, err := FromStrapi([]byte(`"just a string"`))
 	require.Error(t, err)
