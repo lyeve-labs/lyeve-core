@@ -1333,6 +1333,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			api.WithLockoutBackend(lockoutBackend),
 			api.WithKeyStore(encKeyStore),
 			api.WithArchivedChecker(archivedChecker),
+			// The token sign-in records its audit entries through the host.
+			api.WithScalingHost(hostBase),
 			api.WithTenantValidator(tenantValidator),
 			api.WithTenantRoster(tenantRoster),
 			api.WithMembershipStore(memberships),

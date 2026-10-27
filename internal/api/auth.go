@@ -84,6 +84,10 @@ type AuthHandler struct {
 
 	// setupToken authorizes first-run setup. Nil refuses every claim.
 	setupToken *SetupToken
+
+	// host is the engine host the audit writer stores each sign-in through.
+	// Nil records nothing.
+	host core.Host
 }
 
 // NewAuthHandler constructs an AuthHandler with the given user store, MFA

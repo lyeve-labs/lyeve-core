@@ -186,6 +186,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	authHandler.WithSetupToken(setupToken)
 	authHandler.WithMemberships(o.memberships)
+	authHandler.host = o.scalingHost
 	// A plugin that verifies a second factor of its own completes the
 	// challenge through this handler, so both read one record of used
 	// challenges.
@@ -227,6 +228,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		usersHandler.revokeRefresh = o.refreshTokenStore.RevokeAllForUser
 	}
 	usersHandler.passwordPolicy = passwordPolicy
+	usersHandler.host = o.scalingHost
 
 	// Kubernetes health probes
 	// Mounted on the outer router before JWT auth middleware: Kubernetes

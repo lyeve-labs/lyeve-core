@@ -16,6 +16,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
@@ -36,6 +37,9 @@ type UsersHandler struct {
 	// ceilingURL is where the licensing implementation sends an operator to
 	// lift a ceiling, put in the seat refusal. Nil offers no link.
 	ceilingURL func(cap string) string
+	// host is the engine host the audit writer stores each account change
+	// through. Nil records nothing.
+	host core.Host
 }
 
 // NewUsersHandler constructs a UsersHandler. passwordHashAlgo defaults to
@@ -148,6 +152,7 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeUserCreateFailed, nil)
 		return
 	}
+	h.audit(r, "user.create", user.ID, user.TenantID, nil, map[string]any{"roles": user.Roles})
 	respond(w, http.StatusCreated, safeUser(user))
 }
 
@@ -172,7 +177,8 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 
 	// The seat guard counts the account's current roles, so an unknown id has
 	// to answer 404 before the guard can call it a new seat and answer 402.
-	if _, err := h.users.GetByID(r.Context(), id); err != nil {
+	before, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
@@ -198,6 +204,7 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
+	h.audit(r, "user.roles.update", user.ID, user.TenantID, map[string]any{"roles": before.Roles}, map[string]any{"roles": user.Roles})
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -283,6 +290,7 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
+	h.audit(r, "user.state.update", user.ID, user.TenantID, nil, map[string]any{"disabled": user.Disabled, "expires_at": user.ExpiresAt})
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -345,6 +353,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 			slog.WarnContext(logging.ContextAbout(r.Context(), user.TenantID), "set password: refresh tokens not revoked", "user_id", id.String(), "error", err)
 		}
 	}
+	h.audit(r, "user.password.set", user.ID, user.TenantID, nil, nil)
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -365,6 +374,17 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The account is read first because the entry is filed under its tenant
+	// and names the roles the deletion took away.
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
+			return
+		}
+		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+		return
+	}
 	if err := h.users.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
@@ -373,5 +393,30 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
 		return
 	}
+	h.audit(r, "user.delete", id, user.TenantID, map[string]any{"roles": user.Roles}, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// audit records an account change. The entry is filed under the tenant the
+// account belongs to, which for a super admin can differ from the one the
+// request acts in: filed there, it would show another tenant's account to
+// that tenant's admins. An account with no tenant files under none. Neither
+// state ever carries a password or its hash.
+func (h *UsersHandler) audit(r *http.Request, action string, id uuid.UUID, tenantID string, before, after map[string]any) {
+	if h.host == nil {
+		return
+	}
+	var opts []compliance.AuditOption
+	if tenantID == "" {
+		opts = append(opts, compliance.WithoutTenant())
+	}
+	var b, a any
+	if before != nil {
+		b = before
+	}
+	if after != nil {
+		a = after
+	}
+	compliance.RecordAuditWithState(core.WithTenantID(r.Context(), tenantID), h.host, action, "user", id.String(),
+		clientIP(r), r.UserAgent(), b, a, opts...)
 }
