@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +40,9 @@ func TestContentHandler_WriteWithoutContentRulesIsRefused(t *testing.T) {
 
 				rr := w.create(t, "posts", map[string]any{"title": "unchecked"})
 				assert.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+				assert.Contains(t, rr.Body.String(), "supplies no content rules")
+				assert.NotContains(t, rr.Body.String(), "no schema engine is installed",
+					"an engine is installed here, it only supplies no rules")
 
 				rr = w.update(t, "posts", id, map[string]any{"title": "unchecked"})
 				assert.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
@@ -57,6 +62,47 @@ func TestContentHandler_WriteWithoutContentRulesIsRefused(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, row.Scan(&count))
 		assert.Equal(t, 1, count, "a refused write stored a row")
+		got := fx.get(t, "posts", id)
+		require.Equal(t, http.StatusOK, got.Code, got.Body.String())
+		assert.Equal(t, "stored while the rules answered", dataOf(t, got)["title"])
+	})
+}
+
+// failingRules is a rule set that cannot answer, with an error that wraps one
+// of the sentinels a store error is mapped by.
+type failingRules struct{ err error }
+
+func (f failingRules) PrepareCreate(context.Context, *core.Schema, map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	return nil, nil, f.err
+}
+
+func (f failingRules) ValidatePatch(context.Context, *core.Schema, map[string]any, map[string]any) ([]core.SchemaValidationError, error) {
+	return nil, f.err
+}
+
+// The rules failing to answer says nothing about the entry the caller sent,
+// so the answer is 503 whatever the error wraps, never the 404, 409 or 422 a
+// store error carrying the same sentinel gets.
+func TestContentHandler_RulesErrorIsUnavailable(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"posts"}, func(t *testing.T, fx schemaContentFixture) {
+		id := createdID(t, fx.create(t, "posts", map[string]any{"title": "stored while the rules answered"}))
+
+		for _, sentinel := range []error{core.ErrNotFound, core.ErrConflict, core.ErrValidation} {
+			t.Run(sentinel.Error(), func(t *testing.T) {
+				h := *fx.content
+				h.rules = failingRules{err: fmt.Errorf("rules backend: %w", sentinel)}
+				w := fx
+				w.content = &h
+
+				rr := w.create(t, "posts", map[string]any{"title": "unchecked"})
+				assert.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+				assert.NotContains(t, rr.Body.String(), "rules backend", "the cause stays in the log")
+
+				rr = w.update(t, "posts", id, map[string]any{"title": "unchecked"})
+				assert.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+			})
+		}
+
 		got := fx.get(t, "posts", id)
 		require.Equal(t, http.StatusOK, got.Code, got.Body.String())
 		assert.Equal(t, "stored while the rules answered", dataOf(t, got)["title"])

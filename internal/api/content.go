@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
@@ -419,7 +420,7 @@ func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s
 	}
 	errs, err := h.contentRules().ValidatePatch(r.Context(), s, patch, current)
 	if err != nil {
-		storeError(w, r, err, "failed to validate content")
+		rulesUnavailable(w, r, err)
 		return false
 	}
 	if len(errs) == 0 {
@@ -441,7 +442,7 @@ func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s
 	}
 	data, errs, err := h.contentRules().PrepareCreate(r.Context(), s, data)
 	if err != nil {
-		storeError(w, r, err, "failed to validate content")
+		rulesUnavailable(w, r, err)
 		return nil, false
 	}
 	if len(errs) > 0 {
@@ -449,6 +450,19 @@ func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s
 		return nil, false
 	}
 	return data, true
+}
+
+// rulesUnavailable answers a write the content rules could not check. Every
+// such error is 503 whatever it wraps: the rules failed to answer, so a
+// not-found, a conflict or a validation sentinel inside it says nothing about
+// the entry the caller sent. The cause goes to the log, never the wire.
+func rulesUnavailable(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "content: content rules unavailable", "schema", chi.URLParam(r, "schema"), "err", err)
+	msg := "the content rules could not be checked, so the write was not stored"
+	if errors.Is(err, core.ErrNoContentRules) {
+		msg = "the schema engine supplies no content rules, so this install cannot accept content writes"
+	}
+	httpx.ErrorReq(w, r, http.StatusServiceUnavailable, msg)
 }
 
 // contentRules is the registered schema engine's rules. A handler built
