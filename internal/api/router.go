@@ -1206,6 +1206,7 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 		patterns = []string{
 			"GET /api/admin/setup",
 			"POST /api/admin/setup",
+			"GET /api/admin/auth/sign-in-routes",
 			"POST /api/admin/auth/login",
 			"POST /api/admin/auth/refresh",
 			"POST /api/admin/auth/logout",

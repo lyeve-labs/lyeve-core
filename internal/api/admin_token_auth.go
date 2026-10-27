@@ -377,6 +377,7 @@ var engineAdminGrants = []core.RouteDecl{
 var enginePublicAdminRoutes = []core.RouteDecl{
 	{Method: http.MethodGet, Pattern: "/api/admin/setup"},
 	{Method: http.MethodPost, Pattern: "/api/admin/setup"},
+	{Method: http.MethodGet, Pattern: "/api/admin/auth/sign-in-routes"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/login"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/refresh"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/mfa-verify"},

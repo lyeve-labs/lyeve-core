@@ -193,6 +193,14 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			Responses:   map[string]any{"201": ok200, "400": err400, "401": err401, "409": map[string]any{"description": "Setup already complete"}},
 		},
 	}
+	paths["/api/admin/auth/sign-in-routes"] = openAPIPath{
+		"get": {
+			Tags:        []string{"Admin / Auth"},
+			Summary:     "List the sign-in routes the plugins mounted",
+			Description: "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+			Responses:   map[string]any{"200": ok200},
+		},
+	}
 	paths["/api/admin/auth/login"] = openAPIPath{
 		"post": {
 			Tags:        []string{"Admin / Auth"},
