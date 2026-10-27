@@ -45,6 +45,7 @@ func TestContentAPI_ServesFromASuppliedSchemaEngine(t *testing.T) {
 
 	router, err := NewAPIRouter(pool, cfg, nil,
 		WithSchemaSource(eng.SchemaSource()),
+		WithContentRules(eng),
 		WithLifetime(testLifetime(t)),
 	)
 	require.NoError(t, err)

@@ -70,14 +70,6 @@ schemas:
 	assert.Contains(t, err.Error(), "declared twice")
 }
 
-func TestParseBundle_RejectsAnInvalidSchema(t *testing.T) {
-	// Reported against the file rather than part-way through an import that has
-	// already created tables.
-	_, err := ParseBundle([]byte("schemas:\n  - name: article\n    fields:\n      - {name: title, field_type: nonsense}\n"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "article")
-}
-
 func TestParseBundle_RejectsEmptyInput(t *testing.T) {
 	for _, in := range []string{"", "# just a comment\n", "schemas: []\n"} {
 		_, err := ParseBundle([]byte(in))

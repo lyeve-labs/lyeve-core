@@ -75,6 +75,7 @@ type routerOptions struct {
 	contentStoreSink     func(*db.ContentStore)                 // nil -> the router's content store is not shared
 	permissionChecker    core.PermissionCheckerProvider         // nil -> the kernel's role-only checker
 	schemaSource         core.SchemaSource                      // nil -> this install has no schema engine
+	contentRules         core.ContentRules                      // nil -> every content write is refused
 	contentLocalizer     core.ContentLocalizerProvider          // nil -> content reads ignore any locale
 	recordRevisions      core.RecordRevisionStoreProvider       // nil -> the revision routes answer 503
 	lifetime             context.Context                        //nolint:containedctx // nil -> context.Background(): how long this router's background work runs
@@ -201,6 +202,13 @@ func WithPluginSchema(p PluginSchemaProvider) RouterOption {
 // module does not ship.
 func WithSchemaSource(s core.SchemaSource) RouterOption {
 	return func(o *routerOptions) { o.schemaSource = s }
+}
+
+// WithContentRules supplies the rules every content write passes, which are
+// the schema engine's. Without it every content write is refused, because
+// nothing can say whether it is valid.
+func WithContentRules(r core.ContentRules) RouterOption {
+	return func(o *routerOptions) { o.contentRules = r }
 }
 
 // WithPluginConfigReloader injects the provider (typically the activator) that

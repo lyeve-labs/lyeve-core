@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,13 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
-	internalschema "github.com/lyeve-labs/lyeve-core/internal/schema"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 )
@@ -24,6 +25,7 @@ import (
 type ContentHandler struct {
 	store     *db.ContentStore
 	schemas   core.SchemaSource
+	rules     core.ContentRules // nil = every write is refused
 	hooks     *hooks.Registry
 	perms     core.PermissionCheckerProvider   // nil = the kernel's role-only checker
 	localizer core.ContentLocalizerProvider    // nil = reads ignore any locale
@@ -416,11 +418,15 @@ func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s
 	if !ok {
 		return false
 	}
-	errs := internalschema.ValidatePatch(s, patch, current)
+	errs, err := h.contentRules().ValidatePatch(r.Context(), s, patch, current)
+	if err != nil {
+		rulesUnavailable(w, r, err)
+		return false
+	}
 	if len(errs) == 0 {
 		return true
 	}
-	internalschema.ValidationErrors(errs).Respond(w, r, http.StatusUnprocessableEntity)
+	respondValidation(w, r, errs)
 	return false
 }
 
@@ -434,8 +440,38 @@ func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s
 	if !ok {
 		return nil, false
 	}
-	data = internalschema.ApplyDefaults(s, data)
-	return data, h.validateAgainst(w, r, s, data)
+	data, errs, err := h.contentRules().PrepareCreate(r.Context(), s, data)
+	if err != nil {
+		rulesUnavailable(w, r, err)
+		return nil, false
+	}
+	if len(errs) > 0 {
+		respondValidation(w, r, errs)
+		return nil, false
+	}
+	return data, true
+}
+
+// rulesUnavailable answers a write the content rules could not check. Every
+// such error is 503 whatever it wraps: the rules failed to answer, so a
+// not-found, a conflict or a validation sentinel inside it says nothing about
+// the entry the caller sent. The cause goes to the log, never the wire.
+func rulesUnavailable(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "content: content rules unavailable", "schema", chi.URLParam(r, "schema"), "err", err)
+	msg := "the content rules could not be checked, so the write was not stored"
+	if errors.Is(err, core.ErrNoContentRules) {
+		msg = "the schema engine supplies no content rules, so this install cannot accept content writes"
+	}
+	httpx.ErrorReq(w, r, http.StatusServiceUnavailable, msg)
+}
+
+// contentRules is the registered schema engine's rules. A handler built
+// without any refuses every write rather than storing it unchecked.
+func (h *ContentHandler) contentRules() core.ContentRules {
+	if h.rules == nil {
+		return core.AbsentContentRules{}
+	}
+	return h.rules
 }
 
 func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Request, schemaName string) (*domain.Schema, bool) {
@@ -456,19 +492,29 @@ func relationRefused(w http.ResponseWriter, r *http.Request, err error) bool {
 	if !errors.As(err, &refused) {
 		return false
 	}
-	internalschema.ValidationErrors{{
+	respondValidation(w, r, []core.SchemaValidationError{{
 		Field: refused.Field,
-		Code:  i18n.CodeValidationRelationTarget,
+		Code:  string(i18n.CodeValidationRelationTarget),
 		Rule:  "relation",
-	}}.Respond(w, r, http.StatusUnprocessableEntity)
+	}})
 	return true
 }
 
-func (h *ContentHandler) validateAgainst(w http.ResponseWriter, r *http.Request, s *domain.Schema, data map[string]any) bool {
-	errs := internalschema.ValidateContent(s, data)
-	if len(errs) == 0 {
-		return true
+// respondValidation answers 422 with each failure rendered in the locale the
+// request resolved, as a JSON array under "errors".
+func respondValidation(w http.ResponseWriter, r *http.Request, errs []core.SchemaValidationError) {
+	type localized struct {
+		Field   string `json:"field"`
+		Message string `json:"message"`
+		Code    string `json:"code"`
+		Rule    string `json:"rule"`
 	}
-	internalschema.ValidationErrors(errs).Respond(w, r, http.StatusUnprocessableEntity)
-	return false
+	rendered := i18n.LocalizeValidation(i18n.LocaleFromCtx(r.Context()), errs)
+	out := make([]localized, len(rendered))
+	for i, e := range rendered {
+		out[i] = localized{Field: e.Field, Message: e.Message, Code: e.Code, Rule: e.Rule}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{"errors": out})
 }

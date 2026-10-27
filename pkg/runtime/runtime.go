@@ -960,8 +960,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}
 
 	// Custom schema validators
-	// A name no plugin claims falls back to the pattern interpreter, so this
-	// is logged only when a plugin actually gave a name its own meaning.
+	// A name no plugin claims is left to the schema engine, so this is
+	// logged only when a plugin actually gave a name its own meaning.
 	if n := activator.RegisterCustomValidators(); n > 0 {
 		logger.Info("custom schema validators registered from plugins", "validators", n)
 	}
@@ -1211,6 +1211,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// a plugin may register one later, so a source captured now would be the
 	// built-in one for the life of the process.
 	contentSchemaSource := core.LazySchemaSource(hostBase.(core.SchemaSourceProvider).SchemaSource)
+	contentRules := core.LazyContentRules(hostBase.(core.ContentRulesProvider).ContentRules)
 
 	// Router option builder
 	// Closure so both the initial construction and the hot-reload callback
@@ -1221,6 +1222,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		opts := []api.RouterOption{
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
+			api.WithContentRules(contentRules),
 			// Both tenant guards apply here too, because the admin router is
 			// where content, media, users and schemas are authored. Without
 			// them an archived tenant would stay writable, and a super_admin
@@ -1294,6 +1296,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return []api.RouterOption{
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
+			api.WithContentRules(contentRules),
 			// The content reads ask the host per request for the registered
 			// core.ContentLocalizer, so a locale is honored while a plugin
 			// provides one and ignored otherwise.

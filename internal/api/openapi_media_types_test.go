@@ -307,10 +307,10 @@ func newDocumentProbe(t *testing.T, pool db.DB, opts ...RouterOption) *documentP
 		CacheTTL:         60 * time.Second,
 	}
 	adminRouter, err := NewAdminRouter(pool, cfg, append([]RouterOption{WithLifetime(testLifetime(t)),
-		WithSchemaSource(eng.SchemaSource()), WithScalingHost(&schemaHost{Host: testhost.New(pool), engine: eng})}, opts...)...)
+		WithSchemaSource(eng.SchemaSource()), WithContentRules(eng), WithScalingHost(&schemaHost{Host: testhost.New(pool), engine: eng})}, opts...)...)
 	require.NoError(t, err)
 	apiRouter, err := NewAPIRouter(pool, cfg, nil, append([]RouterOption{WithLifetime(testLifetime(t)),
-		WithSchemaSource(eng.SchemaSource())}, opts...)...)
+		WithSchemaSource(eng.SchemaSource()), WithContentRules(eng)}, opts...)...)
 	require.NoError(t, err)
 	p := &documentProbe{
 		cfg:     cfg,
