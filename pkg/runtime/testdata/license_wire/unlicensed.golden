@@ -803,6 +803,20 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/auth/sign-in-routes": {
+      "get": {
+        "description": "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "List the sign-in routes the plugins mounted",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
     "/api/admin/config": {
       "get": {
         "responses": {
