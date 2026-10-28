@@ -182,3 +182,22 @@ func TestAddressRewriteOptions_MySQLCarriesTheRewriteLimit(t *testing.T) {
 	require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT @@SESSION.max_execution_time`).Scan(&ms))
 	assert.Equal(t, (24 * time.Hour).Milliseconds(), ms)
 }
+
+// A SQL Server session opened for the rewrite waits up to 24 hours for a lock,
+// on a reused connection as on a new one.
+func TestAddressRewriteOptions_MSSQLCarriesTheRewriteLimit(t *testing.T) {
+	if !testdb.ShouldTest("mssql") {
+		t.Skip("CI_DIALECT != mssql")
+	}
+	ctx := context.Background()
+	_, dsn := testdb.MSSQLWithDSN(t)
+	pool, err := db.ConnectWithOptions(ctx, dsn, db.AddressRewriteOptions)
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	for i := range 2 {
+		var ms int64
+		require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT @@LOCK_TIMEOUT`).Scan(&ms))
+		assert.Equal(t, (24 * time.Hour).Milliseconds(), ms, "query %d", i)
+	}
+}
