@@ -41,6 +41,38 @@ func TestMSSQLLockTimeout_SurvivesSessionReset(t *testing.T) {
 	}
 }
 
+// A SET LOCK_TIMEOUT a caller runs inside one borrow ends with that borrow.
+// The next borrower of the same session reads the pool's limit, not the
+// caller's.
+func TestMSSQLLockTimeout_CallerSetDoesNotLeakToNextBorrow(t *testing.T) {
+	if !testdb.ShouldTest("mssql") {
+		t.Skip("CI_DIALECT excludes mssql")
+	}
+	ctx := context.Background()
+	_, dsn := testdb.MSSQLWithDSN(t)
+	pool, err := db.ConnectWithOptions(ctx, dsn, db.ConnectOptions{MaxConns: 1, StatementTimeout: 2 * time.Second})
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+	sqlDB := pool.SQLDB()
+
+	first, err := sqlDB.Conn(ctx)
+	require.NoError(t, err)
+	_, err = first.ExecContext(ctx, `SET LOCK_TIMEOUT 5`)
+	require.NoError(t, err)
+	var firstSPID, inside int
+	require.NoError(t, first.QueryRowContext(ctx, `SELECT @@SPID, @@LOCK_TIMEOUT`).Scan(&firstSPID, &inside))
+	require.Equal(t, 5, inside, "the caller's SET did not take inside its own borrow")
+	require.NoError(t, first.Close())
+
+	next, err := sqlDB.Conn(ctx)
+	require.NoError(t, err)
+	defer func() { _ = next.Close() }()
+	var spid, lockTimeout int
+	require.NoError(t, next.QueryRowContext(ctx, `SELECT @@SPID, @@LOCK_TIMEOUT`).Scan(&spid, &lockTimeout))
+	require.Equal(t, firstSPID, spid, "the second borrow got another session, so it proves nothing about a leak")
+	assert.Equal(t, 2000, lockTimeout)
+}
+
 // A statement blocked by another session's lock fails once the pool's limit
 // has passed, instead of holding its connection until the caller's context
 // ends.
