@@ -313,3 +313,22 @@ func TestOpenAPI_ErasePublishesThePartialAnswer(t *testing.T) {
 		}
 	}
 }
+
+// Every content write asks the content rules before it stores anything, so
+// each one answers 422 when they refuse it and 503 when they cannot be
+// checked. A client generated from the document has to expect both.
+func TestOpenAPI_ContentWritesNameTheRulesAnswers(t *testing.T) {
+	doc := documentedPathsOf(t, buildOpenAPIDoc([]string{"notes"}, nil, openAPIOptions{}))
+	for _, write := range []struct{ path, method string }{
+		{"/api/v1/content/{schema}", "post"},
+		{"/api/v1/content/{schema}/bulk", "post"},
+		{"/api/v1/content/{schema}/{id}", "put"},
+		{"/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore", "put"},
+	} {
+		op, ok := doc.Paths[write.path][write.method]
+		require.True(t, ok, "%s %s is not documented", write.method, write.path)
+		for _, code := range []string{"422", "503"} {
+			assert.Contains(t, op.Responses, code, "%s %s", write.method, write.path)
+		}
+	}
+}
