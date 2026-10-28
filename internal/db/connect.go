@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/md5" //nolint:gosec // MD5 names a lock
 	"database/sql"
-	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -54,23 +53,16 @@ func ConnectWithOptions(ctx context.Context, dsn string, opts ConnectOptions) (D
 
 	dsn = applyStatementTimeout(dsn, engine, opts.StatementTimeout)
 
-	// MSSQL: use sql.OpenDB with a connector wrapper that sets LOCK_TIMEOUT
-	// on each new connection. PG and MySQL use DSN-level parameters instead.
+	// MSSQL takes its lock limit from the connector, PG and MySQL from the
+	// DSN.
 	var db *sql.DB
 	switch engine {
 	case "mssql":
-		connector, err := mssql.NewConnector(dsn)
+		connector, err := mssqlConnector(dsn, opts.StatementTimeout)
 		if err != nil {
 			return nil, fmt.Errorf("mssql connector: %w", err)
 		}
-		var wrapped driver.Connector = connector
-		if opts.StatementTimeout > 0 {
-			wrapped = &mssqlLockTimeoutConnector{
-				parent:  connector,
-				timeout: opts.StatementTimeout,
-			}
-		}
-		db = sql.OpenDB(wrapped)
+		db = sql.OpenDB(connector)
 	default:
 		db, err = sql.Open(driverNameFor(engine), driverDSN(engine, dsn))
 		if err != nil {
@@ -305,9 +297,8 @@ const binaryAddressKeys = 12
 
 // addressRewriteOptions connect the rewrite before binaryAddressKeys. Its
 // scan reads every account, so on MySQL a statement gets 24 hours of run time
-// instead of the pool's 30 seconds. SQL Server bounds no run time, and the
-// lock wait the option sets lasts only until the driver resets the session,
-// so there a statement waits on a lock without limit.
+// instead of the pool's 30 seconds. SQL Server bounds no run time, and there
+// the option bounds each lock wait to 24 hours.
 var addressRewriteOptions = ConnectOptions{MaxConns: 2, StatementTimeout: 24 * time.Hour}
 
 // rewriteAddressesBeforeBinaryKeys puts every account address in its one
@@ -673,34 +664,22 @@ func appendDSNParam(dsn, param string) string {
 	return dsn + "?" + param
 }
 
-// mssqlLockTimeoutConnector wraps a driver.Connector to execute SET LOCK_TIMEOUT
-// on every new MSSQL connection. LOCK_TIMEOUT controls how long a statement waits
-// for a lock before failing (milliseconds). For true query execution timeout,
-// callers should use context.WithTimeout: LOCK_TIMEOUT only covers lock waits.
-type mssqlLockTimeoutConnector struct {
-	parent  driver.Connector
-	timeout time.Duration
-}
-
-func (c *mssqlLockTimeoutConnector) Connect(ctx context.Context) (driver.Conn, error) {
-	conn, err := c.parent.Connect(ctx)
+// mssqlConnector opens dsn with LOCK_TIMEOUT set to lockTimeout on every
+// session. LOCK_TIMEOUT bounds how long a statement waits for a lock, not how
+// long it runs, so callers bound run time with a context. The driver resets
+// the session each time the pool hands a connection out again, and the reset
+// puts LOCK_TIMEOUT back to -1, which waits forever. SessionInitSQL runs when
+// the connection opens and again after every reset, so the limit holds on a
+// reused connection too.
+func mssqlConnector(dsn string, lockTimeout time.Duration) (*mssql.Connector, error) {
+	connector, err := mssql.NewConnector(dsn)
 	if err != nil {
 		return nil, err
 	}
-	execConn, ok := conn.(driver.ExecerContext)
-	if !ok {
-		return conn, nil // connector doesn't support Exec: skip silently
+	if ms := lockTimeout.Milliseconds(); ms > 0 {
+		connector.SessionInitSQL = fmt.Sprintf("SET LOCK_TIMEOUT %d", ms)
 	}
-	ms := c.timeout.Milliseconds()
-	if _, err := execConn.ExecContext(ctx, fmt.Sprintf("SET LOCK_TIMEOUT %d", ms), nil); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("set mssql lock_timeout: %w", err)
-	}
-	return conn, nil
-}
-
-func (c *mssqlLockTimeoutConnector) Driver() driver.Driver {
-	return c.parent.Driver()
+	return connector, nil
 }
 
 // applyConnectTimeout appends the engine-appropriate connection timeout
@@ -767,19 +746,15 @@ func ConnectReplica(ctx context.Context, pool DB, replicaDSN string, replicaMaxC
 	replicaDSN = applyConnectTimeout(replicaDSN, engine, 10*time.Second)
 	replicaDSN = applyStatementTimeout(replicaDSN, engine, 30*time.Second)
 
-	// MSSQL: same connector wrapper as ConnectWithOptions.
+	// MSSQL: same lock limit as ConnectWithOptions.
 	var db *sql.DB
 	switch engine {
 	case "mssql":
-		connector, err := mssql.NewConnector(replicaDSN)
+		connector, err := mssqlConnector(replicaDSN, 30*time.Second)
 		if err != nil {
 			return fmt.Errorf("mssql replica connector: %w", err)
 		}
-		wrapped := &mssqlLockTimeoutConnector{
-			parent:  connector,
-			timeout: 30 * time.Second,
-		}
-		db = sql.OpenDB(wrapped)
+		db = sql.OpenDB(connector)
 	default:
 		var err error
 		db, err = sql.Open(driverNameFor(engine), driverDSN(engine, replicaDSN))
