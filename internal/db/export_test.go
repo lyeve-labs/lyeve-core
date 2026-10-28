@@ -32,3 +32,8 @@ func RewriteAccountAddress(ctx context.Context, pool DB, column, tenant string, 
 	outcome, err := rewriteAccountAddress(ctx, pool, column, accountAddressRow{id: id, tenant: tenant, value: read}, form)
 	return outcome == addressRewritten, err
 }
+
+// AddressRewriteOptions are the connection options of the address rewrite
+// that runs before the binary address keys, so a test can read what a
+// session opened with them is limited to.
+var AddressRewriteOptions = addressRewriteOptions

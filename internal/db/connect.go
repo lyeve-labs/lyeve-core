@@ -289,7 +289,7 @@ func Migrate(dsn, migrationsRoot string, seed VersionSeed) (int, error) {
 	}
 
 	before, _, _ := m.Version()
-	if err := rewriteAddressesBeforeBinaryKeys(context.Background(), m, dsn, abs); err != nil {
+	if err := rewriteAddressesBeforeBinaryKeys(context.Background(), m, engine, dsn, abs); err != nil {
 		return 0, err
 	}
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
@@ -303,18 +303,30 @@ func Migrate(dsn, migrationsRoot string, seed VersionSeed) (int, error) {
 // compare by byte on MySQL and SQL Server.
 const binaryAddressKeys = 12
 
+// addressRewriteOptions connect the rewrite before binaryAddressKeys. Its
+// scan reads every account, so on MySQL a statement gets 24 hours of run time
+// instead of the pool's 30 seconds. SQL Server bounds no run time, and the
+// lock wait the option sets lasts only until the driver resets the session,
+// so there a statement waits on a lock without limit.
+var addressRewriteOptions = ConnectOptions{MaxConns: 2, StatementTimeout: 24 * time.Hour}
+
 // rewriteAddressesBeforeBinaryKeys puts every account address in its one
 // Unicode form before binaryAddressKeys runs. From that migration on, an exact
 // lookup misses a row stored in another form, and the key admits a second
 // account in the form the lookup uses. Under the folding keys before it no
 // such second account can exist, so the rewrite has to finish first.
 //
-// It runs under the migration lock, only while the database records a version
-// below binaryAddressKeys: the schema is migrated to the version before it,
-// every row is rewritten with no time limit, and a failure stops the boot
-// before the keys change. A fresh database holds no rows and goes on. A
+// It runs on MySQL and SQL Server under the migration lock, only while the
+// database records a version below binaryAddressKeys: the schema is migrated
+// to the version before it, every row is rewritten under
+// addressRewriteOptions, and a failure stops the boot before the keys change.
+// The migration changes nothing on PostgreSQL, whose rows the rewrite after
+// the migrations covers. A fresh database holds no rows and goes on. A
 // migrations directory without both versions, such as a test's own, skips it.
-func rewriteAddressesBeforeBinaryKeys(ctx context.Context, m *migrate.Migrate, dsn, dir string) error {
+func rewriteAddressesBeforeBinaryKeys(ctx context.Context, m *migrate.Migrate, engine, dsn, dir string) error {
+	if engine != "mysql" && engine != "mssql" {
+		return nil
+	}
 	for _, v := range []int{binaryAddressKeys - 1, binaryAddressKeys} {
 		if found, _ := filepath.Glob(filepath.Join(dir, fmt.Sprintf("%03d_*.up.sql", v))); len(found) == 0 {
 			return nil
@@ -331,7 +343,7 @@ func rewriteAddressesBeforeBinaryKeys(ctx context.Context, m *migrate.Migrate, d
 	if err := m.Migrate(binaryAddressKeys - 1); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("run migrations: %w", err)
 	}
-	pool, err := Connect(ctx, dsn, 2)
+	pool, err := ConnectWithOptions(ctx, dsn, addressRewriteOptions)
 	if err != nil {
 		return fmt.Errorf("rewrite account addresses: connect: %w", err)
 	}

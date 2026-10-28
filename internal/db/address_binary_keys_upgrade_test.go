@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -32,8 +33,12 @@ var binaryKeyDialects = []struct {
 func rollBackTo(t *testing.T, pool db.DB, version int) {
 	t.Helper()
 	ctx := context.Background()
+	tree := pool.Engine()
+	if tree == "postgres" {
+		tree = "psql"
+	}
 	for v := 12; v > version; v-- {
-		found, err := filepath.Glob(filepath.Join("..", "..", "migrations", pool.Engine(), fmt.Sprintf("%03d_*.down.sql", v)))
+		found, err := filepath.Glob(filepath.Join("..", "..", "migrations", tree, fmt.Sprintf("%03d_*.down.sql", v)))
 		require.NoError(t, err)
 		require.Len(t, found, 1)
 		down, err := os.ReadFile(found[0])
@@ -52,9 +57,13 @@ func decomposedAccount(t *testing.T, pool db.DB) (string, string) {
 	t.Helper()
 	composed := "josé-" + uuid.NewString()[:8] + "@example.com"
 	id := uuid.NewString()
+	roles := `["editor"]`
+	if pool.Engine() == "postgres" {
+		roles = `{editor}`
+	}
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO sys_users (id, email, password_hash, roles, tenant_id) VALUES ($1, $2, $3, $4, $5)`,
-		id, norm.NFD.String(composed), "", `["editor"]`, "acme")
+		id, norm.NFD.String(composed), "", roles, "acme")
 	require.NoError(t, err)
 	return id, composed
 }
@@ -133,4 +142,43 @@ func TestMigrate_ConcurrentBootsRewriteBeforeBinaryKeys(t *testing.T) {
 			assert.Zero(t, left, "rows left in decomposed form")
 		})
 	}
+}
+
+// On PostgreSQL migration 012 changes nothing, so a boot that crosses it
+// leaves a decomposed address for the rewrite after the migrations.
+func TestMigrate_PostgresSkipsTheRewriteBeforeBinaryKeys(t *testing.T) {
+	if !testdb.ShouldTest("postgres") {
+		t.Skip("CI_DIALECT != postgres")
+	}
+	ctx := context.Background()
+	pool, dsn := testdb.PostgresWithDSN(t)
+	rollBackTo(t, pool, 11)
+	_, composed := decomposedAccount(t, pool)
+
+	n, err := db.Migrate(dsn, filepath.Join("..", "..", "migrations"), nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+
+	row, err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM sys_users WHERE email = $1`, norm.NFD.String(composed))
+	require.NoError(t, err)
+	var left int
+	require.NoError(t, row.Scan(&left))
+	assert.Equal(t, 1, left, "rows left in decomposed form")
+}
+
+// A MySQL session opened for the rewrite carries its 24 hour limit instead of
+// the pool's 30 seconds, so the scan of a large table finishes.
+func TestAddressRewriteOptions_MySQLCarriesTheRewriteLimit(t *testing.T) {
+	if !testdb.ShouldTest("mysql") {
+		t.Skip("CI_DIALECT != mysql")
+	}
+	ctx := context.Background()
+	_, dsn := testdb.MySQLWithDSN(t)
+	pool, err := db.ConnectWithOptions(ctx, dsn, db.AddressRewriteOptions)
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	var ms int64
+	require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT @@SESSION.max_execution_time`).Scan(&ms))
+	assert.Equal(t, (24 * time.Hour).Milliseconds(), ms)
 }
