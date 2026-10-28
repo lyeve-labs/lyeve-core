@@ -59,7 +59,7 @@ func TestAccountCreation_AddressIsCheckedAndStoredInOneForm(t *testing.T) {
 	h := NewUsersHandler(users)
 	h.host = auditOnlyHost{}
 	create := func(email string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(`{"email":"`+email+`","password":"`+password+`"}`))
+		r := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(`{"email":"`+email+`","password":"`+password+`","roles":["editor"]}`))
 		ctx := core.WithTenantID(r.Context(), "acme")
 		ctx = context.WithValue(ctx, core.ClaimsKey, &core.AuthClaims{UserID: uuid.NewString(), Roles: []string{"super_admin"}, TenantID: "acme"})
 		rr := httptest.NewRecorder()

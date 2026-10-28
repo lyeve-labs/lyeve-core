@@ -293,8 +293,21 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		}, super...),
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "Create a user", Security: bothAuth,
-			RequestBody: jsonBody(map[string]any{"email": "user@example.com", "password": "pass", "roles": []string{"editor"}}),
-			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "403": err403},
+			RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+				"type":     "object",
+				"required": []string{"email", "password", "roles"},
+				"properties": map[string]any{
+					"email":    map[string]any{"type": "string", "format": "email"},
+					"password": map[string]any{"type": "string"},
+					"roles": map[string]any{
+						"type": "array", "minItems": 1, "items": map[string]any{"type": "string"},
+						"description": "The roles the account holds. There is no default, so a request with no roles is refused.",
+					},
+				},
+				"example": map[string]any{"email": "user@example.com", "password": "pass", "roles": []string{"editor"}},
+			}}}},
+			Responses: map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "403": err403,
+				"422": map[string]any{"description": "A field is missing or invalid: no email, a password the policy refuses, or no roles"}},
 		}, super...),
 	}
 

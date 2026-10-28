@@ -286,6 +286,34 @@ func TestOpenAPI_MembershipPathsAreNotTheEngines(t *testing.T) {
 	require.NotNil(t, doc.Paths["/api/admin/auth/memberships"])
 }
 
+// The user create has no default role, so the published body says that roles
+// is required and holds at least one role, and lists the 422 that refuses it.
+func TestOpenAPI_UserCreateRequiresRoles(t *testing.T) {
+	raw, err := json.Marshal(buildOpenAPIDoc(nil, nil, openAPIOptions{}))
+	require.NoError(t, err)
+	var doc struct {
+		Paths map[string]map[string]struct {
+			RequestBody struct {
+				Content map[string]struct {
+					Schema struct {
+						Required   []string                  `json:"required"`
+						Properties map[string]map[string]any `json:"properties"`
+					} `json:"schema"`
+				} `json:"content"`
+			} `json:"requestBody"`
+			Responses map[string]any `json:"responses"`
+		} `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &doc))
+	op := doc.Paths["/api/admin/users"]["post"]
+	schema := op.RequestBody.Content["application/json"].Schema
+	assert.ElementsMatch(t, []string{"email", "password", "roles"}, schema.Required)
+	roles := schema.Properties["roles"]
+	assert.Equal(t, "array", roles["type"])
+	assert.EqualValues(t, 1, roles["minItems"])
+	assert.Contains(t, op.Responses, "422")
+}
+
 // The erase route answers 207 for a partial erasure, and the spec listed only
 // 200. Both answers are published with the fields that tell them apart.
 func TestOpenAPI_ErasePublishesThePartialAnswer(t *testing.T) {

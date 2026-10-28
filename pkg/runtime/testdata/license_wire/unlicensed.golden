@@ -1900,6 +1900,28 @@ body (json, newline):
                     "editor"
                   ]
                 },
+                "properties": {
+                  "email": {
+                    "format": "email",
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "roles": {
+                    "description": "The roles the account holds. There is no default, so a request with no roles is refused.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "roles"
+                ],
                 "type": "object"
               }
             }
@@ -1915,6 +1937,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "A field is missing or invalid: no email, a password the policy refuses, or no roles"
           }
         },
         "security": [
