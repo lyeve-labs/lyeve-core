@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -160,7 +161,24 @@ func (s *UserStore) CreateFirstAdmin(ctx context.Context, email, passwordHash, t
 // plain equality: wrapping the column in LOWER() would make the unique index
 // on email unusable and turn every login into a table scan.
 func (s *UserStore) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
-	return s.getOne(ctx, "get user by email", `WHERE email = $1`, core.NormalizeEmail(email))
+	email = core.NormalizeEmail(email)
+	u, err := s.getOne(ctx, "get user by email", `WHERE email = $1`, email)
+	if err != nil {
+		return nil, err
+	}
+	return holderOf(u, u.Email, email)
+}
+
+// holderOf returns u when stored, the address column a lookup compared, is
+// address under compliance.SameAddress, and domain.ErrNotFound otherwise.
+// Equality in SQL follows the column's collation, which is not the address
+// rule on every dialect, so the stored value is compared again and an
+// address resolves to the same account, or to none, on all three.
+func holderOf(u *domain.User, stored, address string) (*domain.User, error) {
+	if !compliance.SameAddress(stored, address) {
+		return nil, domain.ErrNotFound
+	}
+	return u, nil
 }
 
 // GetByID fetches a user by UUID. Returns domain.ErrNotFound if missing.
@@ -213,8 +231,13 @@ func (s *UserStore) getOne(ctx context.Context, op, where string, args ...any) (
 // provider_email is address. Returns domain.ErrNotFound if missing. The unique
 // index on (tenant_id, provider_email) serves it.
 func (s *UserStore) GetByTenantProviderEmail(ctx context.Context, tenantID, address string) (*domain.User, error) {
-	return s.getOne(ctx, "get user by tenant and provider email",
-		`WHERE tenant_id = $1 AND provider_email = $2`, tenantID, core.NormalizeEmail(address))
+	address = core.NormalizeEmail(address)
+	u, err := s.getOne(ctx, "get user by tenant and provider email",
+		`WHERE tenant_id = $1 AND provider_email = $2`, tenantID, address)
+	if err != nil {
+		return nil, err
+	}
+	return holderOf(u, u.ProviderEmail, address)
 }
 
 // GetByTenantAddress fetches the account in tenantID whose email or
@@ -228,6 +251,9 @@ func (s *UserStore) GetByTenantAddress(ctx context.Context, tenantID, address st
 	local, localErr := s.GetByTenantProviderEmail(ctx, tenantID, address)
 	own, ownErr := s.getOne(ctx, "get user by tenant and email",
 		`WHERE tenant_id = $1 AND email = $2`, tenantID, address)
+	if ownErr == nil {
+		own, ownErr = holderOf(own, own.Email, address)
+	}
 	switch {
 	case localErr == nil:
 		return local, nil
