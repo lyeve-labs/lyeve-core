@@ -181,12 +181,25 @@ func TestContentHandler_Stream_FreesItsSlotWhenTheCredentialEnds(t *testing.T) {
 		require.True(t, ok)
 
 		openStreams(t, h, session, 7)
-		expiring := *claims
-		expiring.ExpiresAt = jwt.NewNumericDate(time.Now().Add(time.Second))
-		expired, done := openStreamDone(t, h, context.WithValue(session, auth.ClaimsKey, &expiring), "notes")
-		requireStreamCapped(t, refusedStream(t, h, session))
+		// The refusal proves that the expiring stream holds the eighth slot
+		// only when it is asked before the token expires. A token keeps whole
+		// seconds, so one minted a second out can expire at once, and a loaded
+		// host can take longer than that to ask. A run that asks too late
+		// proves nothing and tries again with a token twice as long.
+		for lifetime := 2 * time.Second; ; lifetime *= 2 {
+			expiring := *claims
+			expiring.ExpiresAt = jwt.NewNumericDate(time.Now().Add(lifetime))
+			expired, done := openStreamDone(t, h, context.WithValue(session, auth.ClaimsKey, &expiring), "notes")
+			refused := refusedStream(t, h, session)
+			asked := time.Now()
+			requireEndedByCredential(t, expired, done)
+			if asked.Before(expiring.ExpiresAt.Time) {
+				requireStreamCapped(t, refused)
+				break
+			}
+			require.Less(t, lifetime, 8*time.Second, "the refusal was never asked within the token's lifetime")
+		}
 
-		requireEndedByCredential(t, expired, done)
 		openStreamAs(t, h, session, "notes")
 		requireStreamCapped(t, refusedStream(t, h, session))
 	})
