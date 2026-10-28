@@ -15,9 +15,9 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-10-28T07:21:35Z from origin default branches.
+# Generated 2026-10-28T10:23:04Z from origin default branches.
 
-lyeve-libs = 5ef5e6641542e4f5d92fef4517b856a285ddf191
+lyeve-libs = 2ed917438ae668fed03f557313eedd47e5fd3913
 lyeve-plugin-ab-testing = 395327860e7f161ab8c243354f08985ecf372818
 lyeve-plugin-ai = 0f3829e94a0662d5682a0d75a1bc013bd3c7d36c
 lyeve-plugin-analytics = af3945b714b02adc9b1ea8183f4a8363eee41752
@@ -28,7 +28,7 @@ lyeve-plugin-bulk-import = c23aaa9aa652f384b72f08d8b22e406c9bfb7421
 lyeve-plugin-cache = 556d747a979c2a95490c8febe8432aeea8eb6f75
 lyeve-plugin-captcha = a959d00a9475d63d52d9d72aa0a318e742c528e2
 lyeve-plugin-cluster = b78adcfe6ddab618847d4fc4419b2e31c26db83b
-lyeve-plugin-content = 4541672e2b7afe37b12565fcd0d800ba6639ffe9
+lyeve-plugin-content = b97481875d800654f6bc472df5463a3f9ddc41d9
 lyeve-plugin-cron = 90fae591ea88bc942e28c221c9b8b77a634fc7d7
 lyeve-plugin-data-export = aeb89f47ac1e7ff421dbb8b83de729fa414d5d82
 lyeve-plugin-data-residency = 3cf9ba6d2d559147eb8f59b73342272b800f2558
@@ -61,8 +61,8 @@ lyeve-plugin-request-capture = b330c4f5bc2b7b1f69cf8ccc0b8e1dce88593e28
 lyeve-plugin-review = e87d1c50b7612a68e377cd2c955d3e4f87721b02
 lyeve-plugin-saml = 766585b6d33aee58888c53bed695ceeba0f4f9c4
 lyeve-plugin-schema = 8ac10882cea3e7956db72a389dec6ce5a4fa7a50
-lyeve-plugin-scim = 93294927c0c739b76109cc3f9ad8bd2edc180a15
-lyeve-plugin-search = 25e5b16ed310411ba9277285fd1d137957255ce9
+lyeve-plugin-scim = 0e422ecb3a2c1bcb70be6b29478fcbdfb2ea333d
+lyeve-plugin-search = 61a233b01e10fe8c44ea6e8920c7901850a66ef8
 lyeve-plugin-storage = b29ff0b3f79c8210d97bbb8f6448adea8c2e6095
 lyeve-plugin-synthetic-monitoring = 5647b44f5ddf72de6882c5b732fcfd7dbae660f9
 lyeve-plugin-telemetry = 78046aecadc2f70aed8ea8e76e6e08e8d54007d4
