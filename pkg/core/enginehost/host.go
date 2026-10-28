@@ -62,7 +62,9 @@ type engineHost struct {
 	storage core.Storage
 
 	// suppliedSchema is the only engine there is. Nothing here builds one.
-
+	// A plugin reload writes it through Stop and Start while content writes
+	// read it, so schemaMu guards every read and write.
+	schemaMu       sync.RWMutex
 	suppliedSchema core.SchemaEngine
 
 	// Built at construction over a reader that resolves per read, so a plugin
@@ -87,6 +89,11 @@ type engineHost struct {
 	// sign-in handlers). Atomic because a router rebuild replaces it while
 	// plugins serve requests. Until then a plugin cannot complete a challenge.
 	mfaChallenges atomic.Pointer[mfaChallengeBox]
+
+	// Wired by SetStepUpChecker (the admin router, when it builds the token
+	// routes). Atomic for the same reason as mfaChallenges. Until then a
+	// plugin's step-up answers as an outage.
+	stepUps atomic.Pointer[stepUpBox]
 
 	// Wired by RegisterEmailSender (the registering plugin's Start). Nil-safe:
 	// EmailSender() returns nil when no plugin registered one.
@@ -215,6 +222,7 @@ var (
 	_ core.FlowInvokerProvider              = (*engineHost)(nil)
 	_ core.FlowInvokerRegistrar             = (*engineHost)(nil)
 	_ core.PermissionCheckerProvider        = (*engineHost)(nil)
+	_ core.StepUpChecker                    = (*engineHost)(nil)
 	_ core.PermissionCheckerRegistrar       = (*engineHost)(nil)
 	_ core.ContentLocalizerProvider         = (*engineHost)(nil)
 	_ core.ContentLocalizerRegistrar        = (*engineHost)(nil)
@@ -324,8 +332,17 @@ func (h *engineHost) Config() core.Config {
 	return &configAdapter{cfg: h.cfg}
 }
 
+// instanceID is the replica name events carry, empty on a host built
+// without a config.
+func (h *engineHost) instanceID() string {
+	if h.cfg == nil {
+		return ""
+	}
+	return h.cfg.InstanceID
+}
+
 func (h *engineHost) Hooks() core.HookBus {
-	bus := core.HookBus(&hookBusAdapter{registry: h.registry})
+	bus := core.HookBus(&hookBusAdapter{registry: h.registry, instanceID: h.instanceID()})
 	if core.DebugHookBusFunc != nil {
 		bus = core.DebugHookBusFunc(bus)
 	}
@@ -336,7 +353,7 @@ func (h *engineHost) Hooks() core.HookBus {
 // core.HookPublisher. Only trusted callers should call Publish through this
 // interface.
 func (h *engineHost) HookPublisher() core.HookPublisher {
-	pub := core.HookPublisher(&hookBusAdapter{registry: h.registry})
+	pub := core.HookPublisher(&hookBusAdapter{registry: h.registry, instanceID: h.instanceID()})
 	if core.DebugHookPublisherFunc != nil {
 		pub = core.DebugHookPublisherFunc(pub)
 	}

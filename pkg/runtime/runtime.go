@@ -158,10 +158,12 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return fmt.Errorf("config load: %w", err)
 	}
 
-	// Derive the master KEK while the database connects. The derivation is
-	// cached per key, so the first KeyStore a plugin builds finds it ready
-	// instead of spending its start level on it.
-	engine.GoSafe("runtime-kek-warmup", func() { _, _ = encryption.NewKeyStore(cfg.EncryptionKey) })
+	// Before anything can log a data subject. It derives the master KEK, which
+	// is cached per key, so the KeyStores the router and the plugins build
+	// later find it ready.
+	if err := keySubjectRefs(cfg.EncryptionKey); err != nil {
+		return err
+	}
 
 	// GOMEMLIMIT + GC tuning
 	// Set a soft memory cap at 85% of the container limit so Go's GC triggers
@@ -365,6 +367,15 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return fmt.Errorf("migrate: %w", err)
 	} else if n > 0 {
 		logger.Info("migrations applied", "count", n)
+	}
+
+	// Account addresses
+	// Rows written before account addresses were stored in one Unicode form
+	// are rewritten into it, and accounts that collide in it are reported.
+	// A failure leaves the rows as they were and the next boot tries again,
+	// so it does not stop this one.
+	if _, err := db.NormalizeAccountEmails(ctx, pool, logger); err != nil {
+		logger.Warn("account addresses were not all normalized, and the next boot continues", "err", err)
 	}
 
 	// SQL Server snapshot reads
@@ -618,6 +629,13 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	if pool != nil {
 		loadPluginConfigOverlay(ctx,
 			db.NewPluginConfigStore(pool).WithSealer(db.NewConfigSealer(cfg.EncryptionKey)), logger)
+	}
+	// The settings Load read before the database was open take their stored
+	// values here, before the routers and middleware are built from them.
+	if changed, err := config.ApplyStoredSettings(cfg); err != nil {
+		logger.Error("stored settings not applied, starting on the environment and configuration file values", "err", err)
+	} else if len(changed) > 0 {
+		logger.Info("stored settings applied at start", "fields", changed)
 	}
 
 	// The account record is engine-owned, so no plugin exporter covers it and a
@@ -960,8 +978,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}
 
 	// Custom schema validators
-	// A name no plugin claims falls back to the pattern interpreter, so this
-	// is logged only when a plugin actually gave a name its own meaning.
+	// A name no plugin claims is left to the schema engine, so this is
+	// logged only when a plugin actually gave a name its own meaning.
 	if n := activator.RegisterCustomValidators(); n > 0 {
 		logger.Info("custom schema validators registered from plugins", "validators", n)
 	}
@@ -1211,6 +1229,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// a plugin may register one later, so a source captured now would be the
 	// built-in one for the life of the process.
 	contentSchemaSource := core.LazySchemaSource(hostBase.(core.SchemaSourceProvider).SchemaSource)
+	contentRules := core.LazyContentRules(hostBase.(core.ContentRulesProvider).ContentRules)
 
 	// Router option builder
 	// Closure so both the initial construction and the hot-reload callback
@@ -1221,6 +1240,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		opts := []api.RouterOption{
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
+			api.WithContentRules(contentRules),
 			// Both tenant guards apply here too, because the admin router is
 			// where content, media, users and schemas are authored. Without
 			// them an archived tenant would stay writable, and a super_admin
@@ -1294,6 +1314,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		return []api.RouterOption{
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
+			api.WithContentRules(contentRules),
 			// The content reads ask the host per request for the registered
 			// core.ContentLocalizer, so a locale is honored while a plugin
 			// provides one and ignored otherwise.
@@ -1330,6 +1351,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			api.WithLockoutBackend(lockoutBackend),
 			api.WithKeyStore(encKeyStore),
 			api.WithArchivedChecker(archivedChecker),
+			// The token sign-in records its audit entries through the host.
+			api.WithScalingHost(hostBase),
 			api.WithTenantValidator(tenantValidator),
 			api.WithTenantRoster(tenantRoster),
 			api.WithMembershipStore(memberships),

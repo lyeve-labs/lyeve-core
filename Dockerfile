@@ -11,9 +11,11 @@
 #   docker build -t lyeve-core:dev .
 #
 # The binary is static (CGO off, libwebp embedded as WASM), so the base is
-# distroless/static-debian12: CA certs, tzdata, a nonroot user. No libc, shell,
+# distroless/static-debian13: CA certs, tzdata, a nonroot user. No libc, shell,
 # or package manager. No shell means the HEALTHCHECK runs the binary's own
-# `healthcheck` subcommand.
+# `healthcheck` subcommand. Nothing in it links against the distribution, so
+# the release is chosen for the freshest tzdata and CA certificates: the
+# static-debian12 line still shipped tzdata 2026b after Debian fixed it.
 
 # Stage 1 prepares /app with the right ownership (distroless has no shell to
 # mkdir/chown). Pinned to $BUILDPLATFORM so cross-arch builds need no QEMU: it
@@ -33,7 +35,8 @@ RUN install -d /app/uploads && chown -R 65532:65532 /app
 # image can only COPY.
 RUN install -d -m 0700 -o 65532 -g 65532 /state/lyeve
 
-FROM gcr.io/distroless/static-debian12@sha256:a9fcaedd4c9b59e12dd65d954f0b5044f19b0647a8a3712e77205df9e7b102cd
+# gcr.io/distroless/static-debian13:latest
+FROM gcr.io/distroless/static-debian13@sha256:15f8637509792e05b97d83451b0b6ccfa4abd548f997e406ac1e72c87fe1fa78
 COPY --from=rootfs --chown=65532:65532 /app /app
 # --chmod is explicit because COPY does not carry the staged 0700 over. It
 # would land 0755 and leave the signing key's directory world-listable. A

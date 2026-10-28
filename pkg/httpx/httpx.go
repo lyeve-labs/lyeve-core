@@ -13,12 +13,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/go-playground/validator/v10"
@@ -139,6 +141,39 @@ func ErrorReq(w http.ResponseWriter, r *http.Request, status int, msg string) {
 		"code":       statusCode(status),
 		"request_id": rid,
 	})
+}
+
+// StoreError answers a failed store call with the status StoreStatusFor maps
+// it to and the static message msg, the way ErrorReq does, after
+// LogStoreFailure has recorded a 5xx.
+func StoreError(w http.ResponseWriter, r *http.Request, err error, msg string) {
+	status := StoreStatusFor(err)
+	LogStoreFailure(r, status, err)
+	ErrorReq(w, r, status, msg)
+}
+
+// LogStoreFailure records a failed store call that r is about to be answered
+// with status, for a handler whose answer StoreError cannot write, such as one
+// that carries an error code. A 5xx is logged once at warn with the status,
+// method, route pattern and the error, because the response carries none of
+// the cause and nothing else records it. The line keeps the request id, so it
+// joins the access line, and drops the tenant: driver text can carry column
+// values, and a line filed under a tenant is read by that tenant's admins. A
+// 4xx is the caller's outcome and is not logged.
+func LogStoreFailure(r *http.Request, status int, err error) {
+	if status < http.StatusInternalServerError {
+		return
+	}
+	route := ""
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		route = rctx.RoutePattern()
+	}
+	slog.WarnContext(core.LogContextWithoutTenant(r.Context()), "store call failed",
+		"status", status,
+		"method", r.Method,
+		"route", route,
+		"error", err.Error(),
+	)
 }
 
 // BodyTooLarge answers a request body refused for exceeding maxBytes with 413

@@ -28,6 +28,8 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Stub driver that yields a single row with token_version = 0. The smoke tests
@@ -1245,7 +1247,7 @@ func TestUsersHandler_Create_RefusesAnEmptyTenant(t *testing.T) {
 	t.Parallel()
 
 	h := NewUsersHandler(nil)
-	body := `{"email":"a@b.com","password":"LongEnough1Ab"}`
+	body := `{"email":"a@b.com","password":"LongEnough1Ab","roles":["editor"]}`
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -1256,28 +1258,45 @@ func TestUsersHandler_Create_RefusesAnEmptyTenant(t *testing.T) {
 	}
 }
 
-func TestUsersHandler_Create_DefaultsRoles(t *testing.T) {
+// A create that names no roles is refused before the store is reached, so
+// the nil store would panic if the handler went on. The roles are read with
+// the rest of the body, before the tenant, so a request missing both is
+// answered for the roles.
+func TestUsersHandler_Create_RefusesMissingRoles(t *testing.T) {
 	t.Parallel()
 
-	// Without a real UserStore, Create will panic when it tries to create.
-	// This test verifies the body parsing succeeds and roles default to ["editor"].
-	// The panic from nil UserStore is expected at the hash/store boundary.
-	h := NewUsersHandler(nil)
-	body := `{"email":"a@b.com","password":"LongEnough1Ab"}`
-	r := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(body))
-	r.Header.Set("Content-Type", "application/json")
-	r = r.WithContext(core.WithTenantID(r.Context(), "acme"))
-	rr := httptest.NewRecorder()
-
-	// Expect panic from nil UserStore.Create: proves body parsed and validated
-	func() {
-		defer func() {
-			if r := recover(); r == nil {
-				t.Error("expected panic from nil UserStore - validates parsing + validation pass")
+	for _, tc := range []struct {
+		name   string
+		roles  string
+		tenant string
+	}{
+		{"no roles key", ``, "acme"},
+		{"roles null", `,"roles":null`, "acme"},
+		{"roles empty", `,"roles":[]`, "acme"},
+		{"no roles and no tenant", ``, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := NewUsersHandler(nil)
+			body := `{"email":"a@b.com","password":"LongEnough1Ab"` + tc.roles + `}`
+			r := httptest.NewRequest(http.MethodPost, "/api/admin/users", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+			if tc.tenant != "" {
+				r = r.WithContext(core.WithTenantID(r.Context(), tc.tenant))
 			}
-		}()
-		h.Create(rr, r)
-	}()
+			rr := httptest.NewRecorder()
+			h.Create(rr, r)
+
+			require.Equal(t, http.StatusUnprocessableEntity, rr.Code, rr.Body.String())
+			var out struct {
+				Error string `json:"error"`
+				Code  string `json:"code"`
+			}
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
+			assert.Equal(t, "VALIDATION_REQUIRED", out.Code)
+			assert.Equal(t, "The field roles is required.", out.Error)
+		})
+	}
 }
 
 func TestUsersHandler_Create_Argon2IDAlgo(t *testing.T) {

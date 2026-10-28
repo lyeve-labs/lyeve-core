@@ -37,7 +37,7 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 		return
 	case err != nil:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 		return
 	case hidden.Names(fieldName):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
@@ -84,7 +84,7 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 
 	items, total, err := h.store.ListRelated(r.Context(), schemaName, id, f, limit, offset, h.draftResponse(w, r, f.RelationTo))
 	if err != nil {
-		httpx.ErrorReq(w, r, httpStatus(err), "failed to list related")
+		httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to list related")
 		return
 	}
 	for _, item := range items {
@@ -134,7 +134,7 @@ func (h *ContentHandler) SetRelations(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.store.SetRelations(r.Context(), schemaName, id, f, targetIDs); err != nil {
 		if !relationRefused(w, r, err) {
-			httpx.ErrorReq(w, r, httpStatus(err), "failed to set relations")
+			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to set relations")
 		}
 		return
 	}

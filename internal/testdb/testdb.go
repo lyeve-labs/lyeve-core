@@ -14,6 +14,7 @@ package testdb
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,8 +29,8 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/database/sqlserver"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
-	_ "github.com/jackc/pgx/v5/stdlib"  // pgx driver for sql.Open
-	_ "github.com/microsoft/go-mssqldb" // sqlserver driver for sql.Open
+	_ "github.com/jackc/pgx/v5/stdlib"      // pgx driver for sql.Open
+	mssql "github.com/microsoft/go-mssqldb" // sqlserver driver for sql.Open
 
 	"github.com/testcontainers/testcontainers-go"
 	tcmssql "github.com/testcontainers/testcontainers-go/modules/mssql"
@@ -110,22 +111,32 @@ var pgShared struct {
 	err        error
 }
 
+// postgresContainerOptions are the options the shared PostgreSQL container
+// starts with.
+func postgresContainerOptions() []testcontainers.ContainerCustomizer {
+	return []testcontainers.ContainerCustomizer{
+		postgres.WithDatabase("lyeve_test"),
+		postgres.WithUsername("lyeve"),
+		postgres.WithPassword("secret"),
+		// Each test database is a copy of the template that is dropped when
+		// its test ends, so the data directory lives in memory and the copies
+		// never reach the disk.
+		testcontainers.WithTmpfs(map[string]string{"/var/lib/postgresql/data": "rw"}),
+		testcontainers.WithWaitStrategy(
+			wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
+				WithStartupTimeout(60 * time.Second),
+		),
+	}
+}
+
 func ensurePostgres(t *testing.T) {
 	t.Helper()
 	testdialect.Require(t, "postgres")
 	pgShared.once.Do(func() {
 		ctx := context.Background()
 		pgShared.ctr, pgShared.err = postgres.Run(ctx,
-			containerImage("POSTGRES", "postgres:16-alpine"),
-			postgres.WithDatabase("lyeve_test"),
-			postgres.WithUsername("lyeve"),
-			postgres.WithPassword("secret"),
-			testcontainers.WithWaitStrategy(
-				wait.ForLog("database system is ready to accept connections").
-					WithOccurrence(2).
-					WithStartupTimeout(60*time.Second),
-			),
-		)
+			containerImage("POSTGRES", "postgres:16-alpine"), postgresContainerOptions()...)
 		if pgShared.err != nil {
 			return
 		}
@@ -511,6 +522,10 @@ func mssqlContainerOptions() []testcontainers.ContainerCustomizer {
 	return []testcontainers.ContainerCustomizer{
 		tcmssql.WithAcceptEULA(),
 		tcmssql.WithPassword("Str0ng@Passw0rd"),
+		// Every test database is created and dropped within its test, so the
+		// data directory lives in memory. SQL Server opens its files with
+		// O_DIRECT, which tmpfs accepts.
+		testcontainers.WithTmpfs(map[string]string{"/var/opt/mssql": "rw"}),
 		testcontainers.WithWaitStrategyAndDeadline(mssqlStartupWait,
 			wait.ForListeningPort("1433/tcp").WithStartupTimeout(mssqlStartupWait),
 			wait.ForLog("Recovery is complete.").WithStartupTimeout(mssqlStartupWait),
@@ -630,7 +645,7 @@ func prepareMSSQL() readyDB {
 		return readyDB{err: fmt.Errorf("mssql admin open: %w", err)}
 	}
 	defer adminDB.Close()
-	if _, err := adminDB.ExecContext(context.Background(), fmt.Sprintf("CREATE DATABASE [%s]", dbName)); err != nil {
+	if err := createMSSQLDatabase(context.Background(), adminDB, dbName); err != nil {
 		return readyDB{err: fmt.Errorf("mssql CREATE DATABASE %s: %w", dbName, err)}
 	}
 	testDSN := mssqlDSN(dbName)
@@ -643,4 +658,46 @@ func prepareMSSQL() readyDB {
 		return readyDB{name: dbName, err: err}
 	}
 	return readyDB{name: dbName, migrations: n, ddl: ddl}
+}
+
+// mssqlModelLocked is SQL Server's refusal of a CREATE DATABASE while another
+// statement holds the model database, which every new database is copied
+// from. Two preparations run at once and a finished test drops its database
+// beside them, so a create can meet another statement's lock, and the server
+// asks for the statement to be retried.
+const mssqlModelLocked = 1807
+
+// mssqlCreateWait bounds how long a CREATE DATABASE keeps retrying the model
+// lock. Each attempt also waits about 20 seconds on the server before it is
+// refused, so a create can take up to about 80 seconds in all.
+const mssqlCreateWait = time.Minute
+
+// createMSSQLDatabase creates dbName, retrying while another statement holds
+// the model database.
+func createMSSQLDatabase(ctx context.Context, admin *sql.DB, dbName string) error {
+	stmt := fmt.Sprintf("CREATE DATABASE [%s]", dbName)
+	deadline := time.Now().Add(mssqlCreateWait)
+	for {
+		_, err := admin.ExecContext(ctx, stmt)
+		if err == nil || !mssqlModelIsLocked(err) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// mssqlModelIsLocked reports whether err carries error 1807. The driver
+// numbers an error after the last message of its batch, and SQL Server
+// follows 1807 with 1802, so every message of the batch is read.
+func mssqlModelIsLocked(err error) bool {
+	var msErr mssql.Error
+	if !errors.As(err, &msErr) {
+		return false
+	}
+	for _, e := range append([]mssql.Error{msErr}, msErr.All...) {
+		if e.Number == mssqlModelLocked {
+			return true
+		}
+	}
+	return false
 }

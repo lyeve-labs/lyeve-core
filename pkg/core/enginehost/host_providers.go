@@ -233,10 +233,17 @@ func (h *engineHost) RevokeAllRefreshTokens(ctx context.Context, userID string) 
 // is decoded from Get and List, so an engine written without the content path
 // in mind still feeds it.
 func (h *engineHost) SchemaSource() core.SchemaSource {
-	if h.suppliedSchema != nil {
-		return core.SchemaSourceOf(h.suppliedSchema)
+	if e := h.Schema(); e != nil {
+		return core.SchemaSourceOf(e)
 	}
 	return core.AbsentSchemaSource{}
+}
+
+// ContentRules implements core.ContentRulesProvider. It answers the rules of
+// whatever engine a plugin registered, and a refusal of every content write
+// when none has or the registered one supplies none.
+func (h *engineHost) ContentRules() core.ContentRules {
+	return core.ContentRulesOf(h.Schema())
 }
 
 // WithContentStore replaces the host's content store with the one the API
@@ -255,6 +262,8 @@ func (h *engineHost) WithContentStore(store *db.ContentStore) {
 // nil. This module builds no schema engine, so the registered one is the only
 // one the install has.
 func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) error {
+	h.schemaMu.Lock()
+	defer h.schemaMu.Unlock()
 	h.suppliedSchema = e
 	return nil
 }
@@ -262,6 +271,8 @@ func (h *engineHost) RegisterSchemaEngine(e core.SchemaEngine) error {
 // Schema implements core.Host.Schema. It is whatever a plugin registered, and
 // nil when none has, because this module builds no schema engine.
 func (h *engineHost) Schema() core.SchemaEngine {
+	h.schemaMu.RLock()
+	defer h.schemaMu.RUnlock()
 	return h.suppliedSchema
 }
 

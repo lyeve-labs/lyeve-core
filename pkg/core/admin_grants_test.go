@@ -80,6 +80,19 @@ func TestAdminGrants_CatalogIsClosedAndDescribed(t *testing.T) {
 	assert.Equal(t, AdminGrantContentRead, AdminGrants()[0].Name)
 }
 
+// Creating, changing and deleting a webhook stay super admin because a
+// webhook holds its signing secret, so the line an operator reads when
+// issuing a token names only what the write grant opens.
+func TestAdminGrants_WebhooksWriteNamesOnlyWhatItOpens(t *testing.T) {
+	var line string
+	for _, g := range AdminGrants() {
+		if g.Name == AdminGrantWebhooksWrite {
+			line = g.Description
+		}
+	}
+	assert.Equal(t, "Test webhooks, retry deliveries, set the retry policy and work the dead-letter queue.", line)
+}
+
 // A declaration marks its own route session only: the same method and the
 // same pattern whatever its parameters are called. A literal route beside it
 // is another route, and the engine's patterns still apply.

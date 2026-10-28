@@ -40,7 +40,7 @@ func TestIdentifier_TruncatesToTheColumnLimit(t *testing.T) {
 	}
 	got := Identifier(long)
 	assert.Len(t, got, 63)
-	assert.NoError(t, domain.ValidateIdentifier(got))
+	assert.Regexp(t, `^[a-zA-Z_][a-zA-Z0-9_]*$`, got)
 }
 
 func TestFieldName_AvoidsTheEnginesOwnColumns(t *testing.T) {

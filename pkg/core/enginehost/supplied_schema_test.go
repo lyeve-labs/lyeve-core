@@ -1,6 +1,7 @@
 package enginehost
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/lyeve-labs/lyeve-core/internal/testsupply/schemaengine"
@@ -46,4 +47,46 @@ func TestEngineHost_ForgetsTheEngineWhenThePluginStops(t *testing.T) {
 	if got := h.Schema(); got != nil {
 		t.Fatalf("Schema() = %T after deregistration, want nil", got)
 	}
+}
+
+// A plugin reload registers nil in Stop and its engine again in Start while
+// content writes read the engine through Schema, SchemaSource and
+// ContentRules. Under -race this fails if any of those reads is unguarded.
+func TestEngineHost_ReadsTheEngineSafelyDuringAReload(t *testing.T) {
+	h := &engineHost{}
+	supplied := schemaengine.New(nil)
+	stop := make(chan struct{})
+	reloaded := make(chan struct{})
+
+	go func() {
+		defer close(reloaded)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = h.RegisterSchemaEngine(nil)
+			_ = h.RegisterSchemaEngine(supplied)
+		}
+	}()
+
+	var readers sync.WaitGroup
+	for range 4 {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for range 2000 {
+				if e := h.Schema(); e != nil && e != core.SchemaEngine(supplied) {
+					t.Errorf("Schema() returned %T, want the registered engine or nil", e)
+					return
+				}
+				_ = h.SchemaSource()
+				_ = h.ContentRules()
+			}
+		}()
+	}
+	readers.Wait()
+	close(stop)
+	<-reloaded
 }

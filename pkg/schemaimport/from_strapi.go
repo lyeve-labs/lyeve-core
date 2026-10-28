@@ -28,6 +28,9 @@ type strapiSchema struct {
 		PluralName   string `json:"pluralName"`
 		DisplayName  string `json:"displayName"`
 	} `json:"info"`
+	Options struct {
+		DraftAndPublish bool `json:"draftAndPublish"`
+	} `json:"options"`
 	Attributes map[string]strapiAttribute `json:"attributes"`
 }
 
@@ -81,6 +84,9 @@ func FromStrapi(data []byte) (*Conversion, error) {
 		}
 
 		b := newBuilder(conv, name, src.Info.DisplayName)
+		// Draft and publish decides whether an entry is public, so a type
+		// converted without it would publish every entry written into it.
+		b.schema.WithDraftPublish = src.Options.DraftAndPublish
 		attrs := make([]string, 0, len(src.Attributes))
 		for a := range src.Attributes {
 			attrs = append(attrs, a)

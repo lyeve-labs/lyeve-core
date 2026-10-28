@@ -167,12 +167,20 @@ const (
 	// declared their reach before it had a capability of its own.
 	CapSessionKey // read the session signing secret (jwt_secret, jwt_secrets)
 
+	// CapStepUp grants CheckStepUp: a check of a password or an
+	// authenticator code for the account the request's session names. A
+	// wrong answer counts against that account's sign-in lockouts, and the
+	// session claims are a value any plugin can set on its own request, so
+	// only the plugin that asks the owner to confirm a sensitive action holds
+	// it.
+	CapStepUp // check a step-up answer for the session's account (CheckStepUp)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey
+		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey | CapStepUp
 
 	// CapRoles is every capability that does nothing but appoint a plugin to
 	// a host role. A declaration narrows what a plugin reaches and never

@@ -152,7 +152,7 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 	net := requesterNet(ip)
 	open, err := h.store.CountPendingFrom(ctx, net, now)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not start the sign-in.")
+		httpx.StoreError(w, r, err, "Could not start the sign-in.")
 		return
 	}
 	if open >= deviceLoginPendingPerAddress {
@@ -161,7 +161,7 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	all, err := h.store.CountPending(ctx, now)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not start the sign-in.")
+		httpx.StoreError(w, r, err, "Could not start the sign-in.")
 		return
 	}
 	if all >= deviceLoginPendingMax {
@@ -256,7 +256,7 @@ func (h *deviceLoginHandler) Lookup(w http.ResponseWriter, r *http.Request) {
 			httpx.ErrorReq(w, r, http.StatusForbidden, "Your account is not a member of the tenant this session acts in.")
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read the sign-in.")
+		httpx.StoreError(w, r, err, "Could not read the sign-in.")
 		return
 	}
 	approver := clientIP(r)
@@ -287,7 +287,7 @@ func (h *deviceLoginHandler) callerAccount(w http.ResponseWriter, r *http.Reques
 			httpx.ErrorReq(w, r, http.StatusUnauthorized, "session invalidated")
 			return nil, false
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read your account.")
+		httpx.StoreError(w, r, err, "Could not read your account.")
 		return nil, false
 	}
 	return user, true
@@ -350,7 +350,7 @@ func (h *deviceLoginHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	// sessions end, by a logout, a password change or an erasure, is refused.
 	version, err := h.users.GetTokenVersion(ctx, user.ID)
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not approve the sign-in.")
+		httpx.StoreError(w, r, err, "Could not approve the sign-in.")
 		return
 	}
 	var tenant *string
@@ -391,7 +391,7 @@ func (h *deviceLoginHandler) decisionFailed(w http.ResponseWriter, r *http.Reque
 		deviceNotDecidable(w, r, http.StatusConflict, "decided", "This sign-in was already approved or denied.")
 		return
 	}
-	httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), msg)
+	httpx.StoreError(w, r, err, msg)
 }
 
 // decidable reads the request the path's user code names and requires it to
@@ -410,7 +410,7 @@ func (h *deviceLoginHandler) decidable(w http.ResponseWriter, r *http.Request) (
 			deviceNotDecidable(w, r, http.StatusNotFound, "unknown", "No sign-in is waiting for this code.")
 			return nil, false
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read the sign-in.")
+		httpx.StoreError(w, r, err, "Could not read the sign-in.")
 		return nil, false
 	}
 	if d.Status != domain.DeviceLoginPending {
@@ -464,7 +464,7 @@ func (h *deviceLoginHandler) Token(w http.ResponseWriter, r *http.Request) {
 			deviceTokenError(w, deviceErrInvalidGrant, "The device code is not recognized.", 0)
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read the sign-in.")
+		httpx.StoreError(w, r, err, "Could not read the sign-in.")
 		return
 	}
 
@@ -494,7 +494,7 @@ func (h *deviceLoginHandler) pollPending(w http.ResponseWriter, r *http.Request,
 	interval := time.Duration(d.PollInterval) * time.Second
 	polled, err := h.store.MarkPolled(ctx, d.ID, now, now.Add(-interval+deviceLoginPollSlack))
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read the sign-in.")
+		httpx.StoreError(w, r, err, "Could not read the sign-in.")
 		return
 	}
 	if polled {
@@ -502,7 +502,7 @@ func (h *deviceLoginHandler) pollPending(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	if err := h.store.SlowDown(ctx, d.ID, now, deviceLoginSlowDownStep, deviceLoginMaxInterval); err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not read the sign-in.")
+		httpx.StoreError(w, r, err, "Could not read the sign-in.")
 		return
 	}
 	next := min(d.PollInterval+deviceLoginSlowDownStep, deviceLoginMaxInterval)
@@ -525,7 +525,7 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 			h.refuseExchange(w, r, d, "account_gone")
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not complete the sign-in.")
+		httpx.StoreError(w, r, err, "Could not complete the sign-in.")
 		return
 	}
 	now := h.now()
@@ -550,7 +550,7 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 			h.refuseExchange(w, r, d, "not_a_member")
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not complete the sign-in.")
+		httpx.StoreError(w, r, err, "Could not complete the sign-in.")
 		return
 	}
 	if !hasRole(roles, "admin") && !hasRole(roles, "super_admin") {
@@ -565,7 +565,7 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 			deviceTokenError(w, deviceErrExpired, "The sign-in expired or was already used. Start it again.", 0)
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "Could not complete the sign-in.")
+		httpx.StoreError(w, r, err, "Could not complete the sign-in.")
 		return
 	}
 

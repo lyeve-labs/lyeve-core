@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -239,6 +240,8 @@ func capName(c Capability) string {
 		return "CapSessionSign"
 	case CapSessionKey:
 		return "CapSessionKey"
+	case CapStepUp:
+		return "CapStepUp"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -475,6 +478,20 @@ func (h *ScopedHost) CompleteMFAChallenge(ctx context.Context, challengeToken st
 		return c.CompleteMFAChallenge(ctx, challengeToken)
 	}
 	return "", ErrCapDenied
+}
+
+// CheckStepUp forwards to inner if it implements StepUpChecker. Denied
+// without CapStepUp, because a plugin can set the session claims on its own
+// request, and every wrong answer it sends spends that account's lockouts.
+func (h *ScopedHost) CheckStepUp(r *http.Request, factor, answer string) error {
+	if !h.has(CapStepUp) {
+		h.warnDenied("CheckStepUp", "", CapStepUp)
+		return ErrCapDenied
+	}
+	if c, ok := h.inner.(StepUpChecker); ok {
+		return c.CheckStepUp(r, factor, answer)
+	}
+	return fmt.Errorf("step-up checks are not available on this host: %w", ErrServiceUnavailable)
 }
 
 // CachedFetch forwards to inner if it implements QueryCacheProvider.
@@ -725,6 +742,19 @@ func (h *ScopedHost) SchemaSource() SchemaSource {
 	return AbsentSchemaSource{}
 }
 
+// ContentRules forwards to inner if it implements ContentRulesProvider. It is
+// the rules every content write passes, which are the registered engine's. A
+// host that provides none refuses the write rather than letting it through
+// unchecked.
+func (h *ScopedHost) ContentRules() ContentRules {
+	if p, ok := h.inner.(ContentRulesProvider); ok {
+		if r := p.ContentRules(); r != nil {
+			return r
+		}
+	}
+	return AbsentContentRules{}
+}
+
 // RegisterSchemaEngine forwards to inner if it implements
 // SchemaEngineRegistrar, for a plugin holding CapSchema. Every content read
 // and write goes through the engine. More than one plugin holds CapSchema
@@ -864,6 +894,7 @@ var (
 	_ RecordRevisionStoreRegistrar     = (*ScopedHost)(nil)
 	_ SchemaEngineRegistrar            = (*ScopedHost)(nil)
 	_ EmailSenderRegistrar             = (*ScopedHost)(nil)
+	_ StepUpChecker                    = (*ScopedHost)(nil)
 	_ StorageSetter                    = (*ScopedHost)(nil)
 	_ UserProvisionerSetter            = (*ScopedHost)(nil)
 	_ MetricsGathererProvider          = (*ScopedHost)(nil)

@@ -158,8 +158,7 @@ func (a *adminTokenAuth) authenticate(next http.Handler) http.Handler {
 				httpx.ErrorReq(w, r, http.StatusUnauthorized, msgAdminTokenInvalid)
 				return
 			}
-			slog.WarnContext(r.Context(), "admin token lookup failed", "err", err)
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), msgAdminTokenCheckFailed)
+			httpx.StoreError(w, r, err, msgAdminTokenCheckFailed)
 			return
 		}
 
@@ -377,6 +376,7 @@ var engineAdminGrants = []core.RouteDecl{
 var enginePublicAdminRoutes = []core.RouteDecl{
 	{Method: http.MethodGet, Pattern: "/api/admin/setup"},
 	{Method: http.MethodPost, Pattern: "/api/admin/setup"},
+	{Method: http.MethodGet, Pattern: "/api/admin/auth/sign-in-routes"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/login"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/refresh"},
 	{Method: http.MethodPost, Pattern: "/api/admin/auth/mfa-verify"},

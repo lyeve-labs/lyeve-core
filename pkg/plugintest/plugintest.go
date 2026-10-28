@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -91,6 +92,24 @@ func WithPermissionChecker(c core.PermissionChecker) HostOption {
 	}
 }
 
+// WithStepUpChecker registers c as the engine's step-up checks. When not
+// set, CheckStepUp answers as an engine that has not wired them yet: an
+// outage, never a pass.
+func WithStepUpChecker(c core.StepUpChecker) HostOption {
+	return func(h *testHost) {
+		h.stepUp = c
+	}
+}
+
+// WithEmailSender registers s as the host's mail sender, the way the plugin
+// that owns mail does on the engine host. When not set, EmailSender returns
+// nil, as an engine with no mail plugin does.
+func WithEmailSender(s core.EmailSender) HostOption {
+	return func(h *testHost) {
+		h.mail = s
+	}
+}
+
 // dbPool is the minimal interface needed from a database pool.
 // db.DB (internal/db) satisfies this interface.
 type dbPool interface {
@@ -145,6 +164,8 @@ type testHost struct {
 	storage core.Storage
 	caps    *core.CapabilitySet
 	perms   core.PermissionChecker
+	stepUp  core.StepUpChecker
+	mail    core.EmailSender
 
 	// configSections is the registry a plugin's Start registers its
 	// configuration section in, as it does on the engine host.
@@ -182,6 +203,22 @@ func (h *testHost) PermissionChecker() core.PermissionChecker {
 	}
 	return core.RoleOnlyPermissionChecker{}
 }
+
+var (
+	_ core.StepUpChecker       = (*testHost)(nil)
+	_ core.EmailSenderProvider = (*testHost)(nil)
+)
+
+// CheckStepUp answers through the checker WithStepUpChecker registered.
+func (h *testHost) CheckStepUp(r *http.Request, factor, answer string) error {
+	if h.stepUp == nil {
+		return fmt.Errorf("step-up checks are not wired: %w", core.ErrServiceUnavailable)
+	}
+	return h.stepUp.CheckStepUp(r, factor, answer)
+}
+
+// EmailSender returns the sender WithEmailSender registered, or nil.
+func (h *testHost) EmailSender() core.EmailSender { return h.mail }
 
 // Querier returns a core.Querier backed by the database pool.
 func (h *testHost) Querier(ctx context.Context) core.Querier {
@@ -286,6 +323,13 @@ func (h *testHost) RegisterSchemaEngine(e core.SchemaEngine) error {
 // every role a plugin registers.
 func (h *testHost) RegisterOwnedRole(owner string, role core.HostRole, clear bool, set func() error) error {
 	return h.roleHolders.RegisterOwnedRole(owner, role, clear, set)
+}
+
+// ContentRules implements core.ContentRulesProvider, answering the rules of
+// whatever engine was registered or supplied, and a refusal of every write
+// otherwise.
+func (h *testHost) ContentRules() core.ContentRules {
+	return core.ContentRulesOf(h.schema)
 }
 
 // SchemaSource implements core.SchemaSourceProvider, answering the registry

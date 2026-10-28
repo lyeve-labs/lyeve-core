@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -149,8 +148,7 @@ func respondTenantResolution(w http.ResponseWriter, r *http.Request, err error) 
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	slog.Warn("membership lookup failed", "err", err)
-	respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+	respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 }
 
 // Memberships lists every tenant the caller may act in, so a client can offer
@@ -176,7 +174,7 @@ func (h *AuthHandler) Memberships(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 
@@ -190,7 +188,7 @@ func (h *AuthHandler) Memberships(w http.ResponseWriter, r *http.Request) {
 	if h.memberships != nil {
 		list, err := h.memberships.ListForUser(r.Context(), userID)
 		if err != nil {
-			respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+			respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 			return
 		}
 		for _, m := range list {

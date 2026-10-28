@@ -10,6 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // update sends one PUT to the content route and returns the response.
@@ -64,19 +67,25 @@ func TestContentHandler_Update_ValidatesOnlyThePresentFields(t *testing.T) {
 			assert.Contains(t, rr.Body.String(), `"required"`)
 		})
 
-		t.Run("a present field outside its enum is refused", func(t *testing.T) {
+		t.Run("a failure the rules report is answered 422 and nothing is written", func(t *testing.T) {
 			id := newNote(t)
+			fx.rules.refuse = map[string]core.SchemaValidationError{"status": {
+				Field: "status", Code: "SCHEMA_VALIDATION_ENUM", Rule: "enum",
+				Params: map[string]any{"values": "open, closed"},
+			}}
+			t.Cleanup(func() { fx.rules.refuse = nil })
+
 			rr := fx.update(t, "notes", id, map[string]any{"status": "deleted"})
 			require.Equal(t, http.StatusUnprocessableEntity, rr.Code, rr.Body.String())
-			assert.Contains(t, rr.Body.String(), `"enum"`)
+			assert.Equal(t, "application/json", rr.Header().Get("Content-Type"))
+			assert.JSONEq(t, `{"errors":[{"field":"status","message":"The field status must be one of: open, closed.","code":"SCHEMA_VALIDATION_ENUM","rule":"enum"}]}`, rr.Body.String())
 			assert.Equal(t, "open", dataOf(t, fx.get(t, "notes", id))["status"])
-		})
 
-		t.Run("a present field of the wrong type is refused", func(t *testing.T) {
-			id := newNote(t)
-			rr := fx.update(t, "notes", id, map[string]any{"title": true})
+			fr := fx
+			fr.ctx = i18n.WithLocale(fx.ctx, i18n.LocaleFR)
+			rr = fr.update(t, "notes", id, map[string]any{"status": "deleted"})
 			require.Equal(t, http.StatusUnprocessableEntity, rr.Code, rr.Body.String())
-			assert.Contains(t, rr.Body.String(), `"field_type"`)
+			assert.Contains(t, rr.Body.String(), "Le champ status")
 		})
 
 		t.Run("a present unique field that collides is refused", func(t *testing.T) {

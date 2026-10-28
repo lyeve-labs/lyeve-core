@@ -803,6 +803,20 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/auth/sign-in-routes": {
+      "get": {
+        "description": "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "List the sign-in routes the plugins mounted",
+        "tags": [
+          "Admin / Auth"
+        ]
+      }
+    },
     "/api/admin/config": {
       "get": {
         "responses": {
@@ -951,7 +965,102 @@ body (json, newline):
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "complete": {
+                      "description": "True only when every part erased and no legal hold kept any",
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "description": "What is unfinished, that the account was not erased, and that repeating the request finishes it",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "failed": {
+                      "description": "The owners that failed or did not run",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "holds": {
+                      "description": "Legal holds that kept data",
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "total_rows": {
+                      "description": "Rows erased or anonymized",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "identifier",
+                    "total_rows",
+                    "complete"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Erased. complete is false when a legal hold kept data"
+          },
+          "207": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "complete": {
+                      "description": "True only when every part erased and no legal hold kept any",
+                      "type": "boolean"
+                    },
+                    "errors": {
+                      "description": "What is unfinished, that the account was not erased, and that repeating the request finishes it",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "failed": {
+                      "description": "The owners that failed or did not run",
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "holds": {
+                      "description": "Legal holds that kept data",
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "identifier": {
+                      "type": "string"
+                    },
+                    "total_rows": {
+                      "description": "Rows erased or anonymized",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "identifier",
+                    "total_rows",
+                    "complete"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Partly erased: either the account was not erased, failed names the owners left, and repeating the request finishes it, or some rows were kept because they cannot be told apart from another account's data"
           },
           "400": {
             "description": "Bad request"
@@ -964,6 +1073,9 @@ body (json, newline):
           },
           "422": {
             "description": "The identifier is not an email address, an account id or an IP address"
+          },
+          "503": {
+            "description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"
           }
         },
         "security": [
@@ -1013,6 +1125,9 @@ body (json, newline):
           },
           "422": {
             "description": "The identifier is not an email address, an account id or an IP address"
+          },
+          "503": {
+            "description": "The subject's addresses could not be read, so nothing was exported. Repeat the request"
           }
         },
         "security": [
@@ -1785,6 +1900,28 @@ body (json, newline):
                     "editor"
                   ]
                 },
+                "properties": {
+                  "email": {
+                    "format": "email",
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  },
+                  "roles": {
+                    "description": "The roles the account holds. There is no default, so a request with no roles is refused.",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "roles"
+                ],
                 "type": "object"
               }
             }
@@ -1800,6 +1937,9 @@ body (json, newline):
           },
           "403": {
             "description": "Forbidden"
+          },
+          "422": {
+            "description": "A field is missing or invalid: no email, a password the policy refuses, or no roles"
           }
         },
         "security": [

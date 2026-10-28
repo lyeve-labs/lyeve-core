@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -84,6 +85,10 @@ type AuthHandler struct {
 
 	// setupToken authorizes first-run setup. Nil refuses every claim.
 	setupToken *SetupToken
+
+	// host is the engine host the audit writer stores each sign-in through.
+	// Nil records nothing.
+	host core.Host
 }
 
 // NewAuthHandler constructs an AuthHandler with the given user store, MFA
@@ -150,16 +155,22 @@ func (h *AuthHandler) WithSetupToken(t *SetupToken) {
 // LockoutChecker is an optional interface for checking account lockout status.
 // A plugin may implement it to track failed logins and enforce a threshold.
 type LockoutChecker interface {
-	// CountRecentFailures returns the number of failed login attempts for
-	// the given user within the specified window.
-	CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error)
-	// RecordFailedAttempt records a failed login attempt for the given user.
-	RecordFailedAttempt(ctx context.Context, userID uuid.UUID) error
+	// ReserveAttempt counts one password attempt for the user before the
+	// password is checked, in one step with reading the count. It reports
+	// false and counts nothing once the window holds limit attempts. A check
+	// that read the count and recorded a failure afterwards let every
+	// concurrent request that read before the first failure landed through
+	// to the password check.
+	ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error)
+	// ReleaseAttempt gives back one reserved attempt whose password was
+	// correct. Every other attempt in the window stays counted, wrong ones
+	// still in flight included.
+	ReleaseAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error
 }
 
 // WithLockoutChecker wires an optional lockout checker. When set, the Login
-// handler checks recent failures before password verification and returns 429
-// if the threshold is exceeded.
+// handler reserves an attempt before password verification and refuses once
+// the threshold is reached.
 func (h *AuthHandler) WithLockoutChecker(lc LockoutChecker) {
 	h.lockoutChecker = lc
 }
@@ -175,6 +186,28 @@ func (h *AuthHandler) WithSharedLockoutBackend(backend core.CacheBackend) {
 	h.lockoutChecker = NewSharedLockout(backend, h.LockoutWindow)
 	h.mfaLockoutChecker = NewSharedMFALockout(backend, 0, 0)
 	h.lockoutShared = true
+}
+
+// releasePasswordAttempt gives back the attempt a correct password reserved,
+// and only that one, so the wrong passwords in the window stay counted. A
+// release that fails is logged and changes no answer.
+func (h *AuthHandler) releasePasswordAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
+	if h.lockoutChecker == nil {
+		return
+	}
+	if err := h.lockoutChecker.ReleaseAttempt(ctx, userID, r); err != nil {
+		slog.WarnContext(ctx, "failed to release lockout attempt", "err", err, "user_id", userID)
+	}
+}
+
+// releaseMFAAttempt gives back the code attempt a request reserved, when the
+// code verified or the store failed before it could be judged, so neither a
+// correct code nor an outage counts against the owner. Only that attempt is
+// given back. A release that fails is logged.
+func (h *AuthHandler) releaseMFAAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
+	if err := h.mfaLockoutChecker.ReleaseMFAAttempt(ctx, userID, r); err != nil {
+		slog.WarnContext(ctx, "failed to release mfa attempt", "err", err, "user_id", userID)
+	}
 }
 
 // lockoutScopeNote says where a lockout lives, for the lines that report one.
