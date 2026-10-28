@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 )
 
 // collatedPairs are pairs of different addresses that a folding collation
@@ -98,4 +99,32 @@ func TestMigration012_DistinctAddressesBecomeDistinctAccounts(t *testing.T) {
 			assert.Equal(t, local.ID, again.ID)
 		}
 	})
+}
+
+// The MySQL down migration returns the address columns to the collation of
+// the sys_users table, not to the database default, which may have changed
+// since the table was created.
+func TestMigration012_MySQLDownRestoresTheTableCollation(t *testing.T) {
+	if !testdb.ShouldTest("mysql") {
+		t.Skip("CI_DIALECT != mysql")
+	}
+	ctx := context.Background()
+	pool, _ := testdb.MySQLWithDSN(t)
+	sqlDB := pool.SQLDB()
+	_, err := sqlDB.ExecContext(ctx, `ALTER DATABASE CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci`)
+	require.NoError(t, err)
+	down, err := os.ReadFile(filepath.Join("..", "..", "migrations", "mysql", "012_sys_users_address_binary_collation.down.sql"))
+	require.NoError(t, err)
+	_, err = sqlDB.ExecContext(ctx, string(down))
+	require.NoError(t, err)
+
+	var table string
+	require.NoError(t, sqlDB.QueryRowContext(ctx,
+		`SELECT table_collation FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'sys_users'`).Scan(&table))
+	for _, column := range []string{"email", "provider_email"} {
+		var got string
+		require.NoError(t, sqlDB.QueryRowContext(ctx,
+			`SELECT collation_name FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'sys_users' AND column_name = ?`, column).Scan(&got))
+		assert.Equal(t, table, got, column)
+	}
 }
