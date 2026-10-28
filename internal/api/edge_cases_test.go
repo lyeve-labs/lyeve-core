@@ -379,7 +379,7 @@ var homoglyphs = []struct {
 
 	// Invisible formatting
 	{"soft_hyphen", "ad\u00admin", "SOFT HYPHEN U+00AD"},
-	{"nobreak_space", "admin test", "NO-BREAK SPACE U+00A0"},
+	{"nobreak_space", "admin\u00a0test", "NO-BREAK SPACE U+00A0"},
 	{"ogham_space", "admin test", "OGHAM SPACE MARK U+1680"},
 
 	// Fullwidth and math
