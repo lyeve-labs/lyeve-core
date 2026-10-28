@@ -102,16 +102,22 @@ func NormalizeAccountEmails(ctx context.Context, pool DB, logger *slog.Logger) (
 	// rewrote and found.
 	defer func() { logAccountEmailForm(logger, report) }()
 
+	return report, rewriteEveryAccountAddress(ctx, pool, &report)
+}
+
+// rewriteEveryAccountAddress rewrites every candidate row in both address
+// columns, adding what it did to report.
+func rewriteEveryAccountAddress(ctx context.Context, pool DB, report *AccountEmailFormReport) error {
 	byColumn, err := accountAddressCandidates(ctx, pool)
 	if err != nil {
-		return report, err
+		return err
 	}
 	for _, column := range []string{"email", "provider_email"} {
-		if err := rewriteAccountAddresses(ctx, pool, column, byColumn[column], &report); err != nil {
-			return report, err
+		if err := rewriteAccountAddresses(ctx, pool, column, byColumn[column], report); err != nil {
+			return err
 		}
 	}
-	return report, nil
+	return nil
 }
 
 // accountAddressCandidates reads every account whose email or provider_email
