@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.56.1] - 2026-10-28
+
+### Fixed
+
+- Sign-in and account provisioning fixes in the password reset, sign-in link, OAuth, SAML and SCIM plugins, through the plugin releases this engine pins.
+
 ## [0.56.0] - 2026-10-26
 
 ### Security
@@ -668,4 +674,3 @@ engine written in Go, and it runs on PostgreSQL, MySQL 8 and SQL Server.
   on. It is refused with 403 like on any other address. An install with
   tenancy on and a single tenant refuses such an account too. Only a request
   with no credential, and a super admin, take the domain's tenant.
-
