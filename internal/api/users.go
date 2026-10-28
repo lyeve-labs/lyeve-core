@@ -87,6 +87,7 @@ func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create adds a new CMS user.
 // POST /api/admin/users
 // Body: {"email": "...", "password": "...", "roles": ["..."]}
+// roles is required and holds at least one role.
 // Auth: super_admin.
 func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -107,8 +108,11 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnprocessableEntity, code, params)
 		return
 	}
+	// An account holds only the roles its creator names. A default would
+	// grant a role the caller never asked for.
 	if len(body.Roles) == 0 {
-		body.Roles = []string{"editor"}
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, map[string]any{"field": "roles"})
+		return
 	}
 
 	// The tenant the account belongs to. An install with tenancy on resolves

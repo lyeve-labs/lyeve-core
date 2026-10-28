@@ -83,7 +83,7 @@ func TestAdminRouter_UsersRoutesHoldTheConfiguredPasswordPolicy(t *testing.T) {
 
 			t.Run("user create", func(t *testing.T) {
 				rr := send(http.MethodPost, "/api/admin/users",
-					`{"email":"policy-new-`+uuid.NewString()[:8]+`@example.com","password":"`+password+`"}`)
+					`{"email":"policy-new-`+uuid.NewString()[:8]+`@example.com","password":"`+password+`","roles":["editor"]}`)
 				requireTooShort(t, rr)
 			})
 			t.Run("super admin sets a password", func(t *testing.T) {
