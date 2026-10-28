@@ -70,6 +70,10 @@ for dirpath, dirs, names in os.walk(root):
         parts = FUNC.split('\n' + src)
         for i in range(1, len(parts), 2):
             name_, body = parts[i], parts[i + 1]
+            # TestMain is the package's entry point, not a test. It takes
+            # *testing.M, which has nothing to assert with.
+            if name_ == 'TestMain':
+                continue
             if ASSERTS.search(body):
                 continue
             # The marker sits in the comment block above the function, which
