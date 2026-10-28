@@ -277,6 +277,11 @@ func (s *UserStore) CreateTenantLocal(ctx context.Context, tenantID, address, pa
 		return err
 	})
 	if insertErr != nil {
+		// Only a taken key means another create won. Any other failure is
+		// the database's, and a caller answers it as unavailable.
+		if !core.IsDuplicateKey(insertErr) {
+			return nil, false, fmt.Errorf("create tenant-local user: %w", insertErr)
+		}
 		winner, getErr := s.GetByTenantProviderEmail(ctx, tenantID, address)
 		if getErr == nil {
 			return winner, false, nil
