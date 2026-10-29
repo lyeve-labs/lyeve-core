@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -35,18 +34,32 @@ func (m *staticLevelManager) DefaultLevel() slog.Level     { return m.level }
 //  2. Written to the configured LogSink (DB, Loki, ES, etc.) if set.
 //  3. Delegated to the inner slog.Handler (stdout JSON).
 type EnrichHandler struct {
-	inner   slog.Handler
-	mu      sync.RWMutex
-	leveler LevelManager
-	sink    observability.LogSink
+	inner slog.Handler
+	state *handlerState
 }
+
+// handlerState holds the level manager and sink that a root handler shares
+// with every handler derived from it, so a logger derived before the logging
+// plugin starts follows the level and reaches the sink it sets later. Both
+// are read on every log call, so they are atomic pointers rather than fields
+// behind a lock.
+type handlerState struct {
+	leveler atomic.Pointer[levelerRef]
+	sink    atomic.Pointer[sinkRef]
+}
+
+type levelerRef struct{ LevelManager }
+
+type sinkRef struct{ observability.LogSink }
 
 // NewEnrichHandler creates a new EnrichHandler wrapping the given inner handler.
 func NewEnrichHandler(inner slog.Handler, leveler LevelManager) *EnrichHandler {
 	if leveler == nil {
 		leveler = &staticLevelManager{level: slog.LevelInfo}
 	}
-	return &EnrichHandler{inner: inner, leveler: leveler}
+	h := &EnrichHandler{inner: inner, state: &handlerState{}}
+	h.state.leveler.Store(&levelerRef{leveler})
+	return h
 }
 
 // NewDefaultHandler creates an EnrichHandler writing JSON to os.Stdout at Info level.
@@ -57,43 +70,42 @@ func NewDefaultHandler() *EnrichHandler {
 	)
 }
 
-// SetLeveler replaces the level manager. Safe for concurrent use.
+// SetLeveler replaces the level manager for this handler and every handler
+// derived from it. Safe for concurrent use.
 func (h *EnrichHandler) SetLeveler(leveler LevelManager) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	if leveler == nil {
 		leveler = &staticLevelManager{level: slog.LevelInfo}
 	}
-	h.leveler = leveler
+	h.state.leveler.Store(&levelerRef{leveler})
 }
 
 // Leveler returns the current level manager.
 func (h *EnrichHandler) Leveler() LevelManager {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.leveler
+	return h.state.leveler.Load().LevelManager
 }
 
-// SetSink attaches a LogSink for persistent / external log delivery.
-// Every parsed record is written to the sink. Set to nil to detach.
+// SetSink attaches a LogSink for persistent / external log delivery, for this
+// handler and every handler derived from it. Every parsed record is written
+// to the sink. Set to nil to detach.
 func (h *EnrichHandler) SetSink(sink observability.LogSink) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.sink = sink
+	if sink == nil {
+		h.state.sink.Store(nil)
+		return
+	}
+	h.state.sink.Store(&sinkRef{sink})
 }
 
 // Sink returns the currently attached LogSink, or nil.
 func (h *EnrichHandler) Sink() observability.LogSink {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.sink
+	if ref := h.state.sink.Load(); ref != nil {
+		return ref.LogSink
+	}
+	return nil
 }
 
 // Enabled reports whether the handler is interested in the record.
 func (h *EnrichHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	h.mu.RLock()
-	leveler := h.leveler
-	h.mu.RUnlock()
+	leveler := h.Leveler()
 
 	tenant := tenantFromCtx(ctx)
 	plugin := PluginFromCtx(ctx)
@@ -170,10 +182,7 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 		tailer.Broadcast(entry)
 	}
 
-	h.mu.RLock()
-	sink := h.sink
-	h.mu.RUnlock()
-	if sink != nil {
+	if sink := h.Sink(); sink != nil {
 		sink.Write(entry)
 	}
 
@@ -201,18 +210,16 @@ func attrValue(a slog.Attr) any {
 // WithAttrs returns a new EnrichHandler with pre-added attributes.
 func (h *EnrichHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &EnrichHandler{
-		inner:   h.inner.WithAttrs(attrs),
-		leveler: h.leveler,
-		sink:    h.sink,
+		inner: h.inner.WithAttrs(attrs),
+		state: h.state,
 	}
 }
 
 // WithGroup returns a new EnrichHandler with grouped attributes.
 func (h *EnrichHandler) WithGroup(name string) slog.Handler {
 	return &EnrichHandler{
-		inner:   h.inner.WithGroup(name),
-		leveler: h.leveler,
-		sink:    h.sink,
+		inner: h.inner.WithGroup(name),
+		state: h.state,
 	}
 }
 
