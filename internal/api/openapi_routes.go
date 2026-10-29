@@ -338,7 +338,7 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	set("/api/admin/users/{id}/state", "put", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Lock or unlock a user", Security: both,
 		Parameters: []openAPIParameter{id}, RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object", "example": map[string]any{"locked": true}}}}},
-		Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "404": err404},
+		Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "404": err404, "409": map[string]any{"description": "The account's erasure is not complete, so it stays locked"}},
 	}, super...))
 	set("/api/admin/users/{id}/password", "put", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Set a user's password; every session the account held ends", Security: both,

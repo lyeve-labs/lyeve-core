@@ -57,6 +57,9 @@ const (
 	CodeUserNotFound  Code = "USER_NOT_FOUND"
 	CodeInvalidUserID Code = "USER_INVALID_ID"
 	CodeRolesRequired Code = "USER_ROLES_REQUIRED"
+	// CodeUserErasurePending refuses to enable an account whose erasure has
+	// not finished.
+	CodeUserErasurePending Code = "USER_ERASURE_PENDING"
 
 	// Tenant features
 	CodeTenantFeatureWithheld Code = "TENANT_FEATURE_WITHHELD"
