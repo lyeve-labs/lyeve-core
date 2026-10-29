@@ -18,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/internal/testhost"
 	"github.com/lyeve-labs/lyeve-core/internal/testsupply/schemaengine"
@@ -132,6 +133,7 @@ func TestSchemaImport_ReadsBundlesUpToItsOwnLimit(t *testing.T) {
 // admin routers that carry a schema engine.
 type importRig struct {
 	pool    db.DB
+	user    *domain.User
 	session string
 }
 
@@ -160,7 +162,7 @@ func forEachImportDialect(t *testing.T, fn func(t *testing.T, rig *importRig)) {
 			require.NoError(t, err)
 			session, err := auth.Sign(testConfig().JWTSecret, 3600, u.ID, u.Email, u.Roles, "default", u.TokenVersion)
 			require.NoError(t, err)
-			fn(t, &importRig{pool: pool, session: session})
+			fn(t, &importRig{pool: pool, user: u, session: session})
 		})
 	}
 }
