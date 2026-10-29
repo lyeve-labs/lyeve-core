@@ -324,6 +324,7 @@ func TestDefaultPublicRateLimits_Coverage(t *testing.T) {
 		"POST:/api/admin/auth/device/{user_code}/deny",
 		"POST:/api/admin/gdpr/export",
 		"POST:/api/admin/gdpr/erase",
+		"POST:/api/admin/gdpr/subject-digests",
 		"POST:/api/v1/auth/token",
 	}
 	keys := make([]string, 0, len(configs))

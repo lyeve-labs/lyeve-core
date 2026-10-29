@@ -107,6 +107,7 @@ func TestAuthHandler_SignInsAreAudited(t *testing.T) {
 		assert.Equal(t, "auth.login.refused", e.Action)
 		assert.Empty(t, e.ResourceID)
 		assert.Contains(t, e.AfterJSON, `"subject_digest":"`+compliance.SubjectDigest("nobody-here@example.com")+`"`)
+		assert.Contains(t, e.AfterJSON, `"subject_digest":"hmac-sha256:`, "a refused sign-in is named by the keyed digest")
 		assert.NotContains(t, e.AfterJSON, "nobody-here@example.com")
 	})
 

@@ -1147,6 +1147,73 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/gdpr/subject-digests": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "identifier": "user@example.com"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "digests"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Every digest an entry about the subject can carry, the current form first"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Values the audit log names a data subject by, to filter entries by resource id",
+        "tags": [
+          "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
     "/api/admin/health": {
       "get": {
         "responses": {

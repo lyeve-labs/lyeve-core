@@ -305,6 +305,46 @@ func (h *DSARHandler) Erase(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, status, resp)
 }
 
+// SubjectDigestsRequest is the JSON body for POST /api/admin/gdpr/subject-digests.
+type SubjectDigestsRequest struct {
+	Identifier string `json:"identifier" validate:"required,min=1,max=320"`
+}
+
+// SubjectDigestsResponse is the JSON response for POST
+// /api/admin/gdpr/subject-digests.
+type SubjectDigestsResponse struct {
+	Digests []string `json:"digests"`
+}
+
+// SubjectDigests answers every value an audit entry about the identifier can
+// name its subject by, the form entries are written in now first. The digest
+// is keyed by an instance secret, so a caller cannot compute it and asks the
+// engine instead. The forms entries were written in before stay in the list,
+// because the log is hash-chained and those entries are never rewritten.
+// POST /api/admin/gdpr/subject-digests
+// Body: {"identifier": "..."}
+// Auth: super_admin.
+func (h *DSARHandler) SubjectDigests(w http.ResponseWriter, r *http.Request) {
+	var body SubjectDigestsRequest
+	if _, err := httpx.DecodeJSON(r, &body); err != nil {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	body.Identifier = strings.TrimSpace(body.Identifier)
+	if !httpx.ValidateOrRespond(w, &body) {
+		return
+	}
+	if middleware.ContainsNullOrControl(body.Identifier) {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "identifier contains invalid characters")
+		return
+	}
+	if !namesASubject(body.Identifier) {
+		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, errNotASubject)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, SubjectDigestsResponse{Digests: compliance.SubjectDigests(body.Identifier)})
+}
+
 // writeAudit records the DSAR operation in the audit trail.
 //
 // The writer is supplied by a plugin and may be nil, and then a subject export

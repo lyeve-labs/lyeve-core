@@ -57,7 +57,10 @@ func registerSysUserEraser(host core.Host) {
 // lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
 // or the JWT_SECRET it falls back to: every replica shares it, and stored
 // ciphertext depends on it, so the install keeps it. A stateless engine may
-// hold neither, and its references then stay keyed to the process. Lives here
+// hold neither, and its references then stay keyed to the process. It has no
+// audit log either, so no audit entry is ever digested under that key. The
+// same key digests the subject of every audit entry, so an entry written
+// under one ENCRYPTION_KEY is not found by a lookup under another. Lives here
 // for the same reason as the registration above.
 //
 // The key comes from the stretched key-encryption key, never from the secret
