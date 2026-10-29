@@ -113,6 +113,11 @@ func FromWordPress(data []byte) (*Conversion, error) {
 		}
 		b := newBuilder(conv, postType, display)
 		addWordPressCoreFields(b)
+		// Post status becomes the engine's own draft state, which public reads
+		// filter on. A plain status column is read by nothing, so a draft post
+		// imported into one would be public.
+		b.schema.WithDraftPublish = true
+		conv.note(b.schema.Name, "", `post status maps onto draft and publish: only "publish" imports as published. draft, pending, private, future and every other status import as a draft, so who may read a private post and when a future post goes live are lost`)
 
 		for _, g := range byType[postType] {
 			for _, f := range g.Fields {
@@ -196,13 +201,13 @@ func acfPostTypes(g acfGroup) (targets []string, unsupported []string) {
 }
 
 // addWordPressCoreFields adds the columns every WordPress post has, so an
-// imported type holds its content and not only its custom fields.
+// imported type holds its content and not only its custom fields. Post status
+// is not one of them: it maps onto draft and publish.
 func addWordPressCoreFields(b *builder) {
 	b.add("title", domain.SchemaField{FieldType: "text", Required: true, Indexed: true})
 	b.add("slug", domain.SchemaField{FieldType: "text", Unique: true})
 	b.add("content", domain.SchemaField{FieldType: "rich_text"})
 	b.add("excerpt", domain.SchemaField{FieldType: "text"})
-	b.add("status", domain.SchemaField{FieldType: "text", Default: "publish"})
 	b.add("published_at", domain.SchemaField{FieldType: "datetime"})
 }
 
