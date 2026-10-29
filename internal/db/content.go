@@ -374,11 +374,12 @@ func (s *ContentStore) softDeleted(ctx context.Context, schemaName string, id uu
 }
 
 // List returns up to limit rows from the calling tenant's collection table,
-// ordered by created_at DESC, then id DESC. Postgres stamps every row of one
-// transaction with the same created_at, and offset pages over tied rows can
-// repeat some and skip others, so the unique id breaks the tie. filters maps column names to exact-match values
-// (safe: column names come from schema). User-defined field values are
-// returned inside Content.Data.
+// ordered by created_at DESC, then id DESC. Rows can share a created_at:
+// Postgres stamps every row of one transaction with one time, and MySQL every
+// row of one statement. Offset pages over tied rows can repeat some and skip
+// others, so the unique id breaks the tie. filters maps column names to
+// exact-match values (safe: column names come from schema). User-defined field
+// values are returned inside Content.Data.
 func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offset int, filters map[string]any) ([]*domain.Content, error) {
 	// limit<=0 means "no rows" per the pagination contract. MSSQL rejects
 	// FETCH NEXT 0 ROWS ONLY, so short-circuit before building the query.
