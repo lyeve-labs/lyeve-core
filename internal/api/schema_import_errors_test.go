@@ -45,6 +45,7 @@ func (h importHost) Schema() core.SchemaEngine { return h.eng }
 func postImport(t *testing.T, eng core.SchemaEngine, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/api/admin/schemas/import?apply=true", strings.NewReader(body))
+	r = r.WithContext(core.WithTenantID(r.Context(), "acme"))
 	rr := httptest.NewRecorder()
 	schemaImportHandler(importHost{eng: eng})(rr, r)
 	return rr
@@ -123,6 +124,7 @@ func TestSchemaImport_RefusedDefinitionIs422OnPlanAndApply(t *testing.T) {
 			eng := &refusingImportEngine{refuse: "article"}
 			rr := httptest.NewRecorder()
 			r := httptest.NewRequest(http.MethodPost, "/api/admin/schemas/import"+query, strings.NewReader(bundle))
+			r = r.WithContext(core.WithTenantID(r.Context(), "acme"))
 			schemaImportHandler(importHost{eng: eng})(rr, r)
 
 			require.Equal(t, http.StatusUnprocessableEntity, rr.Code, rr.Body.String())

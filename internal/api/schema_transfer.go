@@ -82,6 +82,9 @@ type schemaImportResponse struct {
 // the size was declared or found while reading.
 const bundleTooLarge = "content type definitions are too large"
 
+// schemaNeedsTenant answers an import that names no tenant.
+const schemaNeedsTenant = "schema definitions belong to a tenant, and the request names none"
+
 // schemaImportHandler reads a bundle, or a definition from another system, and
 // reports or applies what it would change.
 //
@@ -94,6 +97,15 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 		eng := schemaEngineFrom(host)
 		if eng == nil {
 			httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "schema engine unavailable")
+			return
+		}
+
+		// A definition written with no tenant in scope is stored under none,
+		// so no tenant lists it or owns it. A super admin with no tenant in
+		// scope is refused before the upload is read, as the schema write
+		// routes refuse one.
+		if _, err := core.RequireTenantID(r.Context()); err != nil {
+			httpx.ErrorReq(w, r, http.StatusBadRequest, schemaNeedsTenant)
 			return
 		}
 
