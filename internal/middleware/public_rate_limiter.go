@@ -155,7 +155,7 @@ func (l *PublicEndpointRateLimiter) cleanupLoop(ctx context.Context) {
 // Sign-in, token refresh and the MFA step: 5 req/s burst 10
 // Content API token: 5 req/s burst 10
 // Device sign-in start: 0.2 req/s burst 5
-// DSAR export: 10 req/s burst 20, erase: 5 req/s burst 10
+// DSAR export: 10 req/s burst 20, erase: 5 req/s burst 10, subject digests: 10 req/s burst 20
 // Global per-IP cap: 50 req/s burst 100
 func DefaultPublicRateLimits() (map[string]PublicRateLimitConfig, *PublicRateLimitConfig) {
 	configs := map[string]PublicRateLimitConfig{
@@ -165,6 +165,11 @@ func DefaultPublicRateLimits() (map[string]PublicRateLimitConfig, *PublicRateLim
 		// identifier at a time. Bounded by generation cost, not by brute force.
 		"POST:/api/admin/gdpr/export": {Rate: 10, Burst: 20},
 		"POST:/api/admin/gdpr/erase":  {Rate: 5, Burst: 10},
+		// The subject digests test an address against the audit log under
+		// the instance key, which is what keying the digest withholds from
+		// anyone without the instance, so a stolen session is held to the
+		// export's pace.
+		"POST:/api/admin/gdpr/subject-digests": {Rate: 10, Burst: 20},
 		// Core auth endpoints: brute-force targets for credential stuffing
 		"POST:/api/admin/auth/login":      {Rate: 5, Burst: 10},
 		"POST:/api/admin/auth/refresh":    {Rate: 5, Burst: 10},

@@ -1239,6 +1239,7 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"GET /api/admin/entitlements",
 			"POST /api/admin/gdpr/export",
 			"POST /api/admin/gdpr/erase",
+			"POST /api/admin/gdpr/subject-digests",
 			"GET /api/admin/health",
 			"GET /api/admin/ready",
 			"GET /api/admin/metrics",

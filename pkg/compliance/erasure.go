@@ -321,17 +321,49 @@ func SetSubjectRefKey(key []byte) error {
 	return nil
 }
 
-// SubjectDigest is how an audit entry names the subject of an export or an
-// erasure: "sha256:" and the hex SHA-256 of the identifier as the request
-// gave it. The audit log outlives the erasure, so it must not keep the
-// address the erasure removed, but it has to prove the request happened.
-// Anyone holding the identifier can recompute the digest and find the entry,
-// and the log alone does not say who it was about. The digest is whole and
-// unkeyed, unlike subjectRef, because the entry is evidence that has to be
-// found from the identifier rather than a correlation key.
+// SubjectDigest is how an audit entry names the subject of an export, an
+// erasure or a refused sign-in: "hmac-sha256:" and the hex HMAC-SHA-256 of the
+// identifier under the subject reference key, the whole sum. The audit log
+// outlives the erasure, so it must not keep the address the erasure removed,
+// but it has to prove the request happened. Keyed, the log alone does not say
+// who an entry is about, and a guessed address hashed without the key matches
+// nothing. SubjectDigests is how the entry is found again.
+//
+// An address is folded the way the engine stores it first, so a request typed
+// with other capitals names the same subject as the stored account. Any other
+// identifier is digested as given.
 func SubjectDigest(identifier string) string {
-	sum := sha256.Sum256([]byte(identifier))
-	return "sha256:" + hex.EncodeToString(sum[:])
+	mac := hmac.New(sha256.New, *subjectRefKey.Load())
+	mac.Write([]byte(subjectForm(identifier)))
+	return "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
+}
+
+// SubjectDigests returns every value an audit entry about the identifier can
+// carry, SubjectDigest's first. Entries written before the digest was keyed
+// carry "sha256:" and the plain SHA-256: a DSAR entry of the identifier as its
+// request typed it, and a refused sign-in of the folded address. The log is
+// hash-chained, so those entries are never rewritten, and the lookup has to
+// try both. An entry typed with other capitals than the identifier given here
+// is found only through the folded form.
+func SubjectDigests(identifier string) []string {
+	digests := []string{SubjectDigest(identifier)}
+	for _, form := range []string{subjectForm(identifier), identifier} {
+		sum := sha256.Sum256([]byte(form))
+		if d := "sha256:" + hex.EncodeToString(sum[:]); !slices.Contains(digests, d) {
+			digests = append(digests, d)
+		}
+	}
+	return digests
+}
+
+// subjectForm is the identifier as the engine stores it: an address folded by
+// core.NormalizeEmail, and anything else as given. An account id or an IP
+// address never holds an at sign.
+func subjectForm(identifier string) string {
+	if strings.Contains(identifier, "@") {
+		return core.NormalizeEmail(identifier)
+	}
+	return identifier
 }
 
 // slowEraser is the point past which an eraser is reported even though it
