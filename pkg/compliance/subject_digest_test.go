@@ -40,23 +40,44 @@ func TestSubjectDigest_OneKeyGivesAStableDigest(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, SetSubjectRefKey(key))
 
-	// HMAC-SHA-256 under the key above, computed outside Go. A change here
-	// leaves every entry an install has written unfindable.
-	assert.Equal(t, "hmac-sha256:34b9c8122332d277c72ad799d27ece5e9edf7c572ed1e5b6aa04c3f0bd465c16", SubjectDigest(knownAddress))
+	// HMAC-SHA-256 under the key above of the label, a zero byte and the
+	// address, computed outside Go. A change here leaves every entry an
+	// install has written unfindable.
+	assert.Equal(t, "hmac-sha256:d572c0156e00af3a9414b2aa26eb2d80e108d2b40fb8fe68fed70d63f98e8112", SubjectDigest(knownAddress))
 }
 
-// An address is digested in the form the engine stores it in, so a request
-// typed with other capitals names the same subject as the stored address.
-// Any other identifier is digested as given.
-func TestSubjectDigest_FoldsAnAddressOnly(t *testing.T) {
+// The log reference and the audit digest share the install key. Were the
+// digest the same HMAC, a log line naming an account beside its reference
+// would tie the account to its audit entries without the key.
+func TestSubjectDigest_IsNotTheLogReference(t *testing.T) {
 	keepSubjectRefKey(t)
 	require.NoError(t, SetSubjectRefKey([]byte("install-key-for-the-subject-digest-test")))
 
-	for _, typed := range []string{"Subject@Example.COM", "SUBJECT@EXAMPLE.COM", " subject@example.com "} {
-		assert.Equal(t, SubjectDigest(knownAddress), SubjectDigest(typed), typed)
+	for _, identifier := range []string{knownAddress, "6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b", "203.0.113.9"} {
+		digest := strings.TrimPrefix(SubjectDigest(identifier), "hmac-sha256:")
+		assert.False(t, strings.HasPrefix(digest, SubjectRef(identifier)), "%s: the digest starts with the log reference", identifier)
 	}
+}
+
+// Each identifier is digested in the form the engine stores it in, so a
+// request spelled another way names the same subject as the stored account:
+// an address folded, an account id and an IP address in their canonical text.
+func TestSubjectDigest_DigestsTheStoredForm(t *testing.T) {
+	keepSubjectRefKey(t)
+	require.NoError(t, SetSubjectRefKey([]byte("install-key-for-the-subject-digest-test")))
+
 	const id = "6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
-	assert.NotEqual(t, SubjectDigest(id), SubjectDigest(strings.ToUpper(id)), "an account id is digested as given")
+	for stored, spellings := range map[string][]string{
+		knownAddress:  {"Subject@Example.COM", "SUBJECT@EXAMPLE.COM", " subject@example.com "},
+		id:            {strings.ToUpper(id), "{" + id + "}", "urn:uuid:" + id},
+		"2001:db8::1": {"2001:DB8::1", "2001:0db8:0000:0000:0000:0000:0000:0001"},
+		"192.0.2.1":   {"::ffff:192.0.2.1"},
+	} {
+		for _, typed := range spellings {
+			assert.Equal(t, SubjectDigest(stored), SubjectDigest(typed), "%s is %s", typed, stored)
+		}
+	}
+	assert.NotEqual(t, SubjectDigest("Jane"), SubjectDigest("jane"), "a word that names no subject is digested as given")
 }
 
 // The lookup has to find entries written before the digest was keyed: a DSAR
@@ -76,4 +97,10 @@ func TestSubjectDigests_FindEveryFormAnEntryWasWrittenIn(t *testing.T) {
 
 	assert.Equal(t, []string{SubjectDigest(knownAddress), unkeyedDigest(knownAddress)}, SubjectDigests(knownAddress),
 		"a form that repeats is listed once")
+
+	const id = "6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+	got = SubjectDigests(strings.ToUpper(id))
+	assert.Equal(t, SubjectDigest(id), got[0])
+	assert.Contains(t, got, unkeyedDigest(strings.ToUpper(id)), "an old entry for the id as it was typed")
+	assert.Contains(t, got, unkeyedDigest(id), "an old entry for the stored id")
 }

@@ -91,7 +91,32 @@ func TestDSARHandler_AuditEntryIsFoundFromTheStoredAddress(t *testing.T) {
 		found = lookUpSubject(t, h, typed)
 		assert.Contains(t, found, unkeyedSubjectDigest(typed), "an earlier DSAR entry is not found")
 		assert.Contains(t, found, unkeyedSubjectDigest(stored), "an earlier sign-in entry is not found")
+
+		// An account id spelled in capitals erases the same account, so its
+		// entry is found from the id the account is stored under.
+		audit.calls = nil
+		require.Equal(t, http.StatusOK, postDSAR(t, h.Erase, "/api/admin/gdpr/erase", strings.ToUpper(account.ID.String())).Code)
+		require.Len(t, audit.calls, 1)
+		assert.Contains(t, lookUpSubject(t, h, account.ID.String()), audit.calls[0].ResourceID,
+			"the entry is not found from the stored account id")
 	})
+}
+
+// The lookup tests an identifier under the instance key, which is what the
+// keyed digest withholds from anyone without the instance, so each lookup is
+// audited the way an export is. The entry never holds the identifier.
+func TestDSARHandler_SubjectDigestsIsAudited(t *testing.T) {
+	audit := &mockAuditWriter{}
+	h := NewDSARHandler(audit, nil, nil)
+	const identifier = "Looked.Up@Example.com"
+	lookUpSubject(t, h, identifier)
+
+	require.Len(t, audit.calls, 1)
+	c := audit.calls[0]
+	assert.Equal(t, "gdpr.subject_lookup", c.Action)
+	assert.Equal(t, "gdpr_dsar", c.ResourceType)
+	assert.Equal(t, compliance.SubjectDigest(identifier), c.ResourceID)
+	assert.NotContains(t, strings.ToLower(c.ResourceID), "looked.up")
 }
 
 func TestDSARHandler_SubjectDigestsRefusesWhatNamesNoSubject(t *testing.T) {

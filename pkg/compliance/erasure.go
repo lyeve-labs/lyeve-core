@@ -9,12 +9,15 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
 	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -329,22 +332,30 @@ func SetSubjectRefKey(key []byte) error {
 // who an entry is about, and a guessed address hashed without the key matches
 // nothing. SubjectDigests is how the entry is found again.
 //
-// An address is folded the way the engine stores it first, so a request typed
-// with other capitals names the same subject as the stored account. Any other
-// identifier is digested as given.
+// The identifier is put in the form the engine stores it in first, so a
+// request spelled another way names the same subject as the stored account.
+// The HMAC covers a label ahead of it, so the digest shares no bytes with the
+// log reference under the same key: a log line that names an account beside
+// its reference must not tie that account to its audit entries.
 func SubjectDigest(identifier string) string {
 	mac := hmac.New(sha256.New, *subjectRefKey.Load())
+	mac.Write([]byte(subjectDigestLabel))
 	mac.Write([]byte(subjectForm(identifier)))
 	return "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
 }
+
+// subjectDigestLabel separates the audit digest from the log reference. It is
+// an input to every digest, so changing it leaves every entry already written
+// unfindable.
+const subjectDigestLabel = "lyeve audit subject\x00"
 
 // SubjectDigests returns every value an audit entry about the identifier can
 // carry, SubjectDigest's first. Entries written before the digest was keyed
 // carry "sha256:" and the plain SHA-256: a DSAR entry of the identifier as its
 // request typed it, and a refused sign-in of the folded address. The log is
 // hash-chained, so those entries are never rewritten, and the lookup has to
-// try both. An entry typed with other capitals than the identifier given here
-// is found only through the folded form.
+// try both. An old DSAR entry whose request spelled the identifier another way
+// than both the stored form and the identifier given here is found by neither.
 func SubjectDigests(identifier string) []string {
 	digests := []string{SubjectDigest(identifier)}
 	for _, form := range []string{subjectForm(identifier), identifier} {
@@ -357,11 +368,18 @@ func SubjectDigests(identifier string) []string {
 }
 
 // subjectForm is the identifier as the engine stores it: an address folded by
-// core.NormalizeEmail, and anything else as given. An account id or an IP
-// address never holds an at sign.
+// core.NormalizeEmail, an account id and an IP address in their canonical
+// text, and anything else as given. An account id or an IP address never
+// holds an at sign.
 func subjectForm(identifier string) string {
 	if strings.Contains(identifier, "@") {
 		return core.NormalizeEmail(identifier)
+	}
+	if id, err := uuid.Parse(identifier); err == nil {
+		return id.String()
+	}
+	if ip := net.ParseIP(identifier); ip != nil {
+		return ip.String()
 	}
 	return identifier
 }
