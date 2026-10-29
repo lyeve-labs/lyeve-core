@@ -374,7 +374,9 @@ func (s *ContentStore) softDeleted(ctx context.Context, schemaName string, id uu
 }
 
 // List returns up to limit rows from the calling tenant's collection table,
-// ordered by created_at DESC. filters maps column names to exact-match values
+// ordered by created_at DESC, then id DESC. Postgres stamps every row of one
+// transaction with the same created_at, and offset pages over tied rows can
+// repeat some and skip others, so the unique id breaks the tie. filters maps column names to exact-match values
 // (safe: column names come from schema). User-defined field values are
 // returned inside Content.Data.
 func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offset int, filters map[string]any) ([]*domain.Content, error) {
@@ -456,7 +458,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		       %s
 		FROM %s r
 		%s
-		ORDER BY created_at DESC
+		ORDER BY created_at DESC, id DESC
 		%s`, dataColumnExpr(s.pool.Engine(), sc, "r"), table, where, pagination),
 		args...,
 	)
