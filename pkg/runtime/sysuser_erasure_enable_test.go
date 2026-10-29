@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -69,6 +70,32 @@ func (a accountFixture) setState(body string) *httptest.ResponseRecorder {
 	return rr
 }
 
+// remove calls DELETE /api/admin/users/{id}.
+func (a accountFixture) remove() *httptest.ResponseRecorder {
+	h := api.NewUsersHandler(db.NewUserStore(a.pool))
+	req := httptest.NewRequest(http.MethodDelete, "/api/admin/users/"+a.id.String(), nil)
+	req.SetPathValue("id", a.id.String())
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	return rr
+}
+
+// marked reports whether the account still exists and carries the erasure
+// marker.
+func (a accountFixture) marked(t *testing.T) (exists, pending bool) {
+	t.Helper()
+	row, err := a.pool.QueryRow(context.Background(),
+		`SELECT CASE WHEN erasure_pending_at IS NULL THEN 0 ELSE 1 END FROM sys_users WHERE id = $1`, a.id)
+	require.NoError(t, err)
+	var n int
+	err = row.Scan(&n)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false
+	}
+	require.NoError(t, err)
+	return true, n == 1
+}
+
 func (a accountFixture) disabled(t *testing.T) bool {
 	t.Helper()
 	row, err := a.pool.QueryRow(context.Background(), `SELECT disabled FROM sys_users WHERE id = $1`, a.id)
@@ -126,6 +153,48 @@ func testErasureAdminEnableLeavesThePendingLock(t *testing.T, pool db.DB) {
 	assert.False(t, pending.Valid, "anonymization clears the marker")
 }
 
+// Deleting the account removed the marker with it. A new account for the
+// same person then signed in unmarked, and the erasure's retry, which runs by
+// the old id, found no address to erase the rest by.
+func TestErasure_AdminDeleteLeavesThePendingAccount_Postgres(t *testing.T) {
+	testErasureAdminDeleteLeavesThePendingAccount(t, testdb.Postgres(t))
+}
+
+func TestErasure_AdminDeleteLeavesThePendingAccount_MySQL(t *testing.T) {
+	testErasureAdminDeleteLeavesThePendingAccount(t, testdb.MySQL(t))
+}
+
+func TestErasure_AdminDeleteLeavesThePendingAccount_MSSQL(t *testing.T) {
+	testErasureAdminDeleteLeavesThePendingAccount(t, testdb.MSSQL(t))
+}
+
+func testErasureAdminDeleteLeavesThePendingAccount(t *testing.T, pool db.DB) {
+	t.Helper()
+	ctx := context.Background()
+	host := &revokingHost{Host: testhost.New(pool)}
+	compliance.ResetSubjectErasers()
+	t.Cleanup(compliance.ResetSubjectErasers)
+	compliance.ResetHoldChecker()
+	t.Cleanup(compliance.ResetHoldChecker)
+	var broken atomic.Bool
+	broken.Store(true)
+	compliance.RegisterSubjectEraser(newSysUserEraser(host))
+	compliance.RegisterSubjectEraser(switchableEraser{broken: &broken})
+
+	a := newAccountFixture(t, pool, "pending-delete")
+	_, err := compliance.RunSubjectErasureWithHolds(ctx, a.id.String())
+	require.Error(t, err, "one eraser fails, so the erasure is incomplete")
+
+	rr := a.remove()
+	assert.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+	exists, pending := a.marked(t)
+	assert.True(t, exists, "the delete leaves the account in place")
+	assert.True(t, pending, "the account keeps the erasure's marker")
+	if exists {
+		assert.True(t, a.disabled(t))
+	}
+}
+
 func TestUpdateState_DisableAndEnableWithNoErasurePending_Postgres(t *testing.T) {
 	testUpdateStateDisableAndEnableWithNoErasurePending(t, testdb.Postgres(t))
 }
@@ -151,4 +220,9 @@ func testUpdateStateDisableAndEnableWithNoErasurePending(t *testing.T, pool db.D
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	assert.False(t, a.disabled(t))
 	assert.Equal(t, http.StatusOK, a.signIn(), "an enabled account signs in again")
+
+	rr = a.remove()
+	require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	exists, _ := a.marked(t)
+	assert.False(t, exists, "an account with no erasure pending is deleted")
 }

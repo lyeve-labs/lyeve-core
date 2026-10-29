@@ -391,9 +391,12 @@ func (s *UserStore) UpdateRoles(ctx context.Context, id uuid.UUID, roles []strin
 	return s.GetByID(ctx, id)
 }
 
-// ErrErasurePending refuses to enable an account that an erasure locked and
-// has not yet anonymized. Enabling it would let the person sign back in and
-// write rows behind an eraser that already ran.
+// ErrErasurePending refuses to enable or delete an account that an erasure
+// locked and has not yet anonymized. Enabling it would let the person sign
+// back in and write rows behind an eraser that already ran. Deleting it would
+// drop the lock with the row, so a new account for the person signs in, and
+// the erasure's retry, which runs by the old id, finds no address to erase
+// the rest by.
 var ErrErasurePending = fmt.Errorf("account erasure pending: %w", domain.ErrConflict)
 
 // SetAccountState updates the account lockout fields on a user.
@@ -452,14 +455,19 @@ func (s *UserStore) SetAccountState(ctx context.Context, id uuid.UUID, disabled 
 	return s.GetByID(ctx, id)
 }
 
-// Delete removes a user by ID.
+// Delete removes a user by ID. An account whose erasure is pending is kept,
+// and the call returns ErrErasurePending. The condition is part of the
+// DELETE, so an erasure that starts during the call keeps its account.
 func (s *UserStore) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM sys_users WHERE id = $1`, id)
+	tag, err := s.pool.Exec(ctx, `DELETE FROM sys_users WHERE id = $1 AND erasure_pending_at IS NULL`, id)
 	if err != nil {
 		return fmt.Errorf("delete user: %w", err)
 	}
 	if n, _ := tag.RowsAffected(); n == 0 {
-		return domain.ErrNotFound
+		if _, err := s.GetByID(ctx, id); err != nil {
+			return err
+		}
+		return ErrErasurePending
 	}
 	return nil
 }
