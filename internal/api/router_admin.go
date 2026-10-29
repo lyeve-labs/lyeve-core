@@ -478,9 +478,12 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 					Post("/gdpr/export", dsarHandler.Export)
 				r.With(requireRole("super_admin"), publicRL.WrapFunc("POST", "/api/admin/gdpr/erase")).
 					Post("/gdpr/erase", dsarHandler.Erase)
+				r.With(requireRole("super_admin"), publicRL.WrapFunc("POST", "/api/admin/gdpr/subject-digests")).
+					Post("/gdpr/subject-digests", dsarHandler.SubjectDigests)
 			} else {
 				r.With(requireRole("super_admin")).Post("/gdpr/export", dsarHandler.Export)
 				r.With(requireRole("super_admin")).Post("/gdpr/erase", dsarHandler.Erase)
+				r.With(requireRole("super_admin")).Post("/gdpr/subject-digests", dsarHandler.SubjectDigests)
 			}
 		})
 

@@ -54,11 +54,16 @@ func registerSysUserEraser(host core.Host) {
 
 // keySubjectRefs keys the reference every log line names a data subject by.
 // The references have to agree on every replica and across restarts for the
-// lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
-// or the JWT_SECRET it falls back to: every replica shares it, and stored
-// ciphertext depends on it, so the install keeps it. A stateless engine may
-// hold neither, and its references then stay keyed to the process. Lives here
-// for the same reason as the registration above.
+// lines about one person to correlate, so the key comes from ENCRYPTION_KEY:
+// every replica shares it, and stored ciphertext depends on it, so the install
+// keeps it. The configuration refuses to load when ENCRYPTION_KEY is unset and
+// would fall back to JWT_SECRET, so the key never comes from a JWT secret and
+// rotating one leaves it as it is. A stateless engine holds neither, and its
+// references then stay keyed to the process. It has no audit log either, so no
+// audit entry is ever digested under that key. The same key digests the
+// subject of every audit entry, and the engine offers no way to rotate
+// ENCRYPTION_KEY, so an entry written under one is not found by a lookup
+// under another. Lives here for the same reason as the registration above.
 //
 // The key comes from the stretched key-encryption key, never from the secret
 // itself. One logged reference and one known address test a guessed secret,
