@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 
@@ -61,7 +62,8 @@ func ActorUserAgent(adminTokenID, userAgent string) string {
 // entries. The plugin registers it with RegisterAuditWriter when it starts.
 // With no writer registered, entries are dropped.
 //
-// Writer must not block. Failures are logged but not returned, because audit
+// Writer must not block past its context, which carries a deadline of at
+// most asyncAuditWait. Failures are logged but not returned, because audit
 // writes are best-effort for normal operations.
 //
 // WriterSync blocks until the entry is durably written (or fails). Use it
@@ -213,7 +215,7 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 				}
 			}
 		} else {
-			w.Writer(ctx, host, entry)
+			writeAsync(ctx, host, w, entry)
 		}
 		return
 	}
@@ -228,6 +230,32 @@ func RecordAuditWithState(ctx context.Context, host core.Host, action, resourceT
 	if slog := host.Logger(ctx); slog != nil {
 		slog.Debug("audit entry dropped: no writer registered",
 			"action", action, "resource_type", resourceType)
+	}
+}
+
+// asyncAuditWait bounds how long an asynchronous write waits for the writer
+// to take its entry. A writer that drains normally takes one within 10 ms
+// when a thousand entries arrive at once, and within 300 ms when four
+// thousand do, so a request waits this long only behind a writer that has
+// stopped draining. Past it the entry is dropped and logged rather than
+// holding the request.
+const asyncAuditWait = 500 * time.Millisecond
+
+// writeAsync hands the entry to the writer under asyncAuditWait, or under
+// the caller's own deadline when that comes first. An entry the writer could
+// not take before the deadline is logged by its action and tenant, never by
+// its subject.
+func writeAsync(ctx context.Context, host core.Host, w AuditLogWriter, entry AuditEntry) {
+	wctx, cancel := context.WithTimeout(ctx, asyncAuditWait)
+	defer cancel()
+	ended := ctx.Err() != nil
+	w.Writer(wctx, host, entry)
+	if ended || wctx.Err() == nil || host == nil {
+		return
+	}
+	if slog := host.Logger(ctx); slog != nil {
+		slog.Error("audit entry dropped: writer did not take it before the deadline",
+			"action", entry.Action, "tenant_id", entry.TenantID, "err", wctx.Err())
 	}
 }
 

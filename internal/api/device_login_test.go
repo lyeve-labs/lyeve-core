@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -79,8 +80,11 @@ func (rg *tokenRig) approveWith(userCode, bearer string, body map[string]any) *h
 var userCodeShape = regexp.MustCompile(`^[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{4}-[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{4}$`)
 
 // auditOnlyHost stands in for the engine host where only the audit writer,
-// which never calls it, is reached.
+// which never calls it, is reached. Its logger discards, because an audit
+// write the writer did not take in time is logged through the host.
 type auditOnlyHost struct{ core.Host }
+
+func (auditOnlyHost) Logger(context.Context) *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // recordingAuditWriter keeps the audit entries written through it.
 type recordingAuditWriter struct {
