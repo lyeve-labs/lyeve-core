@@ -320,7 +320,9 @@ type SubjectDigestsResponse struct {
 // name its subject by, the form entries are written in now first. The digest
 // is keyed by an instance secret, so a caller cannot compute it and asks the
 // engine instead. The forms entries were written in before stay in the list,
-// because the log is hash-chained and those entries are never rewritten.
+// because the log is hash-chained and those entries are never rewritten. Each
+// lookup is audited like an export, because it tests an identifier under the
+// key the digest withholds from everyone else.
 // POST /api/admin/gdpr/subject-digests
 // Body: {"identifier": "..."}
 // Auth: super_admin.
@@ -342,6 +344,7 @@ func (h *DSARHandler) SubjectDigests(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, errNotASubject)
 		return
 	}
+	h.writeAudit(r, "gdpr.subject_lookup", "gdpr_dsar", compliance.SubjectDigest(body.Identifier))
 	httpx.JSON(w, http.StatusOK, SubjectDigestsResponse{Digests: compliance.SubjectDigests(body.Identifier)})
 }
 
