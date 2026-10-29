@@ -154,8 +154,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Au moins un rôle est requis.",
 	},
 	CodeUserErasurePending: {
-		"en": "The account stays locked until its erasure is complete.",
-		"fr": "Le compte reste verrouillé jusqu'à la fin de son effacement.",
+		"en": "The account cannot be enabled or deleted until its erasure is complete.",
+		"fr": "Le compte ne peut être ni réactivé ni supprimé avant la fin de son effacement.",
 	},
 
 	// Tenant features

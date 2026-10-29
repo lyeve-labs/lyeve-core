@@ -348,7 +348,7 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	set("/api/admin/users/{id}", "delete", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Delete a user", Security: both,
 		Parameters: []openAPIParameter{id},
-		Responses:  map[string]any{"204": map[string]any{"description": "Deleted"}, "401": err401, "403": err403, "404": err404},
+		Responses:  map[string]any{"204": map[string]any{"description": "Deleted"}, "401": err401, "403": err403, "404": err404, "409": map[string]any{"description": "The account's erasure is not complete, so it is kept"}},
 	}, super...))
 	set("/api/admin/plugins/status", "get", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Plugins"}, Summary: "Every plugin's phase, start time and last error", Description: pluginStatusDescription(), Security: both,
