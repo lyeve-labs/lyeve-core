@@ -1,6 +1,7 @@
 package schemaimport
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -17,6 +18,18 @@ func noteFor(conv *Conversion, schema, field string) string {
 		}
 	}
 	return ""
+}
+
+// schemaNotes joins the messages recorded against a schema rather than one
+// of its fields.
+func schemaNotes(conv *Conversion, schema string) string {
+	var out []string
+	for _, n := range conv.Notes {
+		if n.Schema == schema && n.Field == "" {
+			out = append(out, n.Message)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // Strapi
@@ -191,6 +204,22 @@ func TestFromContentful_LinksBecomeRelations(t *testing.T) {
 	assert.Equal(t, domain.RelManyToMany, fieldByName(t, s, "tags").RelationType)
 }
 
+func TestFromContentful_CarriesDraftAndPublish(t *testing.T) {
+	// Every Contentful entry is drafted and published, so a type converted
+	// without draft and publish would publish every entry written into it.
+	conv, err := FromContentful([]byte(`[
+	  {"sys":{"id":"article"},"fields":[{"id":"title","type":"Symbol","localized":true}]},
+	  {"sys":{"id":"person"},"fields":[{"id":"name","type":"Symbol"}]}
+	]`))
+	require.NoError(t, err)
+
+	for _, name := range []string{"article", "person"} {
+		assert.True(t, schemaByName(t, conv.Bundle, name).WithDraftPublish, "content type %q", name)
+		assert.Contains(t, schemaNotes(conv, name), "draft and publish",
+			"the plan does not say how entry state maps onto %q", name)
+	}
+}
+
 func TestFromContentful_AmbiguousLinkIsReported(t *testing.T) {
 	// A link accepting several content types has no single relation target.
 	conv, err := FromContentful([]byte(`[
@@ -213,7 +242,7 @@ func TestFromContentful_LocalizedTurnsOnLocalization(t *testing.T) {
 
 	s := schemaByName(t, conv.Bundle, "article")
 	assert.True(t, s.WithLocalization)
-	assert.Contains(t, noteFor(conv, "article", ""), "one row per locale")
+	assert.Contains(t, schemaNotes(conv, "article"), "one row per locale")
 }
 
 // Contentful marks translation per field, and so does this engine. A field
@@ -280,7 +309,7 @@ func TestFromWordPress_AddsCoreFieldsAndACFFields(t *testing.T) {
 
 	// Without the core columns an imported type holds custom fields hanging off
 	// nothing.
-	for _, core := range []string{"title", "slug", "content", "excerpt", "status", "published_at"} {
+	for _, core := range []string{"title", "slug", "content", "excerpt", "published_at"} {
 		assert.Contains(t, fieldNames(s), core, "core WordPress field %q", core)
 	}
 
@@ -293,6 +322,27 @@ func TestFromWordPress_AddsCoreFieldsAndACFFields(t *testing.T) {
 		assert.Equal(t, fieldType, fieldByName(t, s, name).FieldType, "ACF field %q", name)
 	}
 	assert.True(t, fieldByName(t, s, "subtitle").Required, "ACF writes required as 1")
+}
+
+func TestFromWordPress_MapsPostStatusOntoDraftAndPublish(t *testing.T) {
+	// The engine keeps an entry's state in _status, which public reads filter
+	// on. A plain status column is read by nothing, so a draft post imported
+	// into it would be public.
+	conv, err := FromWordPress([]byte(`[{"title":"A",
+	  "location":[[{"param":"post_type","value":"article"}]],
+	  "fields":[{"name":"subtitle","type":"text"}]}]`))
+	require.NoError(t, err)
+
+	s := schemaByName(t, conv.Bundle, "article")
+	assert.True(t, s.WithDraftPublish, "a post type converts without draft and publish")
+	assert.NotContains(t, fieldNames(s), "status",
+		"post status imports as a second status column that public reads ignore")
+
+	notes := schemaNotes(conv, "article")
+	assert.Contains(t, notes, `only "publish" imports as published`)
+	for _, status := range []string{"draft", "pending", "private", "future"} {
+		assert.Contains(t, notes, status, "the plan does not say what becomes of %q posts", status)
+	}
 }
 
 func TestFromWordPress_RelationFields(t *testing.T) {

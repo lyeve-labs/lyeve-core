@@ -85,6 +85,9 @@ func FromContentful(data []byte) (*Conversion, error) {
 			continue
 		}
 		b := newBuilder(conv, name, t.Name)
+		// Every Contentful entry is drafted and published, so a type converted
+		// without draft and publish would publish every entry written into it.
+		b.schema.WithDraftPublish = true
 		localized := false
 
 		for _, f := range t.Fields {
@@ -128,6 +131,7 @@ func FromContentful(data []byte) (*Conversion, error) {
 			conv.note(b.schema.Name, "", "content type skipped: no fields could be mapped")
 			continue
 		}
+		conv.note(b.schema.Name, "", "draft and publish: an entry with a published version imports as published, an archived entry as archived, and every other entry as a draft. One row holds one version, so a published entry's newer unpublished changes are lost")
 		conv.Bundle.Schemas = append(conv.Bundle.Schemas, b.done())
 	}
 	return conv.finish("contentful")
