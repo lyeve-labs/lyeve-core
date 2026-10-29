@@ -875,7 +875,9 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 // ListRelated returns items from the target schema related to id via a
 // many_to_many pivot table. A soft-deleted target is never listed, and an
 // unpublished one only when drafts is true. The total counts what the same
-// filter would serve, so a page count never reveals a hidden row.
+// filter would serve, so a page count never reveals a hidden row. Targets are
+// ordered as List orders them, with the id breaking created_at ties, so an
+// offset page never repeats or skips a target.
 func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uuid.UUID, f domain.SchemaField, limit, offset int, drafts bool) ([]*domain.Content, int, error) {
 	pivotName, err := s.pivotTable(ctx, schemaName, f)
 	if err != nil {
@@ -921,7 +923,7 @@ func (s *ContentStore) ListRelated(ctx context.Context, schemaName string, id uu
 		FROM %s t
 		JOIN %s p ON p.%s = t.id
 		WHERE p.%s = $1 AND p.tenant_id = $2 AND t.tenant_id = $3%s
-		ORDER BY t.created_at DESC
+		ORDER BY t.created_at DESC, t.id DESC
 		%s`,
 		dataColumnExpr(s.pool.Engine(), relSchema, "t"),
 		targetTable, pivotName, bCol, aCol, visible, relPagination,
