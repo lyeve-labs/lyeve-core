@@ -149,3 +149,54 @@ func TestScopedHost_ContentEntryReader_ReachedThroughTheWriter(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []ContentEntryInput{in}, fake.saved, "the id, expected revision and note reach the store untouched")
 }
+
+// fakeVersionStore is a store that also lists an entry's revisions.
+type fakeVersionStore struct {
+	fakeEntryStore
+	asked []ContentEntryVersionQuery
+	page  ContentEntryVersionPage
+}
+
+func (f *fakeVersionStore) ContentEntryVersions(_ context.Context, id uuid.UUID, q ContentEntryVersionQuery) (ContentEntryVersionPage, error) {
+	if id != f.entry.ID {
+		return ContentEntryVersionPage{}, ErrNotFound
+	}
+	f.asked = append(f.asked, q)
+	return f.page, nil
+}
+
+// A consumer reaches the version list on the writer its scoped host hands
+// out, as it reaches the reader, and a writer without one is told apart.
+func TestScopedHost_ContentEntryVersionLister_ReachedThroughTheWriter(t *testing.T) {
+	inner := &entryWriterHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "content", CapAll)
+	consumer := NewScopedHost(inner, "pages", CapRoutes)
+
+	id := uuid.New()
+	author := uuid.New()
+	fake := &fakeVersionStore{
+		fakeEntryStore: fakeEntryStore{entry: ContentEntry{ID: id, Schema: "pages", Revision: 7}},
+		page: ContentEntryVersionPage{
+			Versions: []ContentEntryVersion{
+				{ContentEntry: ContentEntry{ID: id, Revision: 7, UpdatedBy: author}, Note: "Before the launch", Action: "updated", Source: "import"},
+				{ContentEntry: ContentEntry{ID: id, Revision: 5, UpdatedBy: author}, Action: "created"},
+			},
+			Total: 2, Hidden: 1, Recording: true,
+		},
+	}
+	require.NoError(t, owner.RegisterContentEntryWriter(fake))
+
+	l, ok := consumer.ContentEntryWriter().(ContentEntryVersionLister)
+	require.True(t, ok, "the writer the host returns must keep the version list it was registered with")
+	ctx := WithTenantID(context.Background(), "acme")
+	got, err := l.ContentEntryVersions(ctx, id, ContentEntryVersionQuery{Before: 7, Limit: 1})
+	require.NoError(t, err)
+	assert.Equal(t, fake.page, got)
+	assert.Equal(t, []ContentEntryVersionQuery{{Before: 7, Limit: 1}}, fake.asked, "the query reaches the store untouched")
+	_, err = l.ContentEntryVersions(ctx, uuid.New(), ContentEntryVersionQuery{Limit: 1})
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	var older ContentEntryWriter = &fakeEntryStore{}
+	_, lists := older.(ContentEntryVersionLister)
+	assert.False(t, lists, "a store that reads but does not list is told apart")
+}

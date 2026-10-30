@@ -165,6 +165,63 @@ type ContentEntry struct {
 	UpdatedBy uuid.UUID
 }
 
+// ContentEntryVersionLister lists an entry's past revisions, newest first,
+// with who wrote each, when, and the note it carries. A consumer finds it by
+// asserting it on the writer ContentEntryWriter returns, as it finds
+// ContentEntryReader.
+//
+// Every call is scoped to the tenant on ctx and refuses a context without
+// one with ErrTenantRequired. An entry the tenant does not hold, and a
+// deleted one, are ErrNotFound. A query outside its bounds is ErrValidation.
+type ContentEntryVersionLister interface {
+	// ContentEntryVersions returns one page of the entry's revisions.
+	// Revisions older than the caller's license lets it read are left out
+	// and counted in Hidden, except the entry's newest, which is always
+	// read.
+	ContentEntryVersions(ctx context.Context, id uuid.UUID, q ContentEntryVersionQuery) (ContentEntryVersionPage, error)
+}
+
+// ContentEntryVersionQuery is the page of revisions to list.
+type ContentEntryVersionQuery struct {
+	// Before lists only the revisions numbered below it, so Before set to
+	// a revision and Limit 1 read the revision that preceded it. 0 lists
+	// from the newest.
+	Before int
+	// Limit is the most revisions the page holds, from 1 to 100, and
+	// Offset how many it skips.
+	Limit  int
+	Offset int
+}
+
+// ContentEntryVersionPage is one page of an entry's revisions.
+type ContentEntryVersionPage struct {
+	// Versions are newest first.
+	Versions []ContentEntryVersion
+	// Total counts the revisions the query reads, across every page.
+	Total int
+	// Hidden counts the revisions the query matched that the caller's
+	// license keeps it from reading.
+	Hidden int
+	// Recording says whether a save of the entry records a revision now.
+	// A store that keeps a revision only when an administrator turned it
+	// on answers false while it is off, with the revisions it kept before.
+	Recording bool
+}
+
+// ContentEntryVersion is one past revision with what the store recorded
+// about the write. UpdatedAt and UpdatedBy say when and by whom.
+type ContentEntryVersion struct {
+	ContentEntry
+	// Note is the label the write gave the revision.
+	Note string
+	// Action is the kind of write, such as created, updated or rollback,
+	// and empty on a revision written before the store recorded one.
+	Action string
+	// Source is where the write came from, such as console or import, and
+	// empty on a revision written before the store recorded one.
+	Source string
+}
+
 // ContentEntryWriterRegistrar is implemented by the engine host. The plugin
 // that owns the editorial store calls it when it activates and again with
 // nil when it stops, so the registration follows the plugin's lifecycle,
