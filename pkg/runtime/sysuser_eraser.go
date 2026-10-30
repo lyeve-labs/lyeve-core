@@ -109,8 +109,9 @@ func logSubjectEraserRoster(ctx context.Context, logger *slog.Logger) {
 // can erase several. Replaces email with a per-row sentinel, clears
 // password_hash, provider_email and provider_seen_at, empties roles, and
 // bumps token_version so every previously issued JWT is rejected immediately.
-// Skips rows already marked anonymized, so a second erasure is a no-op. It
-// returns the number of rows erased.
+// Clears erasure_pending_at, which EndSessions set, so the account is no
+// longer held by a pending erasure. Skips rows already marked anonymized, so
+// a second erasure is a no-op. It returns the number of rows erased.
 func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return 0, nil
@@ -193,7 +194,8 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	     sessions_revoked_at = %s,
 	     anonymized = %s,
 	     provider_email = NULL,
-	     provider_seen_at = NULL
+	     provider_seen_at = NULL,
+	     erasure_pending_at = NULL
 	 WHERE anonymized = %s AND id IN `, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, boolFalse)
 
 	n, err := execByIDs(ctx, q, update, ids)
@@ -294,12 +296,16 @@ func (e *sysUserEraser) EndSessions(ctx context.Context, identifier string) erro
 	if err != nil {
 		return err
 	}
+	// erasure_pending_at keeps the lock: while it is set, the engine's enable
+	// and a directory's reactivation leave the account disabled. A retry
+	// keeps the time the first run set.
 	update := fmt.Sprintf(`UPDATE sys_users
 	 SET disabled = %s,
 	     token_version = token_version + 1,
 	     sessions_revoked_at = %s,
+	     erasure_pending_at = COALESCE(erasure_pending_at, %s),
 	     updated_at = %s
-	 WHERE anonymized = %s AND id IN `, boolTrue, utcFn, utcFn, boolFalse)
+	 WHERE anonymized = %s AND id IN `, boolTrue, utcFn, utcFn, utcFn, boolFalse)
 	if _, err := execByIDs(ctx, q, update, ids); err != nil {
 		return fmt.Errorf("sys_users sign-out: %w", err)
 	}
