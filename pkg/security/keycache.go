@@ -1,6 +1,8 @@
 package security
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"sync"
 )
@@ -15,6 +17,20 @@ const keyCacheSize = 4096
 // derivedKeys holds the PBKDF2 keys this process has already derived, so a
 // value is derived once per process instead of once per decrypt.
 var derivedKeys = newKeyCache(keyCacheSize)
+
+// keyCacheIDKey keys the cache ids. With a plain hash, a heap dump that holds
+// an id and its salt would let a passphrase guess be tested at hash speed
+// instead of through PBKDF2. A secret drawn once per process closes that, and
+// costs nothing because the cache never outlives the process.
+var keyCacheIDKey = newKeyCacheIDKey()
+
+func newKeyCacheIDKey() []byte {
+	key := make([]byte, 32)
+	// crypto/rand.Read never returns an error: it crashes the process when
+	// the system source fails, so there is nothing to handle.
+	_, _ = rand.Read(key)
+	return key
+}
 
 // keyCache maps a digest of (salt, passphrase) to the key PBKDF2 derives
 // from them. When full it evicts the entry inserted first. Two callers that
@@ -32,11 +48,11 @@ func newKeyCache(size int) *keyCache {
 	return &keyCache{size: size, entries: make(map[[32]byte][32]byte)}
 }
 
-// keyCacheID names a cache entry without holding the passphrase. Every salt
-// is saltSize bytes, so the concatenation is unambiguous, and two
-// passphrases share an entry only through a SHA-256 collision.
+// keyCacheID names a cache entry without holding the passphrase. Only a
+// salt of saltSize bytes is cached, so the concatenation is unambiguous, and
+// two passphrases share an entry only through an HMAC-SHA256 collision.
 func keyCacheID(passphrase string, salt []byte) [32]byte {
-	h := sha256.New()
+	h := hmac.New(sha256.New, keyCacheIDKey)
 	h.Write(salt)
 	h.Write([]byte(passphrase))
 	var id [32]byte
@@ -76,14 +92,21 @@ func (c *keyCache) put(id [32]byte, key []byte) {
 // encrypt, whose key is right by construction.
 func pbkdf2KeyFor(passphrase string, salt []byte) []byte {
 	key := derivePBKDF2Key(passphrase, salt)
-	derivedKeys.put(keyCacheID(passphrase, salt), key)
+	if len(salt) == saltSize {
+		derivedKeys.put(keyCacheID(passphrase, salt), key)
+	}
 	return key
 }
 
 // openPBKDF2 decrypts (nonce || ciphertext+tag) with the key for passphrase
 // and salt, deriving it only on a cache miss. A derived key is cached only
 // once it has opened the value, so a wrong passphrase never takes an entry.
+// A salt of any other length than saltSize bypasses the cache, because the
+// id would no longer tell salt and passphrase apart.
 func openPBKDF2(passphrase string, salt, data []byte) ([]byte, error) {
+	if len(salt) != saltSize {
+		return decryptGCM(derivePBKDF2Key(passphrase, salt), data)
+	}
 	id := keyCacheID(passphrase, salt)
 	key, cached := derivedKeys.get(id)
 	if !cached {

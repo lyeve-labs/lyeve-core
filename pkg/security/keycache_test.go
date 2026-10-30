@@ -1,6 +1,9 @@
 package security
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -68,6 +71,40 @@ func TestKeyCache_IDSeparatesPassphrasesAndSalts(t *testing.T) {
 	assert.NotEqual(t, keyCacheID("pass-a", salt), keyCacheID("pass-a", otherSalt))
 	id := keyCacheID("pass-a", salt)
 	assert.NotContains(t, string(id[:]), "pass-a")
+}
+
+func TestKeyCache_IDIsKeyedByAProcessSecret(t *testing.T) {
+	salt := make([]byte, saltSize)
+	plain := sha256.Sum256(append(append([]byte{}, salt...), "pass-a"...))
+	id := keyCacheID("pass-a", salt)
+	assert.NotEqual(t, plain, id, "an id is not a plain hash a guess can be tested against")
+	assert.NotEqual(t, make([]byte, 32), keyCacheIDKey, "the id key is drawn from crypto/rand")
+
+	mac := hmac.New(sha256.New, keyCacheIDKey)
+	mac.Write(salt)
+	mac.Write([]byte("pass-a"))
+	assert.Equal(t, mac.Sum(nil), id[:])
+}
+
+func TestKeyCache_SaltOfAnotherLengthIsNeverCached(t *testing.T) {
+	const pass = "odd-salt-passphrase"
+	for _, n := range []int{saltSize - 1, saltSize + 1} {
+		salt := make([]byte, n)
+		_, err := rand.Read(salt)
+		require.NoError(t, err)
+		before := cacheLen()
+
+		key := pbkdf2KeyFor(pass, salt)
+		sealed, err := encryptGCMWithKey(key, []byte("value"))
+		require.NoError(t, err)
+		got, err := openPBKDF2(pass, salt, sealed)
+		require.NoError(t, err, "salt of %d bytes", n)
+		assert.Equal(t, "value", string(got))
+
+		_, ok := cachedKey(pass, salt)
+		assert.False(t, ok, "salt of %d bytes", n)
+		assert.Equal(t, before, cacheLen(), "salt of %d bytes", n)
+	}
 }
 
 // A decrypt that derived its key would succeed after the cached key is
