@@ -57,7 +57,7 @@ func EncryptSecret(plaintext, passphrase string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return "", fmt.Errorf("encrypt: generate salt: %w", err)
 	}
-	key := derivePBKDF2Key(passphrase, salt)
+	key := pbkdf2KeyFor(passphrase, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return "", fmt.Errorf("encrypt: create cipher: %w", err)
@@ -94,8 +94,7 @@ func DecryptSecret(encHex, passphrase string) (string, error) {
 	// Try the PBKDF2 format first: salt(16) || nonce(12) || ciphertext+tag
 	if len(raw) >= saltSize+gcmNonceSize {
 		salt := raw[:saltSize]
-		key := derivePBKDF2Key(passphrase, salt)
-		plaintext, decErr := decryptGCM(key, raw[saltSize:])
+		plaintext, decErr := openPBKDF2(passphrase, salt, raw[saltSize:])
 		if decErr == nil {
 			return string(plaintext), nil
 		}
@@ -124,8 +123,7 @@ func DecryptSecretStrict(encHex, passphrase string) (string, error) {
 		return "", fmt.Errorf("decrypt: ciphertext too short for PBKDF2 format")
 	}
 	salt := raw[:saltSize]
-	key := derivePBKDF2Key(passphrase, salt)
-	plaintext, err := decryptGCM(key, raw[saltSize:])
+	plaintext, err := openPBKDF2(passphrase, salt, raw[saltSize:])
 	if err != nil {
 		return "", err
 	}
@@ -178,7 +176,7 @@ func EncryptBytes(plaintext []byte, passphrase string) ([]byte, error) {
 	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
 		return nil, fmt.Errorf("encrypt: generate salt: %w", err)
 	}
-	key := derivePBKDF2Key(passphrase, salt)
+	key := pbkdf2KeyFor(passphrase, salt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt: create cipher: %w", err)
@@ -205,8 +203,7 @@ func DecryptBytes(ciphertext []byte, passphrase string) ([]byte, error) {
 	// Try the PBKDF2 format first: salt(16) || nonce(12) || ciphertext+tag
 	if len(ciphertext) >= saltSize+gcmNonceSize {
 		salt := ciphertext[:saltSize]
-		key := derivePBKDF2Key(passphrase, salt)
-		plaintext, decErr := decryptGCM(key, ciphertext[saltSize:])
+		plaintext, decErr := openPBKDF2(passphrase, salt, ciphertext[saltSize:])
 		if decErr == nil {
 			return plaintext, nil
 		}
