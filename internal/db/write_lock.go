@@ -156,8 +156,19 @@ func runWriteTx(ctx context.Context, pool DB, key string, fn func(context.Contex
 	}
 	committed := false
 	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+		if committed {
+			return
+		}
+		_ = tx.Rollback()
+		if engine == "mssql" && ctx.Err() != nil {
+			// The SQL Server driver answers a rollback whose context has
+			// ended without waiting for the server, and keeps the
+			// connection (go-mssqldb issue 390). A request written on it
+			// while the server still rolls back makes the server end the
+			// session, so the next write would fail with "Read: EOF".
+			// Raw waits for the rollback, and ErrBadConn closes the
+			// connection instead of pooling it.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
 	}()
 
