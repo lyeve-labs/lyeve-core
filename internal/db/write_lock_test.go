@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 )
@@ -156,6 +157,78 @@ func TestSerializeWrite_RefusesNestedTransactions_AllDialects(t *testing.T) {
 		})
 		require.ErrorIs(t, err, db.ErrNestedWriteLock)
 	})
+}
+
+// A write canceled while its transaction runs is rolled back on its canceled
+// context, and the next write must still succeed. Each pool holds one
+// connection, so every write after a canceled one gets the connection the
+// canceled one used unless it was discarded. The canceled write inserts enough
+// rows that the server is still rolling back when the next write begins on SQL
+// Server, whose driver answers a canceled rollback without waiting for it.
+func TestSerializeWrite_WriteAfterACanceledWriteSucceeds_AllDialects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping multi-dialect integration test in short mode")
+	}
+	fixtures := []struct {
+		name string
+		open func(t *testing.T) db.DB
+	}{
+		{"postgres", func(t *testing.T) db.DB { return testdb.PostgresWithMaxConns(t, 1) }},
+		{"mysql", func(t *testing.T) db.DB { return testdb.MySQLWithMaxConns(t, 1) }},
+		{"mssql", func(t *testing.T) db.DB { return testdb.MSSQLWithMaxConns(t, 1) }},
+	}
+	for _, fx := range fixtures {
+		t.Run(fx.name, func(t *testing.T) {
+			if !testdb.ShouldTest(fx.name) {
+				t.Skipf("CI_DIALECT != %s", fx.name)
+			}
+			pool := fx.open(t)
+			ctx := context.Background()
+			for _, stmt := range []string{
+				`CREATE TABLE rollback_digit (d INT NOT NULL)`,
+				`INSERT INTO rollback_digit (d) VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)`,
+				`CREATE TABLE rollback_probe (n INT NOT NULL)`,
+			} {
+				_, err := pool.Exec(ctx, stmt)
+				require.NoError(t, err)
+			}
+			const fill = `INSERT INTO rollback_probe (n)
+				SELECT a.d + 10 * b.d + 100 * c.d + 1000 * e.d + 10000 * f.d
+				FROM rollback_digit a CROSS JOIN rollback_digit b CROSS JOIN rollback_digit c
+				CROSS JOIN rollback_digit e CROSS JOIN rollback_digit f
+				WHERE f.d < 2`
+
+			const rounds = 50
+			var failed []string
+			for i := range rounds {
+				wctx, cancel := context.WithCancel(ctx)
+				err := db.SerializeWrite(wctx, pool, "test.rollback_probe", func(ctx context.Context) error {
+					if _, err := pool.Exec(ctx, fill); err != nil {
+						return err
+					}
+					cancel()
+					return ctx.Err()
+				})
+				cancel()
+				require.ErrorIs(t, err, context.Canceled)
+
+				err = db.SerializeWrite(ctx, pool, "test.rollback_probe", func(ctx context.Context) error {
+					_, err := pool.Exec(ctx, `INSERT INTO rollback_probe (n) VALUES ($1)`, -1-i)
+					return err
+				})
+				if err != nil {
+					failed = append(failed, fmt.Sprintf("round %d: %v", i, err))
+				}
+			}
+			assert.Empty(t, failed, "%d of %d writes after a canceled write failed", len(failed), rounds)
+
+			row, err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM rollback_probe`)
+			require.NoError(t, err)
+			var n int
+			require.NoError(t, row.Scan(&n))
+			assert.Equal(t, rounds-len(failed), n, "only the writes after each cancel may land")
+		})
+	}
 }
 
 func dbNameOf(pool db.DB) string {
