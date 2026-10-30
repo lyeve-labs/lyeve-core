@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A plugin that writes content entries can name the entry to update and the revision its edit started from. A save from a revision that is no longer current is refused as a conflict instead of overwriting the newer one, and every save reports the revision it wrote. The same plugin can read an entry, or one of its past revisions, with its revision number.
+
 ## [0.57.0] - 2026-11-01
 
 ### Security
