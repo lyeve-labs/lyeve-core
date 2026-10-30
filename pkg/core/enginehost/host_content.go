@@ -24,6 +24,47 @@ import (
 // caller's mistake and not as an outage the caller would retry. A soft-deleted
 // row under the id is core.ErrConflict, and the row stays deleted.
 func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.UpsertContentAs(ctx, "", schemaName, id, data)
+}
+
+// UpsertContentAs is UpsertContent on behalf of the plugin named plugin.
+// Implements core.PluginContentWriter.
+//
+// Before it inserts a row, whether the row was missing or the update fell
+// back to an insert, it publishes before_create with the caller's ctx and
+// Plugin set to plugin, and a refusal comes back wrapping
+// core.ErrCreateRefused with nothing written. So every writer that reaches
+// the table through the host meets the subscribers a create through the
+// engine's own routes meets. An update of an existing row publishes nothing.
+func (h *engineHost) UpsertContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error {
+	if h.contentStore == nil {
+		return fmt.Errorf("content writer not wired")
+	}
+	before := func(ctx context.Context) error {
+		if h.registry == nil {
+			return nil
+		}
+		ev := core.ContentEvent(ctx, core.SourceEngine, core.BeforeCreate, schemaName, id.String(), nil, data)
+		ev.Plugin = plugin
+		if err := h.HookPublisher().Publish(ctx, ev); err != nil {
+			return fmt.Errorf("%w: %s: %w", core.ErrCreateRefused, schemaName, err)
+		}
+		return nil
+	}
+	if err := h.contentStore.UpsertContentChecked(ctx, schemaName, id, data, before); err != nil {
+		return contentWriterErr(err, schemaName)
+	}
+	return nil
+}
+
+// ProjectContentAs writes as UpsertContent does and publishes no
+// before_create, for the content plugin alone, which asked the subscribers
+// when it created the entry. Any other plugin is core.ErrCapDenied, and
+// nothing is written. Implements core.PluginContentWriter.
+func (h *engineHost) ProjectContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error {
+	if plugin != core.ContentPluginName {
+		return fmt.Errorf("project content: %w", core.ErrCapDenied)
+	}
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
 	}
@@ -175,6 +216,7 @@ func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after u
 
 var (
 	_ core.ContentWriter          = (*engineHost)(nil)
+	_ core.PluginContentWriter    = (*engineHost)(nil)
 	_ core.ContentUpdater         = (*engineHost)(nil)
 	_ core.ContentStatusProjector = (*engineHost)(nil)
 	_ core.ContentReader          = (*engineHost)(nil)

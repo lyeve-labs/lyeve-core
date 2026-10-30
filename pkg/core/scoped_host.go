@@ -302,15 +302,51 @@ func (h *ScopedHost) Schema() SchemaEngine {
 	return h.inner.Schema()
 }
 
-// UpsertContent forwards content writes to the inner host. Implements
-// ContentWriter so a plugin that receives a ScopedHost can mirror its
-// editorial writes into the per-schema tables the public read routes serve.
+// UpsertContent forwards content writes to the inner host under this
+// plugin's name. Implements ContentWriter so a plugin that receives a
+// ScopedHost can mirror its editorial writes into the per-schema tables the
+// public read routes serve. A row it inserts asks the before_create
+// subscribers first, and the event names this plugin.
 func (h *ScopedHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.UpsertContentAs(ctx, h.name, schemaName, id, data)
+}
+
+// UpsertContentAs writes as UpsertContent does, under this plugin's name
+// whatever name the caller passes. Implements PluginContentWriter, so a
+// scoped host wrapped in another passes its own name inward and the layer
+// next to the engine names the caller.
+func (h *ScopedHost) UpsertContentAs(ctx context.Context, _, schemaName string, id uuid.UUID, data map[string]any) error {
+	if pw, ok := h.inner.(PluginContentWriter); ok {
+		return pw.UpsertContentAs(ctx, h.name, schemaName, id, data)
+	}
 	cw, ok := h.inner.(ContentWriter)
 	if !ok {
 		return fmt.Errorf("content writer not available")
 	}
 	return cw.UpsertContent(ctx, schemaName, id, data)
+}
+
+// ProjectContent writes an entry's row as UpsertContent does and asks no
+// before_create subscriber. Implements ContentProjector. Only the plugin
+// registered as ContentPluginName may call it, and every other plugin gets
+// ErrCapDenied with nothing written.
+func (h *ScopedHost) ProjectContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.ProjectContentAs(ctx, h.name, schemaName, id, data)
+}
+
+// ProjectContentAs is ProjectContent under this plugin's name, whatever name
+// the caller passes. Implements PluginContentWriter.
+func (h *ScopedHost) ProjectContentAs(ctx context.Context, _, schemaName string, id uuid.UUID, data map[string]any) error {
+	if h.name != ContentPluginName {
+		return fmt.Errorf("project content: %w", ErrCapDenied)
+	}
+	if pw, ok := h.inner.(PluginContentWriter); ok {
+		return pw.ProjectContentAs(ctx, h.name, schemaName, id, data)
+	}
+	if cp, ok := h.inner.(ContentProjector); ok {
+		return cp.ProjectContent(ctx, schemaName, id, data)
+	}
+	return fmt.Errorf("content projector not available")
 }
 
 // UpdateContent forwards an update-only content write to the inner host.
@@ -374,6 +410,8 @@ func (h *ScopedHost) FlushContentCache(ctx context.Context, schemaName string) {
 
 var (
 	_ ContentWriter          = (*ScopedHost)(nil)
+	_ ContentProjector       = (*ScopedHost)(nil)
+	_ PluginContentWriter    = (*ScopedHost)(nil)
 	_ ContentUpdater         = (*ScopedHost)(nil)
 	_ ContentStatusProjector = (*ScopedHost)(nil)
 	_ ContentReader          = (*ScopedHost)(nil)
@@ -392,20 +430,52 @@ func (h *ScopedHost) Config() Config {
 
 // Hooks returns the hook bus for subscribing to events.
 // Denied without CapHooks.
+//
+// A bus that also publishes is handed out wrapped, so a type assertion of it
+// to HookPublisher reaches the publisher HookPublisher returns, which names
+// this plugin on every event.
 func (h *ScopedHost) Hooks() HookBus {
 	if !h.has(CapHooks) {
 		return deniedHookBus{host: h}
 	}
-	return h.inner.Hooks()
+	bus := h.inner.Hooks()
+	if pub, ok := bus.(HookPublisher); ok {
+		return namedHookBus{HookBus: bus, pub: namedPublisher{inner: pub, name: h.name}}
+	}
+	return bus
 }
 
-// HookPublisher returns the hook bus for publishing events.
-// Denied without CapHooks.
+// HookPublisher returns the hook bus for publishing events, which sets each
+// event's Plugin to this plugin's name. Denied without CapHooks.
 func (h *ScopedHost) HookPublisher() HookPublisher {
 	if !h.has(CapHooks) {
 		return deniedHookPublisher{host: h}
 	}
-	return h.inner.HookPublisher()
+	return namedPublisher{inner: h.inner.HookPublisher(), name: h.name}
+}
+
+// namedPublisher overwrites Plugin with the name of the plugin it was handed
+// to. An inner scoped host's publisher overwrites it again on the way in, so
+// the name the engine sees is the one next to it.
+type namedPublisher struct {
+	inner HookPublisher
+	name  string
+}
+
+func (p namedPublisher) Publish(ctx context.Context, event Event) error {
+	event.Plugin = p.name
+	return p.inner.Publish(ctx, event)
+}
+
+// namedHookBus is a hook bus whose Publish names the plugin, so publishing
+// through a type assertion of Hooks() names it too.
+type namedHookBus struct {
+	HookBus
+	pub namedPublisher
+}
+
+func (b namedHookBus) Publish(ctx context.Context, event Event) error {
+	return b.pub.Publish(ctx, event)
 }
 
 // Logger returns the structured logger from the inner host.

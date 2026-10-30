@@ -89,6 +89,12 @@ type Event struct {
 	// ActorKind names the credential ActorID came from: ActorKindUser,
 	// ActorKindAdminToken or ActorKindAPIKey, and empty when ActorID is.
 	ActorKind string `json:"-"`
+	// Plugin is the registered name of the plugin whose write or publish
+	// produced the event, and empty for the engine's own. The host writes it,
+	// never the publisher: every publisher and content writer a plugin is
+	// handed overwrites it with that plugin's name, so a subscriber can trust
+	// it where it cannot trust Source, which each publisher writes for itself.
+	Plugin string `json:"-"`
 }
 
 // The kinds of caller an Event's ActorKind names.
