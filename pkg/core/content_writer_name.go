@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -48,9 +49,10 @@ type PluginContentEditor interface {
 
 // PublishBeforeCreate asks the before_create subscribers of schema whether
 // the entry id may be created with data, and answers an error wrapping
-// ErrCreateRefused when one refuses. A writer calls it once per entry it
-// creates, before its first statement, and writes nothing when it refuses. A
-// nil publisher asks nobody.
+// ErrCreateRefused when one refuses. A subscriber's error wrapping
+// ErrServiceUnavailable comes back without it, as the outage it is. A writer
+// calls it once per entry it creates, before its first statement, and writes
+// nothing when it refuses. A nil publisher asks nobody.
 //
 // The event's Plugin is the caller's name: the publisher a plugin is handed
 // writes it, so a subscriber can tell which plugin asked.
@@ -63,6 +65,10 @@ func PublishBeforeCreate(ctx context.Context, pub HookPublisher, source, schema 
 		rid = id.String()
 	}
 	if err := pub.Publish(ctx, ContentEvent(ctx, source, BeforeCreate, schema, rid, nil, data)); err != nil {
+		// A subscriber that could not read a store it needs refused nothing.
+		if errors.Is(err, ErrServiceUnavailable) {
+			return fmt.Errorf("ask the before_create subscribers of %s: %w", schema, err)
+		}
 		return fmt.Errorf("%w: %s: %w", ErrCreateRefused, schema, err)
 	}
 	return nil

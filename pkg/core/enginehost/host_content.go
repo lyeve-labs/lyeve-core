@@ -50,7 +50,7 @@ func (h *engineHost) UpsertContentAs(ctx context.Context, plugin, schemaName str
 		ev := core.ContentEvent(ctx, core.SourceEngine, core.BeforeCreate, schemaName, id.String(), nil, data)
 		ev.Plugin = plugin
 		if err := h.HookPublisher().Publish(ctx, ev); err != nil {
-			return fmt.Errorf("%w: %s: %w", core.ErrCreateRefused, schemaName, err)
+			return refusedBy(core.ErrCreateRefused, schemaName, err)
 		}
 		return nil
 	}
@@ -85,9 +85,20 @@ func (h *engineHost) askBeforeEdit(ctx context.Context, plugin string, action co
 		if action == core.BeforeDelete {
 			refused = core.ErrDeleteRefused
 		}
-		return fmt.Errorf("%w: %s: %w", refused, schemaName, err)
+		return refusedBy(refused, schemaName, err)
 	}
 	return nil
+}
+
+// refusedBy is a before subscriber's error as the writer answers it: a
+// refusal wrapping refused, or, when the subscriber could not read a store it
+// needs, the core.ErrServiceUnavailable it returned, so the caller answers an
+// outage and not a refusal.
+func refusedBy(refused error, schemaName string, err error) error {
+	if errors.Is(err, core.ErrServiceUnavailable) {
+		return fmt.Errorf("ask the subscribers of %s: %w", schemaName, err)
+	}
+	return fmt.Errorf("%w: %s: %w", refused, schemaName, err)
 }
 
 // ProjectContentAs writes as UpsertContent does and publishes no
