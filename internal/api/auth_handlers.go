@@ -74,7 +74,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Email == "" {
-		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, nil)
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, map[string]any{"field": "email"})
 		return
 	}
 	if err := auth.ValidatePassword(h.passwordPolicy, body.Password); err != nil {
