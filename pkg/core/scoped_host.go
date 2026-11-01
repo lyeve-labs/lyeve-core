@@ -308,7 +308,8 @@ func (h *ScopedHost) Schema() SchemaEngine {
 // plugin's name. Implements ContentWriter so a plugin that receives a
 // ScopedHost can mirror its editorial writes into the per-schema tables the
 // public read routes serve. A row it inserts asks the before_create
-// subscribers first, and the event names this plugin.
+// subscribers first, a row it updates the before_update subscribers, and the
+// event names this plugin.
 func (h *ScopedHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
 	return h.UpsertContentAs(ctx, h.name, schemaName, id, data)
 }
@@ -351,9 +352,19 @@ func (h *ScopedHost) ProjectContentAs(ctx context.Context, _, schemaName string,
 	return fmt.Errorf("content projector not available")
 }
 
-// UpdateContent forwards an update-only content write to the inner host.
-// Implements ContentUpdater.
+// UpdateContent forwards an update-only content write to the inner host
+// under this plugin's name. Implements ContentUpdater. It asks the
+// before_update subscribers first, and the event names this plugin.
 func (h *ScopedHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.UpdateContentAs(ctx, h.name, schemaName, id, data)
+}
+
+// UpdateContentAs is UpdateContent under this plugin's name, whatever name
+// the caller passes. Implements PluginContentEditor.
+func (h *ScopedHost) UpdateContentAs(ctx context.Context, _, schemaName string, id uuid.UUID, data map[string]any) error {
+	if pe, ok := h.inner.(PluginContentEditor); ok {
+		return pe.UpdateContentAs(ctx, h.name, schemaName, id, data)
+	}
 	cu, ok := h.inner.(ContentUpdater)
 	if !ok {
 		return fmt.Errorf("content updater not available")
@@ -361,9 +372,19 @@ func (h *ScopedHost) UpdateContent(ctx context.Context, schemaName string, id uu
 	return cu.UpdateContent(ctx, schemaName, id, data)
 }
 
-// DeleteContent forwards content deletes to the inner host. Implements
-// ContentWriter.
+// DeleteContent forwards content deletes to the inner host under this
+// plugin's name. Implements ContentWriter. It asks the before_delete
+// subscribers first, and the event names this plugin.
 func (h *ScopedHost) DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error {
+	return h.DeleteContentAs(ctx, h.name, schemaName, id)
+}
+
+// DeleteContentAs is DeleteContent under this plugin's name, whatever name
+// the caller passes. Implements PluginContentEditor.
+func (h *ScopedHost) DeleteContentAs(ctx context.Context, _, schemaName string, id uuid.UUID) error {
+	if pe, ok := h.inner.(PluginContentEditor); ok {
+		return pe.DeleteContentAs(ctx, h.name, schemaName, id)
+	}
 	cw, ok := h.inner.(ContentWriter)
 	if !ok {
 		return fmt.Errorf("content writer not available")

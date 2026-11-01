@@ -204,6 +204,13 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	if !h.validatePatch(w, r, schemaName, restored, existing.Data) {
 		return
 	}
+	// A restore is an update, so it asks the subscribers an update asks.
+	if err := h.hooks.Run(r.Context(), hooks.Event{
+		Type: hooks.BeforeUpdate, Schema: schemaName, Data: restored, OldData: existing.Data,
+	}); err != nil {
+		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "blocked by pre-update hook")
+		return
+	}
 	h.snapshot(r, schemaName, id, existing.Data)
 	item, err := h.store.Update(r.Context(), schemaName, id, restored, existing.UpdatedAt)
 	if err != nil {

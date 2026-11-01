@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -20,11 +21,38 @@ const ContentPluginName = "content"
 // create.
 var ErrCreateRefused = fmt.Errorf("create refused by a before_create hook: %w", ErrValidation)
 
+// ErrUpdateRefused is an update a before_update subscriber refused, and
+// ErrDeleteRefused a delete a before_delete subscriber refused. Nothing was
+// written. Each wraps ErrValidation, as ErrCreateRefused does, so a route
+// answers it 422, the answer the engine's own content routes give.
+var (
+	ErrUpdateRefused = fmt.Errorf("update refused by a before_update hook: %w", ErrValidation)
+	ErrDeleteRefused = fmt.Errorf("delete refused by a before_delete hook: %w", ErrValidation)
+)
+
+// PluginContentEditor is the update and delete a host makes on behalf of a
+// named plugin. The scoped host a plugin is handed calls it with the
+// plugin's registered name, as it calls PluginContentWriter, so a plugin
+// cannot write under another's name.
+//
+// UpdateContentAs is ContentUpdater.UpdateContent and DeleteContentAs is
+// ContentWriter.DeleteContent. Each first asks the before_update or
+// before_delete subscribers with Plugin set to plugin, and a refusal comes
+// back wrapping ErrUpdateRefused or ErrDeleteRefused with nothing written.
+// The one exception is ContentPluginName: its writes project an entry whose
+// own update or delete asked the subscribers already, and a projection must
+// never be refused after the entry changed.
+type PluginContentEditor interface {
+	UpdateContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error
+	DeleteContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID) error
+}
+
 // PublishBeforeCreate asks the before_create subscribers of schema whether
 // the entry id may be created with data, and answers an error wrapping
-// ErrCreateRefused when one refuses. A writer calls it once per entry it
-// creates, before its first statement, and writes nothing when it refuses. A
-// nil publisher asks nobody.
+// ErrCreateRefused when one refuses. A subscriber's error wrapping
+// ErrServiceUnavailable comes back without it, as the outage it is. A writer
+// calls it once per entry it creates, before its first statement, and writes
+// nothing when it refuses. A nil publisher asks nobody.
 //
 // The event's Plugin is the caller's name: the publisher a plugin is handed
 // writes it, so a subscriber can tell which plugin asked.
@@ -37,6 +65,10 @@ func PublishBeforeCreate(ctx context.Context, pub HookPublisher, source, schema 
 		rid = id.String()
 	}
 	if err := pub.Publish(ctx, ContentEvent(ctx, source, BeforeCreate, schema, rid, nil, data)); err != nil {
+		// A subscriber that could not read a store it needs refused nothing.
+		if errors.Is(err, ErrServiceUnavailable) {
+			return fmt.Errorf("ask the before_create subscribers of %s: %w", schema, err)
+		}
 		return fmt.Errorf("%w: %s: %w", ErrCreateRefused, schema, err)
 	}
 	return nil
