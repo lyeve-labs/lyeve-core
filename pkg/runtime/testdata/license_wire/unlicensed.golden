@@ -2376,7 +2376,10 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "422": {
-            "description": "Hook validation failed"
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -2430,6 +2433,9 @@ body (json, newline):
           },
           "422": {
             "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -2791,6 +2797,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3074,6 +3086,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3474,7 +3492,10 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "422": {
-            "description": "Hook validation failed"
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3528,6 +3549,9 @@ body (json, newline):
           },
           "422": {
             "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3889,6 +3913,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -4172,6 +4202,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
