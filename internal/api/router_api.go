@@ -172,6 +172,9 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 		// Debug mode: X-Debug header gated behind admin role.
 		// Replaces response body with timing breakdown report.
 		r.Use(debug.Handler(cfg.DebugTracer, debug.AdminFromClaims()))
+		for _, mw := range o.admission {
+			r.Use(mw)
+		}
 		// A session the engine has ended reaches the plugin middleware with
 		// no caller, and gets its claims back before the routes judge it.
 		hideEnded, restoreEnded := hideEndedSession(tokenVersionGetter(userStore))

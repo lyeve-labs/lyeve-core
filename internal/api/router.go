@@ -30,6 +30,7 @@ import (
 type RouterOption func(*routerOptions)
 
 type routerOptions struct {
+	admission            []func(http.Handler) http.Handler // runs before the session check and the extra middleware
 	extra                []func(http.Handler) http.Handler
 	preAuth              []func(http.Handler) http.Handler      // runs after CORS, before JWT auth
 	pluginStatus         PluginStatusProvider                   // nil -> empty status report
@@ -115,6 +116,16 @@ func WithSetupToken(t *SetupToken) RouterOption {
 func WithMiddleware(mw ...func(http.Handler) http.Handler) RouterOption {
 	return func(o *routerOptions) {
 		o.extra = append(o.extra, mw...)
+	}
+}
+
+// WithAdmissionMiddleware appends middleware that decides whether the engine
+// takes a request at all, such as load shedding and the in-flight count a
+// drain waits on. Every router mounts it ahead of the session check and the
+// extra middleware, so a request turned away here costs no database read.
+func WithAdmissionMiddleware(mw ...func(http.Handler) http.Handler) RouterOption {
+	return func(o *routerOptions) {
+		o.admission = append(o.admission, mw...)
 	}
 }
 
