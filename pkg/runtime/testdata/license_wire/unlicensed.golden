@@ -2051,6 +2051,9 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "The account's erasure is not complete, so it is kept"
           }
         },
         "security": [
@@ -2227,6 +2230,9 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "The account's erasure is not complete, so it stays locked"
           }
         },
         "security": [
