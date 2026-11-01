@@ -12,8 +12,6 @@ TestConcurrentAccess_RaceFree	internal/testhost/testhost_test.go
 TestEdgeCase_ConcurrentRouteCollection	internal/api/edge_cases_test.go
 TestEdgeCase_ConcurrentRouteEnumeration	internal/api/edge_cases_test.go
 TestFlushProtectedBackend_ConcurrentSafety	internal/auth/flush_protected_test.go
-TestMain	internal/auth/key_hashing_test.go
-TestMain	internal/config/config_test.go
 TestMemoryCache_ConcurrentRaces	internal/cache/concurrent_test.go
 TestMemoryCache_ConcurrentSetGet	internal/cache/cache_test.go
 TestMemoryCache_ConcurrentSingleKey	internal/cache/concurrent_test.go
