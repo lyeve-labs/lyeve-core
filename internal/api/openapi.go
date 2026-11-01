@@ -419,6 +419,17 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		}}, super...),
 	}
 
+	paths["/api/admin/gdpr/subject-digests"] = openAPIPath{
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Values the audit log names a data subject by, to filter entries by resource id", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{
+			"200": openAPIResponse{Description: "Every digest an entry about the subject can carry, the current form first", Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+				"type":       "object",
+				"required":   []string{"digests"},
+				"properties": map[string]any{"digests": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+			}}}},
+			"400": err400, "401": err401, "403": err403, "422": notASubject422,
+		}}, super...),
+	}
+
 	// Admin API: probe endpoints
 	// These probes take any credential the engine accepts, a key minted for
 	// content work included. An orchestrator's probes are /healthz, /readyz

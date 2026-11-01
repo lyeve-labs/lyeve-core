@@ -103,7 +103,8 @@ func deriveKEK(masterKey string) []byte {
 
 // subjectRefInfo is an input to the subject reference key. Changing it rekeys
 // every reference, so lines logged before the change stop correlating with
-// lines logged after it.
+// lines logged after it, and every audit entry written before it stops being
+// found by its subject.
 const subjectRefInfo = "lyeve subject reference key v1"
 
 // SubjectRefKey returns the 32-byte key that log lines name a data subject by,
