@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Security
 
 - A plugin middleware sees no caller for a session the engine has ended. Before, a session whose account had signed out, been disabled or been erased reached the plugin middleware with its role until its token expired, because the check that ends it runs later, in the route groups. A plugin that acted on the role, such as one comparing a save with the stored record, could answer before the route refused the request. The route still answers such a request 401.
+- A plugin that updates or deletes a content row through the engine asks the before_update or before_delete subscribers first, with the event naming the plugin, as a create already asks the before_create subscribers. An update through an upsert that finds the row asks them too, and restoring a revision asks the before_update subscribers as an update does. Before, a guard on a content type held against the engine's content routes and the content console but not against a plugin writing the row, such as one serving content over another protocol or a workflow step, so a tenant administrator could rewrite or delete a guarded row that way. A refusal answers as a refused create does, and nothing is written.
 
 ### Added
 

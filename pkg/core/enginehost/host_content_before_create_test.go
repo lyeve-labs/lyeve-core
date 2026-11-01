@@ -21,8 +21,8 @@ import (
 // A plugin that writes a content table through the host reaches the
 // before_create subscribers a create through the engine's own routes reaches,
 // so a subscriber that guards a content type guards it against every writer.
-// An update of a row that exists asks nobody, and the content plugin's
-// projection of an entry it created asks nobody either.
+// An update of a row that exists asks no before_create subscriber, and the
+// content plugin's projection of an entry it created asks nobody.
 func TestUpsertContent_PublishesBeforeCreate(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -105,7 +105,8 @@ func TestUpsertContent_PublishesBeforeCreate(t *testing.T) {
 			require.ErrorIs(t, err, core.ErrCreateRefused, "the fallback insert did not ask the subscribers")
 			assert.Len(t, events(), 1)
 
-			// An update of a row that exists creates nothing and asks nobody.
+			// An update of a row that exists creates nothing and asks no
+			// before_create subscriber.
 			require.NoError(t, flow.UpsertContent(ctx, schema, taken, map[string]any{"title": "edited"}))
 			assert.Empty(t, events())
 
