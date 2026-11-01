@@ -175,12 +175,17 @@ const (
 	// it.
 	CapStepUp // check a step-up answer for the session's account (CheckStepUp)
 
+	// CapTenantRoles grants TenantRoles: the roles any account holds in any
+	// tenant. It reads who may act where across the install, so only the
+	// plugin that re-checks the person behind a long-lived grant holds it.
+	CapTenantRoles // read an account's roles in a tenant (TenantRoles)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey | CapStepUp
+		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey | CapStepUp | CapTenantRoles
 
 	// CapRoles is every capability that does nothing but appoint a plugin to
 	// a host role. A declaration narrows what a plugin reaches and never

@@ -202,6 +202,13 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}); ok {
 		reg.SetStepUpChecker(authHandler)
 	}
+	// A plugin that re-checks a person's roles in a tenant asks the handler
+	// that resolves them at sign-in.
+	if reg, ok := o.scalingHost.(interface {
+		SetTenantRolesReader(core.TenantRolesReader)
+	}); ok {
+		reg.SetTenantRolesReader(authHandler)
+	}
 	// The document describes what this router mounts, so it is built from the
 	// same values the mounts are.
 	specOptions := openAPIOptions{

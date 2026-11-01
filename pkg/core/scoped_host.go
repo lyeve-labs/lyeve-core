@@ -242,6 +242,8 @@ func capName(c Capability) string {
 		return "CapSessionKey"
 	case CapStepUp:
 		return "CapStepUp"
+	case CapTenantRoles:
+		return "CapTenantRoles"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -562,6 +564,20 @@ func (h *ScopedHost) CheckStepUp(r *http.Request, factor, answer string) error {
 		return c.CheckStepUp(r, factor, answer)
 	}
 	return fmt.Errorf("step-up checks are not available on this host: %w", ErrServiceUnavailable)
+}
+
+// TenantRoles forwards to inner if it implements TenantRolesReader. Denied
+// without CapTenantRoles, because it answers who may act where for every
+// account on the install.
+func (h *ScopedHost) TenantRoles(ctx context.Context, userID uuid.UUID, tenantID string) ([]string, error) {
+	if !h.has(CapTenantRoles) {
+		h.warnDenied("TenantRoles", "", CapTenantRoles)
+		return nil, ErrCapDenied
+	}
+	if r, ok := h.inner.(TenantRolesReader); ok {
+		return r.TenantRoles(ctx, userID, tenantID)
+	}
+	return nil, fmt.Errorf("tenant roles are not available on this host: %w", ErrServiceUnavailable)
 }
 
 // CachedFetch forwards to inner if it implements QueryCacheProvider.
