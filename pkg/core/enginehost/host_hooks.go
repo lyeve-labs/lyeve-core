@@ -40,6 +40,7 @@ func (h *hookBusAdapter) Subscribe(schema string, event core.EventType, handler 
 			Source:     e.Source,
 			ActorID:    e.ActorID,
 			ActorKind:  e.ActorKind,
+			Plugin:     e.Plugin,
 		})
 	}
 

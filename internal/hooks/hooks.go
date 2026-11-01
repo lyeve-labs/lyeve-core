@@ -70,6 +70,9 @@ type Event struct {
 	ActorID string
 	// ActorKind names the credential ActorID came from.
 	ActorKind string
+	// Plugin is the registered name of the plugin that wrote or published
+	// the event, empty for the engine's own. See core.Event.Plugin.
+	Plugin string
 	// Timestamp is when the event was published. Run stamps it when the
 	// publisher left it zero.
 	Timestamp time.Time
@@ -319,6 +322,7 @@ func (r *Registry) Publish(ctx context.Context, event core.Event) error {
 		Source:     event.Source,
 		ActorID:    event.ActorID,
 		ActorKind:  event.ActorKind,
+		Plugin:     event.Plugin,
 		Timestamp:  event.Timestamp,
 		InstanceID: event.InstanceID,
 	})

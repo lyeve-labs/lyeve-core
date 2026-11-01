@@ -337,6 +337,15 @@ func (s *ContentStore) insertRowWithID(ctx context.Context, sc *domain.Schema, s
 // key it still holds. A write that reaches a deleted row is racing its delete,
 // so the row stays deleted rather than coming back.
 func (s *ContentStore) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return s.UpsertContentChecked(ctx, schemaName, id, data, nil)
+}
+
+// UpsertContentChecked is UpsertContent, and runs beforeInsert with the
+// caller's ctx before it inserts a row, whether the row was missing or the
+// update met ErrContentConflict and fell back to the insert. An error from
+// beforeInsert comes back as it is, and nothing is written. An update of an
+// existing row never runs it. A nil beforeInsert is UpsertContent.
+func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, beforeInsert func(context.Context) error) error {
 	if _, err := s.Update(ctx, schemaName, id, data, time.Time{}); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrContentConflict) && !errors.Is(err, domain.ErrNotFound) {
@@ -348,6 +357,11 @@ func (s *ContentStore) UpsertContent(ctx context.Context, schemaName string, id 
 	}
 	if deleted {
 		return fmt.Errorf("content %s %s was deleted: %w", schemaName, id, domain.ErrConflict)
+	}
+	if beforeInsert != nil {
+		if err := beforeInsert(ctx); err != nil {
+			return err
+		}
 	}
 	_, err = s.InsertWithID(ctx, schemaName, id, data)
 	return err
