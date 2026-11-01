@@ -157,6 +157,10 @@ type ContentEntry struct {
 	Status string
 	// Fields are the entry's values, keyed by the schema's field names.
 	Fields map[string]any
+	// Meta is the entry's metadata beside its fields, such as the values a
+	// page's head carries, as the store keeps it. It is nil for a store
+	// that keeps no metadata, or none for this entry.
+	Meta map[string]any
 	// Revision is the number SaveContentEntry takes as ExpectedRevision.
 	Revision int
 	// UpdatedAt and UpdatedBy say when this revision was written and by
