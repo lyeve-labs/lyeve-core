@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- A plugin middleware sees no caller for a session the engine has ended. Before, a session whose account had signed out, been disabled or been erased reached the plugin middleware with its role until its token expired, because the check that ends it runs later, in the route groups. A plugin that acted on the role, such as one comparing a save with the stored record, could answer before the route refused the request. The route still answers such a request 401.
+
 ### Added
 
 - A plugin that writes content entries can name the entry to update and the revision its edit started from. A save from a revision that is no longer current is refused as a conflict instead of overwriting the newer one, and every save reports the revision it wrote. The same plugin can read an entry, or one of its past revisions, with its revision number.

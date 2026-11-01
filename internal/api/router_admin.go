@@ -141,6 +141,10 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	// An admin token reaches only the routes that declare a grant it holds.
 	// Ahead of the plugin middleware, so a refused token spends no quota.
 	r.Use(enforceGrants(grantRegistry))
+	// A session the engine has ended reaches the plugin middleware with no
+	// caller, and gets its claims back before the routes judge it.
+	hideEnded, restoreEnded := hideEndedSession(tokenVersionGetter(db.NewUserStore(pool)))
+	r.Use(hideEnded)
 	// Caller-supplied extra middleware.
 	for _, mw := range o.extra {
 		r.Use(mw)
@@ -152,6 +156,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	if o.idempotency != nil {
 		r.Use(o.idempotency)
 	}
+	r.Use(restoreEnded)
 
 	secureCook := cfg.SecureCookie
 	userStore := db.NewUserStore(pool)
