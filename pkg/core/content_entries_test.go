@@ -79,3 +79,73 @@ func TestScopedHost_ContentEntryWriter_NilWhenInnerCannotProvide(t *testing.T) {
 	require.Len(t, recs, 1, h.buf.String())
 	assertField(t, recs[0], "op", "ContentEntryWriter")
 }
+
+// fakeEntryStore is a writer that also reads, as a store keeping numbered
+// revisions registers it.
+type fakeEntryStore struct {
+	fakeEntryWriter
+	entry ContentEntry
+}
+
+func (f *fakeEntryStore) ContentEntry(_ context.Context, id uuid.UUID) (ContentEntry, error) {
+	if id != f.entry.ID {
+		return ContentEntry{}, ErrNotFound
+	}
+	return f.entry, nil
+}
+
+func (f *fakeEntryStore) ContentEntryRevision(ctx context.Context, id uuid.UUID, revision int) (ContentEntry, error) {
+	e, err := f.ContentEntry(ctx, id)
+	if err != nil || revision != e.Revision {
+		return ContentEntry{}, ErrNotFound
+	}
+	return e, nil
+}
+
+// The fields added for an expected revision default to the meaning a caller
+// written before them relied on: no id creates or matches, no expected
+// revision checks nothing, no note keeps the store's label.
+func TestContentEntryInput_ZeroValuesKeepTheOldMeaning(t *testing.T) {
+	var in ContentEntryInput
+	assert.Equal(t, uuid.Nil, in.ID)
+	assert.Zero(t, in.ExpectedRevision)
+	assert.Empty(t, in.Note)
+	var saved ContentEntrySaved
+	assert.Zero(t, saved.Revision)
+
+	var w ContentEntryWriter = &fakeEntryWriter{}
+	_, isReader := w.(ContentEntryReader)
+	assert.False(t, isReader, "a writer that only writes is not a reader, so a consumer can tell an older store apart")
+}
+
+// A consumer holding only the writer its scoped host hands out reaches the
+// reader on it, with no capability of its own.
+func TestScopedHost_ContentEntryReader_ReachedThroughTheWriter(t *testing.T) {
+	inner := &entryWriterHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "content", CapAll)
+	consumer := NewScopedHost(inner, "pages", CapRoutes)
+
+	id := uuid.New()
+	fake := &fakeEntryStore{entry: ContentEntry{ID: id, Schema: "pages", Slug: "home", Title: "Home", Status: "draft", Revision: 4}}
+	require.NoError(t, owner.RegisterContentEntryWriter(fake))
+
+	w := consumer.ContentEntryWriter()
+	require.NotNil(t, w)
+	r, ok := w.(ContentEntryReader)
+	require.True(t, ok, "the writer the host returns must keep the reader it was registered with")
+
+	ctx := WithTenantID(context.Background(), "acme")
+	got, err := r.ContentEntry(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, 4, got.Revision)
+	past, err := r.ContentEntryRevision(ctx, id, 4)
+	require.NoError(t, err)
+	assert.Equal(t, "Home", past.Title)
+	_, err = r.ContentEntry(ctx, uuid.New())
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	in := ContentEntryInput{Schema: "pages", ID: id, ExpectedRevision: 4, Note: "edited", Fields: map[string]any{"title": "Home"}}
+	_, err = w.SaveContentEntry(ctx, in)
+	require.NoError(t, err)
+	assert.Equal(t, []ContentEntryInput{in}, fake.saved, "the id, expected revision and note reach the store untouched")
+}
