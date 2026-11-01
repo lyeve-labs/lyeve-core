@@ -560,7 +560,7 @@ func tokenVersionCheck(getTokenVersion func(ctx context.Context, userID string) 
 					httpx.ErrorReq(w, r, http.StatusUnauthorized, "session invalidated")
 					return
 				}
-				httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "session check unavailable")
+				httpx.StoreError(w, r, err, "session check unavailable")
 				return
 			}
 			if claims.TokenVersion < currentVersion {

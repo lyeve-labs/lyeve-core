@@ -214,7 +214,10 @@ func LimitOffsetPlaceholders(dialectName string, limitIdx, offsetIdx int) string
 //   - MSSQL:  [identifier]
 //
 // Embed any close-quote characters are doubled per dialect convention.
-// Callers MUST validate identifiers via domain.ValidateIdentifier before quoting.
+// Quoting keeps any name one identifier. It does not make a name safe to
+// choose: a content table or column name comes from a definition the schema
+// engine accepted, and the engine refuses a name that is not a safe
+// identifier before any DDL runs.
 func QuoteIdentifier(dialectName, name string) string {
 	return sqldialect.QuoteIdentifier(dialectName, name)
 }

@@ -46,7 +46,7 @@ var adminGrantCatalog = []AdminGrantInfo{
 	{AdminGrantFlowsRead, "Read flows and their runs."},
 	{AdminGrantFlowsWrite, "Create, change, activate and delete flows."},
 	{AdminGrantWebhooksRead, "Read webhooks and their deliveries."},
-	{AdminGrantWebhooksWrite, "Create, change and delete webhooks."},
+	{AdminGrantWebhooksWrite, "Test webhooks, retry deliveries, set the retry policy and work the dead-letter queue."},
 	{AdminGrantJobsRead, "Read scheduled jobs and their runs."},
 	{AdminGrantJobsWrite, "Create, change, trigger and delete scheduled jobs."},
 	{AdminGrantLogsRead, "Read and export the instance logs."},

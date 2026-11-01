@@ -20,8 +20,8 @@ import (
 )
 
 // Engine keeps schema definitions in memory and generates the table for each
-// one through the host's migration database. It implements core.SchemaEngine
-// and core.SchemaSource.
+// one through the host's migration database. It implements core.SchemaEngine,
+// core.SchemaSource and core.ContentRules.
 type Engine struct {
 	host core.Host
 
@@ -452,6 +452,41 @@ func (e *Engine) Get(_ context.Context, name string) (json.RawMessage, error) {
 
 func (e *Engine) ValidateContent(context.Context, string, map[string]any) ([]core.SchemaValidationError, error) {
 	return nil, nil
+}
+
+// PrepareCreate implements core.ContentRules with the one rule this engine
+// knows: a required field must carry a value. It fills no defaults.
+func (e *Engine) PrepareCreate(_ context.Context, sc *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	return data, missingRequired(sc, data, false), nil
+}
+
+// ValidatePatch implements core.ContentRules. A required field the patch
+// carries must carry a value, and one it leaves out keeps what is stored.
+func (e *Engine) ValidatePatch(_ context.Context, sc *core.Schema, patch, _ map[string]any) ([]core.SchemaValidationError, error) {
+	return missingRequired(sc, patch, true), nil
+}
+
+// missingRequired reports each required field data holds no value for. With
+// partial set, a field absent from data is not reported. A relation is left to
+// the store, which refuses a reference to no entry on its own.
+func missingRequired(sc *core.Schema, data map[string]any, partial bool) []core.SchemaValidationError {
+	if sc == nil {
+		return nil
+	}
+	var out []core.SchemaValidationError
+	for _, f := range sc.Fields {
+		if !f.Required || f.System || f.FieldType == "relation" {
+			continue
+		}
+		v, present := data[f.Name]
+		if partial && !present {
+			continue
+		}
+		if s, isText := v.(string); v == nil || (isText && s == "") {
+			out = append(out, core.SchemaValidationError{Field: f.Name, Code: "VALIDATION_REQUIRED", Rule: "required"})
+		}
+	}
+	return out
 }
 
 // GetByName implements core.SchemaSource, which is what the content path reads.

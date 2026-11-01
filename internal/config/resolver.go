@@ -95,6 +95,10 @@ type Resolution struct {
 	// OperatorOnly marks a key the admin layer may never set
 	// (core.OperatorOnlyKeys), whatever the other layers hold.
 	OperatorOnly bool
+
+	// ReadAtStart marks a key the engine reads only while it starts. A value
+	// stored for it applies at the next start rather than at once.
+	ReadAtStart bool
 }
 
 // Resolver answers configuration lookups from the layered sources.
@@ -113,16 +117,24 @@ type Resolver struct {
 
 	// read holds every key the engine has asked for, which is what this build
 	// treats as configuration. Provenance needs it to report a setting the
-	// environment alone supplies: such a key is in no layer it can walk, so
-	// without this it is invisible to the admin API while the save handler
-	// refuses it as env-pinned, and a page cannot tell that from a setting
-	// nobody has set.
+	// environment alone supplies, or one nothing supplies yet: such a key is in
+	// no layer it can walk, so without this it is invisible to the admin API,
+	// and a page can neither show it pinned nor save it for the first time.
 	//
 	// Only Get records. Resolve is also called with names that arrive in a
 	// request body, and recording those would let a caller put anything it
 	// liked on an admin screen.
 	mu   sync.RWMutex
 	read map[string]struct{}
+
+	// atStart holds the keys read before the admin layer was offered or while
+	// boot re-reads its settings, and readLive those read after. A key only in
+	// atStart is consumed at boot, so a stored value for it waits for the next
+	// start.
+	atStart   map[string]struct{}
+	readLive  map[string]struct{}
+	offered   atomic.Bool
+	rereading atomic.Bool
 }
 
 // NewResolver builds a resolver over a loaded file layer. Pass nil for an
@@ -168,6 +180,7 @@ func (r *Resolver) SetAdminLayer(values map[string]string) {
 	if r == nil {
 		return
 	}
+	r.offered.Store(true)
 	upper := make(map[string]string, len(values))
 	for k, v := range values {
 		upper[normalizeKey(k)] = v
@@ -186,6 +199,7 @@ func (r *Resolver) Resolve(key string) Resolution {
 	if name == "" {
 		return res
 	}
+	res.ReadAtStart = r.readOnlyAtStart(name)
 
 	fv, inFile := r.fileValue(name)
 
@@ -293,7 +307,40 @@ func (r *Resolver) markRead(name string) {
 		r.read = make(map[string]struct{})
 	}
 	r.read[name] = struct{}{}
+	if r.offered.Load() && !r.rereading.Load() {
+		if r.readLive == nil {
+			r.readLive = make(map[string]struct{})
+		}
+		r.readLive[name] = struct{}{}
+	} else {
+		if r.atStart == nil {
+			r.atStart = make(map[string]struct{})
+		}
+		r.atStart[name] = struct{}{}
+	}
 	r.mu.Unlock()
+}
+
+// offerAdminLayer marks the point after which a read can see a stored value.
+// It is set even when loading the stored layer fails, because a save then
+// installs one, and every read after this point would pick it up.
+func (r *Resolver) offerAdminLayer() {
+	if r != nil {
+		r.offered.Store(true)
+	}
+}
+
+// readOnlyAtStart reports whether the engine read the key only while it
+// started.
+func (r *Resolver) readOnlyAtStart(name string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, early := r.atStart[name]
+	_, live := r.readLive[name]
+	return early && !live
 }
 
 // ReadKeys returns the keys the engine has asked for, sorted. It is what the
@@ -314,9 +361,9 @@ func (r *Resolver) ReadKeys() []string {
 	return out
 }
 
-// Provenance reports every key any layer knows about, sorted by key. The admin
-// UI uses it to show which settings it may edit and which are pinned by the
-// deployment.
+// Provenance reports every key any layer knows about or the engine reads,
+// sorted by key. The admin UI uses it to show which settings it may edit and
+// which are pinned by the deployment.
 //
 // Secret values are not redacted here. Callers that expose this over HTTP must
 // redact before responding. See the plugin configuration endpoints.
@@ -333,19 +380,14 @@ func (r *Resolver) Provenance() []Resolution {
 			seen[k] = struct{}{}
 		}
 	}
-	// The environment is listed only where it supplies a key the engine
-	// actually reads. The full environment of a container is not configuration
-	// and would put unrelated process state on an admin screen, which is why
-	// this is bounded by the read set rather than by os.Environ.
-	//
-	// Leaving it out entirely would be worse. A .env file becomes process
-	// environment, so on an install configured that way no setting would
-	// appear at all, while the save handler would refuse each one as env-pinned.
+	// Every key the engine reads is listed, whichever layer supplies it or
+	// none. A setting nothing has set yet needs a row, or the admin can never
+	// save it for the first time. The list is bounded by the read set rather
+	// than by os.Environ, because the full environment of a container is not
+	// configuration and would put unrelated process state on an admin screen.
 	r.mu.RLock()
 	for k := range r.read {
-		if _, ok := os.LookupEnv(k); ok {
-			seen[k] = struct{}{}
-		}
+		seen[k] = struct{}{}
 	}
 	r.mu.RUnlock()
 

@@ -54,7 +54,7 @@ func refuseCatalog(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, core.ErrPermissionDenied):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "permission denied")
 	default:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 	}
 }
 
@@ -113,7 +113,7 @@ func (h *schemaCatalog) List(w http.ResponseWriter, r *http.Request) {
 	}
 	schemas, err := h.source.List(r.Context())
 	if err != nil {
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to list schemas")
+		httpx.StoreError(w, r, err, "failed to list schemas")
 		return
 	}
 	out := make([]schemaCatalogResponse, 0, len(schemas))
@@ -152,7 +152,7 @@ func (h *schemaCatalog) Get(w http.ResponseWriter, r *http.Request) {
 			httpx.ErrorReq(w, r, http.StatusNotFound, "schema not found")
 			return
 		}
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to load schema")
+		httpx.StoreError(w, r, err, "failed to load schema")
 		return
 	}
 	respond(w, http.StatusOK, schemaCatalogEntry(sc))

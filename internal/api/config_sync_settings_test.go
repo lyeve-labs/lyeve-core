@@ -108,6 +108,33 @@ func TestSettingsSection_RoundTripKeepsWhatTheBundleDoesNotCarry(t *testing.T) {
 	}
 }
 
+// Every portable setting is one the engine reads while it starts. A bundle
+// still carries it, and an import stores it for the next start.
+func TestSettingsSection_ImportsASettingTheEngineReadsAtStart(t *testing.T) {
+	withResolver(t, nil)
+	config.ActiveResolver().Get("JWT_EXPIRY_SECS")
+	config.ActiveResolver().SetAdminLayer(map[string]string{})
+	pool := testdb.Postgres(t)
+	ctx := core.WithTenantID(context.Background(), "default")
+	store := db.NewPluginConfigStore(pool).WithSealer(db.NewConfigSealer("test-master-key-for-config-sync-settings"))
+	section := newSettingsSection(store, nil, pool.Engine())
+	bundle := json.RawMessage(`{"JWT_EXPIRY_SECS":"1800"}`)
+
+	plan, err := section.PlanConfig(ctx, bundle, core.ConfigOptions{})
+	require.NoError(t, err)
+	require.Empty(t, plan.Problems)
+
+	tx, err := testhost.New(pool).Querier(ctx).Begin(ctx)
+	require.NoError(t, err)
+	_, err = section.ApplyConfig(ctx, tx, bundle, core.ConfigOptions{})
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit(ctx))
+
+	got, err := store.GetResolved(ctx, config.CoreSettingsOwner)
+	require.NoError(t, err)
+	assert.Equal(t, "1800", got["JWT_EXPIRY_SECS"])
+}
+
 func TestSettingsSection_PlanRefusesWhatThisInstanceCannotTake(t *testing.T) {
 	t.Setenv("RATE_LIMIT_RPS", "777")
 	withResolver(t, nil)

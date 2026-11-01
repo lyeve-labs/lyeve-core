@@ -29,7 +29,55 @@ type schemaContentFixture struct {
 	ctx     context.Context
 	content *ContentHandler
 	eng     *schemaengine.Engine
+	rules   *fixtureRules
 	pool    db.DB
+}
+
+// fixtureRules are the content rules the fixture's handler applies. The
+// reference engine under them checks required fields and nothing else, so a
+// test here reads what the kernel does with the rules' answer, never what a
+// rule means. Two things are canned on top of it: the defaults the fixture
+// schemas declare, filled into a create that leaves them out so a test can
+// post without them, and a refusal of any field named in refuse.
+type fixtureRules struct {
+	eng    *schemaengine.Engine
+	refuse map[string]core.SchemaValidationError
+}
+
+// fixtureDefaults are the defaults contentDefaultSchemas declare.
+var fixtureDefaults = map[string]map[string]any{
+	"notes":            {"status": "open"},
+	"survey_responses": {"status": "new"},
+	"surveys":          {"active": true},
+}
+
+func (f *fixtureRules) PrepareCreate(ctx context.Context, sc *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	for k, v := range fixtureDefaults[sc.Name] {
+		if _, sent := data[k]; !sent {
+			data[k] = v
+		}
+	}
+	if errs := f.refused(data); len(errs) > 0 {
+		return data, errs, nil
+	}
+	return f.eng.PrepareCreate(ctx, sc, data)
+}
+
+func (f *fixtureRules) ValidatePatch(ctx context.Context, sc *core.Schema, patch, current map[string]any) ([]core.SchemaValidationError, error) {
+	if errs := f.refused(patch); len(errs) > 0 {
+		return errs, nil
+	}
+	return f.eng.ValidatePatch(ctx, sc, patch, current)
+}
+
+func (f *fixtureRules) refused(data map[string]any) []core.SchemaValidationError {
+	var out []core.SchemaValidationError
+	for field, failure := range f.refuse {
+		if _, ok := data[field]; ok {
+			out = append(out, failure)
+		}
+	}
+	return out
 }
 
 // contentDefaultSchemas are the content models the tests below post, spelled
@@ -241,10 +289,12 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 				}
 			}
 			src := eng.SchemaSource()
+			rules := &fixtureRules{eng: eng}
 			fn(t, schemaContentFixture{
 				ctx:     ctx,
-				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, hooks: hooks.NewRegistry()},
+				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, rules: rules, hooks: hooks.NewRegistry()},
 				eng:     eng,
+				rules:   rules,
 				pool:    pool,
 			})
 		})
@@ -314,9 +364,9 @@ func dataOf(t *testing.T, rr *httptest.ResponseRecorder) map[string]any {
 	return out.Data
 }
 
-// Both sets declare status as required with a default. The default is
-// applied before validation, so a note or a response posted without a
-// status is created with the default on every dialect.
+// Both sets declare status as required with a default. The rules fill the
+// default before they validate, and the kernel stores and answers the data
+// the rules hand back rather than the body it was sent, on every dialect.
 func TestContentHandler_Create_DefaultSatisfiesRequired(t *testing.T) {
 	forEachDialectWithSchemas(t, []string{"notes", "surveys"}, func(t *testing.T, fx schemaContentFixture) {
 		t.Run("a note without status starts open", func(t *testing.T) {

@@ -16,20 +16,30 @@ const DefaultMaxFailedAttempts = 5
 // DefaultLockoutWindow is the default window for counting login failures.
 const DefaultLockoutWindow = 15 * time.Minute
 
+// Reservation is one attempt a lockout counted before its answer was checked.
+// It names the window the attempt was counted in, so releasing it gives back
+// that attempt and never one counted in a later window.
+type Reservation struct {
+	// Count is the number of attempts in the window, this one included when
+	// it was counted.
+	Count  int
+	window int64 // unix nanos the window opened
+}
+
 // lockoutUserState is one user's failure window.
 //
 // Both fields are read and written only under the owning InMemoryLockout's
-// mutex. The entry's contents and its lifetime need the same lock: counting
-// prunes an expired entry from the map, so a record holding only a pointer to
-// it could stamp its failure onto a state nobody will read again.
+// mutex. The entry's contents and its lifetime need the same lock: a release
+// removes an entry from the map, so a reservation holding only a pointer to
+// it could stamp its attempt onto a state nobody will read again.
 type lockoutUserState struct {
 	failures    atomic.Int64
 	windowStart atomic.Int64 // unix nanos of the first failure in the current window
 }
 
 // InMemoryLockout is a process-local, per-user login failure tracker.
-// It enforces a sliding-window limit: after maxAttempts failures within
-// the configured window, CountRecentFailures returns the failure count.
+// It enforces a fixed-window limit: once the window holds the limit's
+// attempts, ReserveAttempt refuses until the window closes.
 //
 // Unlike InMemoryMFALockout, this does not track per-challenge attempts
 // (MFA is a separate concern). It only tracks password-login failures.
@@ -69,45 +79,17 @@ func (l *InMemoryLockout) getOrCreate(userID uuid.UUID) *lockoutUserState {
 	return s
 }
 
-// CountRecentFailures returns the number of failed login attempts for the
-// given user since the supplied time. If no active failure window exists
-// or the window started before `since`, returns 0.
+// ReserveAttempt counts one password attempt against the user before the
+// password is checked, unless the open window already holds limit attempts.
+// It returns the reservation and whether the attempt was counted. If no
+// active window exists (or the previous window expired), a new window starts
+// now.
 //
-// Expired entries are pruned from the underlying map to prevent unbounded
-// growth from non-existent or attacker-induced user IDs.
-func (l *InMemoryLockout) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
-	l.mu.Lock()
-	s, ok := l.entries[userID]
-	if !ok {
-		l.mu.Unlock()
-		return 0, nil
-	}
-
-	windowStart := s.windowStart.Load()
-
-	// Window expired or started before the cutoff: prune and return 0.
-	if time.Unix(0, windowStart).Before(since) {
-		delete(l.entries, userID)
-		l.mu.Unlock()
-		return 0, nil
-	}
-	n := int(s.failures.Load())
-	l.mu.Unlock()
-
-	return n, nil
-}
-
-// RecordFailedAttempt records a failed login attempt for the user. If no
-// active window exists (or the previous window expired), a new window
-// starts now.
-// The whole operation runs under l.mu, including the roll. Releasing the lock
-// after getOrCreate and finishing on the entry alone is not enough: a
-// concurrent CountRecentFailures prunes an entry whose window has not been
-// stamped yet (a fresh one has windowStart zero, which is before any cutoff),
-// and this then increments a state that is no longer in the map. The failure is
-// lost, and a login calls Count immediately before Record, so the two race on
-// every attempt.
-func (l *InMemoryLockout) RecordFailedAttempt(ctx context.Context, userID uuid.UUID) error {
+// The read and the increment are one step under l.mu, so of many concurrent
+// attempts only limit are counted and only those reach the password check.
+// Counting after the check instead lets every request that read the count
+// before the first failure landed through.
+func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -121,7 +103,30 @@ func (l *InMemoryLockout) RecordFailedAttempt(ctx context.Context, userID uuid.U
 		s.windowStart.Store(now)
 	}
 
-	s.failures.Add(1)
+	r := Reservation{Count: int(s.failures.Load()), window: s.windowStart.Load()}
+	if r.Count >= limit {
+		return r, false, nil
+	}
+	r.Count = int(s.failures.Add(1))
+	return r, true, nil
+}
+
+// ReleaseAttempt gives back one attempt reserved in the user's current
+// window. A window that has expired or been replaced is left as it is, and a
+// window whose count reaches zero is removed from the map.
+func (l *InMemoryLockout) ReleaseAttempt(ctx context.Context, userID uuid.UUID, r Reservation) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	s, ok := l.entries[userID]
+	if !ok || s.windowStart.Load() != r.window || time.Now().UnixNano()-r.window > int64(l.window) {
+		return nil
+	}
+	if s.failures.Load() <= 1 {
+		delete(l.entries, userID)
+		return nil
+	}
+	s.failures.Add(-1)
 	return nil
 }
 

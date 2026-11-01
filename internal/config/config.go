@@ -96,7 +96,12 @@ func LoadFrom(path string) (*Config, error) {
 		return nil, err
 	}
 	SetActiveResolver(NewResolver(files))
+	return resolveConfig()
+}
 
+// resolveConfig reads every engine setting through the active resolver and
+// validates the result.
+func resolveConfig() (*Config, error) {
 	mode, err := engineMode()
 	if err != nil {
 		return nil, err

@@ -70,6 +70,12 @@ type Event struct {
 	ActorID string
 	// ActorKind names the credential ActorID came from.
 	ActorKind string
+	// Timestamp is when the event was published. Run stamps it when the
+	// publisher left it zero.
+	Timestamp time.Time
+	// InstanceID names the replica that published the event, when the
+	// publisher knows it.
+	InstanceID string
 }
 
 // Hook is a function that runs on a lifecycle event.
@@ -277,6 +283,9 @@ func (r *Registry) Run(ctx context.Context, event Event) error {
 	if event.TenantID == "" {
 		event.TenantID = core.TenantIDFromCtx(ctx)
 	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	}
 
 	r.mu.RLock()
 	wildcardFns := r.hooks[key("*", event.Type)]
@@ -301,15 +310,17 @@ func (r *Registry) Run(ctx context.Context, event Event) error {
 // from the public event to the internal one, whoever publishes.
 func (r *Registry) Publish(ctx context.Context, event core.Event) error {
 	return r.Run(ctx, Event{
-		Type:      EventType(event.Type),
-		Schema:    event.Schema,
-		Data:      event.Data,
-		OldData:   event.OldData,
-		TenantID:  event.TenantID,
-		RecordID:  event.RecordID,
-		Source:    event.Source,
-		ActorID:   event.ActorID,
-		ActorKind: event.ActorKind,
+		Type:       EventType(event.Type),
+		Schema:     event.Schema,
+		Data:       event.Data,
+		OldData:    event.OldData,
+		TenantID:   event.TenantID,
+		RecordID:   event.RecordID,
+		Source:     event.Source,
+		ActorID:    event.ActorID,
+		ActorKind:  event.ActorKind,
+		Timestamp:  event.Timestamp,
+		InstanceID: event.InstanceID,
 	})
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -36,4 +37,20 @@ func acceptTOTP(ctx context.Context, store security.MFAStore, userID uuid.UUID, 
 		return totpReplayed, nil
 	}
 	return totpAccepted, nil
+}
+
+// totpShaped reports whether code has the shape of an authenticator code:
+// six digits once surrounding space is trimmed, as acceptTOTP reads it. A
+// recovery code never has that shape.
+func totpShaped(code string) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	for _, c := range code {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

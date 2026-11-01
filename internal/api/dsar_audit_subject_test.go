@@ -23,9 +23,9 @@ func TestDSARHandler_AuditNamesTheSubjectByDigest(t *testing.T) {
 	want := "sha256:" + hex.EncodeToString(sum[:])
 
 	compliance.RegisterSubjectEraser(&testEraser{affected: 1})
-	defer compliance.RegisterSubjectEraser(nil)
+	t.Cleanup(compliance.ResetSubjectErasers)
 	compliance.RegisterSubjectExporter(&testExporter{data: map[string]any{"notes": []map[string]any{{"id": "1"}}}})
-	defer compliance.RegisterSubjectExporter(nil)
+	t.Cleanup(compliance.ResetSubjectExporters)
 
 	audit := &mockAuditWriter{}
 	handler := NewDSARHandler(audit, nil, nil)

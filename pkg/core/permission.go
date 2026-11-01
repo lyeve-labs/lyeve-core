@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"regexp"
 	"strings"
 )
 
@@ -53,22 +54,26 @@ func GeneralPermissionResource(resource string) string {
 	return PermissionResourceAll
 }
 
+// schemaNameRe is the identifier rule the schema engine holds every schema
+// name to, so a rule resource outside it names a schema that can never exist.
+var schemaNameRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,62}$`)
+
 // ValidatePermissionResource reports whether resource may name a rule: the
 // wildcard, a resource of a registered kind, or a schema name. A kind's
 // prefix with no slug, or with one the kind refuses, is refused rather than
-// stored as a schema name nobody will ever match. Schema names are not
-// checked against the schemas that exist, because a rule may be written
-// before its schema.
+// stored as a schema name nobody will ever match, and so is a name no schema
+// can carry. Schema names are not checked against the schemas that exist,
+// because a rule may be written before its schema.
 func ValidatePermissionResource(resource string) bool {
-	if resource == "" {
-		return false
+	if resource == PermissionResourceAll {
+		return true
 	}
 	for _, k := range registeredPermissionKinds() {
 		if slug, ok := strings.CutPrefix(resource, k.Prefix); ok {
 			return k.ValidSlug(slug)
 		}
 	}
-	return true
+	return schemaNameRe.MatchString(resource)
 }
 
 // PermissionActionsFor returns the actions a rule on resource may grant.

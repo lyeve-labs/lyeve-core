@@ -102,10 +102,10 @@ func TestErasure_APluginThatResolvesTheAddressStillFindsIt(t *testing.T) {
 	reg.Register(&anonymizingAccount{accounts: &accounts})
 	reg.Register(&resolvingEraser{accounts: &accounts, erased: &erased})
 
-	rows, err := runSubjectErasureOn(context.Background(), reg, "someone@example.test")
+	res, err := runSubjectErasureOn(context.Background(), reg, "someone@example.test")
 	require.NoError(t, err)
 
 	assert.Equal(t, 1, erased,
 		"the plugin ran after the account was anonymized and could no longer resolve the subject")
-	assert.EqualValues(t, 2, rows, "both erasers did work, so both are counted")
+	assert.EqualValues(t, 2, res.Rows, "both erasers did work, so both are counted")
 }

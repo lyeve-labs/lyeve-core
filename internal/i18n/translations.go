@@ -309,6 +309,12 @@ var translations = map[Code]map[string]string{
 	},
 }
 
+// Known reports whether the catalog holds a message for code.
+func Known(code Code) bool {
+	_, ok := translations[code]
+	return ok
+}
+
 // Load returns the best available translation for the given code and locale,
 // walking the fallback chain (e.g. fr-CA -> fr -> en). Returns the raw code
 // string when no translation exists.

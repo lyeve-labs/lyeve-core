@@ -193,6 +193,14 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			Responses:   map[string]any{"201": ok200, "400": err400, "401": err401, "409": map[string]any{"description": "Setup already complete"}},
 		},
 	}
+	paths["/api/admin/auth/sign-in-routes"] = openAPIPath{
+		"get": {
+			Tags:        []string{"Admin / Auth"},
+			Summary:     "List the sign-in routes the plugins mounted",
+			Description: "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+			Responses:   map[string]any{"200": ok200},
+		},
+	}
 	paths["/api/admin/auth/login"] = openAPIPath{
 		"post": {
 			Tags:        []string{"Admin / Auth"},
@@ -285,8 +293,21 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		}, super...),
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "Create a user", Security: bothAuth,
-			RequestBody: jsonBody(map[string]any{"email": "user@example.com", "password": "pass", "roles": []string{"editor"}}),
-			Responses:   map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "403": err403},
+			RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+				"type":     "object",
+				"required": []string{"email", "password", "roles"},
+				"properties": map[string]any{
+					"email":    map[string]any{"type": "string", "format": "email"},
+					"password": map[string]any{"type": "string"},
+					"roles": map[string]any{
+						"type": "array", "minItems": 1, "items": map[string]any{"type": "string"},
+						"description": "The roles the account holds. There is no default, so a request with no roles is refused.",
+					},
+				},
+				"example": map[string]any{"email": "user@example.com", "password": "pass", "roles": []string{"editor"}},
+			}}}},
+			Responses: map[string]any{"201": map[string]any{"description": "Created"}, "401": err401, "403": err403,
+				"422": map[string]any{"description": "A field is missing or invalid: no email, a password the policy refuses, or no roles"}},
 		}, super...),
 	}
 
@@ -371,10 +392,31 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	// Admin API: GDPR DSAR
 	notASubject422 := map[string]any{"description": "The identifier is not an email address, an account id or an IP address"}
 	paths["/api/admin/gdpr/export"] = openAPIPath{
-		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422}}, super...),
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Export all data for a data subject (Art.15/20 portable bundle)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422,
+			"503": map[string]any{"description": "The subject's addresses could not be read, so nothing was exported. Repeat the request"},
+		}}, super...),
 	}
+	// One body for both answers: complete says whether the subject is fully
+	// erased, and a partial erasure answers 207 so no caller reads it as done.
+	eraseBody := map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+		"type":     "object",
+		"required": []string{"identifier", "total_rows", "complete"},
+		"properties": map[string]any{
+			"identifier": map[string]any{"type": "string"},
+			"total_rows": map[string]any{"type": "integer", "description": "Rows erased or anonymized"},
+			"complete":   map[string]any{"type": "boolean", "description": "True only when every part erased and no legal hold kept any"},
+			"failed":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The owners that failed or did not run"},
+			"errors":     map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "What is unfinished, that the account was not erased, and that repeating the request finishes it"},
+			"holds":      map[string]any{"type": "array", "items": map[string]any{"type": "object"}, "description": "Legal holds that kept data"},
+		},
+	}}}
 	paths["/api/admin/gdpr/erase"] = openAPIPath{
-		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": notASubject422}}, super...),
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Erase or anonymize a data subject's data (Art.17 right to erasure)", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{
+			"200": openAPIResponse{Description: "Erased. complete is false when a legal hold kept data", Content: eraseBody},
+			"207": openAPIResponse{Description: "Partly erased: either the account was not erased, failed names the owners left, and repeating the request finishes it, or some rows were kept because they cannot be told apart from another account's data", Content: eraseBody},
+			"400": err400, "401": err401, "403": err403, "422": notASubject422,
+			"503": map[string]any{"description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"},
+		}}, super...),
 	}
 
 	// Admin API: probe endpoints

@@ -40,6 +40,10 @@ type configSettingResponse struct {
 	// write-only field rather than an empty one.
 	Secret bool `json:"secret,omitempty"`
 
+	// ReadAtStart marks a setting the engine reads only while it starts, so a
+	// value saved for it applies at the next start.
+	ReadAtStart bool `json:"read_at_start,omitempty"`
+
 	// Description says what the setting does, and Default what applies when
 	// no layer sets it. Both are empty for a key the engine does not describe.
 	Description string `json:"description,omitempty"`
@@ -83,11 +87,12 @@ func configProvenanceHandler() http.HandlerFunc {
 func settingResponse(res config.Resolution) configSettingResponse {
 	secret := core.IsSecretKey(res.Key)
 	item := configSettingResponse{
-		Key:      res.Key,
-		Source:   res.From.String(),
-		Origin:   res.Origin,
-		Editable: res.Overridable,
-		Secret:   secret,
+		Key:         res.Key,
+		Source:      res.From.String(),
+		Origin:      res.Origin,
+		Editable:    res.Overridable,
+		Secret:      secret,
+		ReadAtStart: res.ReadAtStart,
 	}
 	if !secret {
 		item.Value = res.Value
@@ -162,7 +167,7 @@ func configSaveHandler(store *db.PluginConfigStore, reloader PluginConfigReloade
 					"cannot store a credential without an encryption key: set ENCRYPTION_KEY")
 				return
 			}
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to save settings")
+			httpx.StoreError(w, r, err, "failed to save settings")
 			return
 		}
 		applyStoredConfig(r.Context(), store, reloader)

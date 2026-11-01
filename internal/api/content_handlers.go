@@ -355,7 +355,7 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	results, err := h.store.BulkInsert(r.Context(), schemaName, body.Items)
 	if err != nil {
 		if !relationRefused(w, r, err) {
-			httpx.ErrorReq(w, r, httpStatus(err), "bulk insert failed")
+			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "bulk insert failed")
 		}
 		return
 	}
@@ -519,7 +519,7 @@ func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Requ
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 		return false
 	case err != nil:
-		httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "database error")
+		httpx.StoreError(w, r, err, "database error")
 		return false
 	}
 	for key := range filters {
@@ -582,6 +582,15 @@ func storeError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 		slog.ErrorContext(r.Context(), "content: "+msg, "schema", chi.URLParam(r, "schema"), "status", status, "err", err)
 	}
 	httpx.ErrorReq(w, r, status, msg)
+}
+
+// storeFailureStatus is httpStatus for a handler that answers the failure
+// itself, after httpx.LogStoreFailure has recorded a 5xx, because the body
+// carries none of the cause.
+func storeFailureStatus(r *http.Request, err error) int {
+	status := httpStatus(err)
+	httpx.LogStoreFailure(r, status, err)
+	return status
 }
 
 func httpStatus(err error) int {

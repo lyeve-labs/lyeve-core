@@ -229,12 +229,16 @@ type recordingLockoutChecker struct {
 	failures int
 }
 
-func (c *recordingLockoutChecker) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
-	return c.failures, nil
+func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
+	if c.failures >= limit {
+		return Reservation{Count: c.failures}, false, nil
+	}
+	c.failures++
+	return Reservation{Count: c.failures}, true, nil
 }
 
-func (c *recordingLockoutChecker) RecordFailedAttempt(ctx context.Context, userID uuid.UUID) error {
-	c.failures++
+func (c *recordingLockoutChecker) ReleaseAttempt(ctx context.Context, userID uuid.UUID, _ Reservation) error {
+	c.failures--
 	return nil
 }
 
@@ -256,9 +260,9 @@ func TestLogin_LockoutTriggersAfterNFailures(t *testing.T) {
 	h.MaxFailedAttempts = 5
 	h.LockoutWindow = 15 * time.Minute
 
-	// First 5 failed logins return 401. On the 5th, RecordFailedAttempt fires
-	// after the lockout check, so the counter reaches 5 but login still returns
-	// 401. The 6th attempt sees counter=5 and blocks.
+	// First 5 failed logins return 401. Each reserves its attempt before the
+	// password check, so the 5th brings the counter to 5 and is still checked.
+	// The 6th finds the counter at 5 and blocks.
 	for i := 0; i < 5; i++ {
 		body := makeLoginBody("user@test.com", "wrong-password")
 		req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login", strings.NewReader(body))
@@ -657,14 +661,14 @@ type fakeLockoutChecker struct {
 	err       error
 }
 
-func (c *fakeLockoutChecker) CountRecentFailures(ctx context.Context, userID uuid.UUID, since time.Time) (int, error) {
+func (c *fakeLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
 	if c.err != nil {
-		return 0, c.err
+		return Reservation{}, false, c.err
 	}
-	return c.failCount, nil
+	return Reservation{Count: c.failCount}, c.failCount < limit, nil
 }
 
-func (c *fakeLockoutChecker) RecordFailedAttempt(ctx context.Context, userID uuid.UUID) error {
+func (c *fakeLockoutChecker) ReleaseAttempt(context.Context, uuid.UUID, Reservation) error {
 	return nil
 }
 

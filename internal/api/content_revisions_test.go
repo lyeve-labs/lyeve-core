@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -192,5 +193,100 @@ func TestContentHandler_Revisions_RefusalNamesTheFeatureAndEmptyListIsAnArray(t 
 		assert.Equal(t, "payment_required", body["error"])
 		assert.Equal(t, "widgets", body["plugin"])
 		assert.Equal(t, "feature:widgets_history", body["feature"])
+	})
+}
+
+// A restore writes back every field the revision holds, so the content rules
+// read it as an update of those fields. A rule added after the revision was
+// taken refuses the restore with the answer that update gets, and rules that
+// cannot answer refuse it as unavailable. Either way nothing is stored.
+func TestContentHandler_RestoreRevision_ChecksContentRules(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"notes"}, func(t *testing.T, fx schemaContentFixture) {
+		id := createdID(t, fx.create(t, "notes", map[string]any{
+			"title": "First", "body": "first",
+		}))
+		revs := &memRevisions{}
+		h := *fx.content
+		h.revisions = &revisionProvider{s: revs}
+		wired := fx
+		wired.content = &h
+		require.Equal(t, http.StatusOK, wired.update(t, "notes", id, map[string]any{"body": "second"}).Code)
+		require.Len(t, revs.rows, 1)
+		revID := revs.rows[0].ID.String()
+
+		t.Run("a rule the revision breaks answers as an update", func(t *testing.T) {
+			fx.rules.refuse = map[string]core.SchemaValidationError{"body": {
+				Field: "body", Code: "SCHEMA_VALIDATION_ENUM", Rule: "enum",
+				Params: map[string]any{"values": "second"},
+			}}
+			t.Cleanup(func() { fx.rules.refuse = nil })
+
+			for _, ctx := range []context.Context{fx.ctx, i18n.WithLocale(fx.ctx, i18n.LocaleFR)} {
+				at := wired
+				at.ctx = ctx
+				restored := at.restoreRevision(t, &h, "notes", id, revID)
+				require.Equal(t, http.StatusUnprocessableEntity, restored.Code, restored.Body.String())
+				updated := at.update(t, "notes", id, revs.rows[0].Data)
+				require.Equal(t, http.StatusUnprocessableEntity, updated.Code, updated.Body.String())
+				assert.Equal(t, updated.Header().Get("Content-Type"), restored.Header().Get("Content-Type"))
+				assert.JSONEq(t, updated.Body.String(), restored.Body.String())
+			}
+		})
+
+		t.Run("rules that cannot answer refuse it as unavailable", func(t *testing.T) {
+			for name, rules := range map[string]core.ContentRules{
+				"no rules":        nil,
+				"rules that fail": failingRules{err: core.ErrConflict},
+			} {
+				unchecked := h
+				unchecked.rules = rules
+				rr := fx.restoreRevision(t, &unchecked, "notes", id, revID)
+				assert.Equal(t, http.StatusServiceUnavailable, rr.Code, name+": "+rr.Body.String())
+			}
+		})
+
+		assert.Equal(t, "second", dataOf(t, fx.get(t, "notes", id))["body"], "a refused restore wrote the revision back")
+		assert.Len(t, revs.rows, 1, "a refused restore recorded the state it did not replace")
+	})
+}
+
+func TestContentHandler_Revisions_RestoreRefusesAnotherRecordsRevision(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"notes", "surveys"}, func(t *testing.T, fx schemaContentFixture) {
+		h := *fx.content
+		store := &memRevisions{}
+		h.revisions = &revisionProvider{s: store}
+		wired := fx
+		wired.content = &h
+
+		target := createdID(t, fx.create(t, "notes", map[string]any{"title": "Target", "body": "target"}))
+		sibling := createdID(t, fx.create(t, "notes", map[string]any{"title": "Sibling", "body": "sibling"}))
+		survey := fx.createSurvey(t)
+		require.Equal(t, http.StatusOK, wired.update(t, "notes", sibling, map[string]any{"body": "sibling 2"}).Code)
+		require.Equal(t, http.StatusOK, wired.update(t, "surveys", survey, map[string]any{"name": "Renamed"}).Code)
+
+		var siblingRev, surveyRev core.RecordRevision
+		for _, rev := range store.rows {
+			switch rev.SchemaName {
+			case "notes":
+				siblingRev = rev
+			case "surveys":
+				surveyRev = rev
+			}
+		}
+		require.Equal(t, sibling, siblingRev.RecordID.String())
+		require.Equal(t, survey, surveyRev.RecordID.String())
+
+		assert.Equal(t, http.StatusNotFound,
+			fx.restoreRevision(t, &h, "notes", target, siblingRev.ID.String()).Code,
+			"a revision of another record of the same type")
+		assert.Equal(t, http.StatusNotFound,
+			fx.restoreRevision(t, &h, "notes", target, surveyRev.ID.String()).Code,
+			"a revision of a record of another type")
+
+		var out struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(fx.get(t, "notes", target).Body.Bytes(), &out))
+		assert.Equal(t, "target", out.Data["body"], "a refused restore writes nothing")
 	})
 }

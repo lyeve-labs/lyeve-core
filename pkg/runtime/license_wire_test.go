@@ -222,6 +222,7 @@ func (v wireVariant) run(t *testing.T) []wireExchange {
 		t.Setenv(k, val)
 	}
 
+	forgetBootRegistries(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunWithOptions(ctx, Options{}) }()

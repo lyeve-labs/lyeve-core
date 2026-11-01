@@ -48,6 +48,7 @@ func bootWithPanicHolder(t *testing.T) *panicHolderPlugin {
 	plugin.RegisterPluginWithCaps(p.Name(), func() core.Plugin { return p }, core.CapRoutes)
 	t.Cleanup(func() { plugin.UnregisterPlugin(p.Name()) })
 
+	forgetBootRegistries(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunWithOptions(ctx, Options{}) }()

@@ -46,7 +46,10 @@ func TenantColumnDef(engine string) string {
 // database explicitly to reach the shared table: the same reason sys_*
 // references are qualified. Postgres resolves the shared table through
 // search_path, so its reference stays bare. An empty or invalid database name
-// disables qualification. Table names come from domain.ValidateIdentifier.
+// disables qualification. A table exists only for a definition the schema
+// engine accepted, and the engine refuses a name that is not a safe
+// identifier before it creates one. Quoting doubles any closing quote, so a
+// name reaches SQL as one identifier either way.
 func qualifyGeneratedTable(engine, dbName, table string) string {
 	switch engine {
 	case "mysql":

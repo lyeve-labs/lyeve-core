@@ -150,6 +150,7 @@ webhooks:
 	registerForTest(t, relay)
 	registerForTest(t, needsDB)
 
+	forgetBootRegistries(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- RunWithOptions(ctx, Options{Version: "v9.8.7"}) }()

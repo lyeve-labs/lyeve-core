@@ -16,6 +16,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
@@ -36,6 +37,9 @@ type UsersHandler struct {
 	// ceilingURL is where the licensing implementation sends an operator to
 	// lift a ceiling, put in the seat refusal. Nil offers no link.
 	ceilingURL func(cap string) string
+	// host is the engine host the audit writer stores each account change
+	// through. Nil records nothing.
+	host core.Host
 }
 
 // NewUsersHandler constructs a UsersHandler. passwordHashAlgo defaults to
@@ -70,7 +74,7 @@ func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	users, err := h.users.List(r.Context(), limit, offset)
 	if err != nil {
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	out := make([]map[string]any, 0, len(users))
@@ -83,6 +87,7 @@ func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 // Create adds a new CMS user.
 // POST /api/admin/users
 // Body: {"email": "...", "password": "...", "roles": ["..."]}
+// roles is required and holds at least one role.
 // Auth: super_admin.
 func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -103,8 +108,11 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnprocessableEntity, code, params)
 		return
 	}
+	// An account holds only the roles its creator names. A default would
+	// grant a role the caller never asked for.
 	if len(body.Roles) == 0 {
-		body.Roles = []string{"editor"}
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, map[string]any{"field": "roles"})
+		return
 	}
 
 	// The tenant the account belongs to. An install with tenancy on resolves
@@ -134,6 +142,10 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !admitAdminSeat(w, r, seatErr, h.ceilingURL) {
 		return
 	}
+	if errors.Is(err, domain.ErrValidation) {
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationEmail, map[string]any{"field": "email"})
+		return
+	}
 	if err != nil {
 		// Detect unique-constraint violations across all dialects.
 		errMsg := strings.ToLower(err.Error())
@@ -145,9 +157,10 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusConflict, i18n.CodeUserCreateFailed, nil)
 			return
 		}
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeUserCreateFailed, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeUserCreateFailed)
 		return
 	}
+	h.audit(r, "user.create", user.ID, user.TenantID, nil, map[string]any{"roles": user.Roles})
 	respond(w, http.StatusCreated, safeUser(user))
 }
 
@@ -172,12 +185,13 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 
 	// The seat guard counts the account's current roles, so an unknown id has
 	// to answer 404 before the guard can call it a new seat and answer 402.
-	if _, err := h.users.GetByID(r.Context(), id); err != nil {
+	before, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
 		return
 	}
 
@@ -195,9 +209,10 @@ func (h *UsersHandler) UpdateRoles(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
+	h.audit(r, "user.roles.update", user.ID, user.TenantID, map[string]any{"roles": before.Roles}, map[string]any{"roles": user.Roles})
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -218,7 +233,7 @@ func admitAdminSeat(w http.ResponseWriter, r *http.Request, err error, upgrade f
 		httpx.CapExceeded(w, core.CapAdminSeats, capErr.Limit, capErr.Current, link)
 		return false
 	}
-	respondErrCode(w, r, httpx.StoreStatusFor(err), i18n.CodeDatabaseError, nil)
+	respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
 	return false
 }
 
@@ -280,9 +295,10 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
+	h.audit(r, "user.state.update", user.ID, user.TenantID, nil, map[string]any{"disabled": user.Disabled, "expires_at": user.ExpiresAt})
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -333,7 +349,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 			httpx.ErrorReq(w, r, http.StatusConflict, "this account signs in through a trusted issuer and has no password")
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
 	// The hash and the token version moved together above, so the change is
@@ -345,6 +361,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 			slog.WarnContext(logging.ContextAbout(r.Context(), user.TenantID), "set password: refresh tokens not revoked", "user_id", id.String(), "error", err)
 		}
 	}
+	h.audit(r, "user.password.set", user.ID, user.TenantID, nil, nil)
 	respond(w, http.StatusOK, safeUser(user))
 }
 
@@ -365,13 +382,49 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The account is read first because the entry is filed under its tenant
+	// and names the roles the deletion took away.
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
+			return
+		}
+		respondStoreErrCode(w, r, httpx.StoreStatusFor(err), err, i18n.CodeDatabaseError)
+		return
+	}
 	if err := h.users.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
-		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodeDatabaseError, nil)
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
+	h.audit(r, "user.delete", id, user.TenantID, map[string]any{"roles": user.Roles}, nil)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// audit records an account change. The entry is filed under the tenant the
+// account belongs to, which for a super admin can differ from the one the
+// request acts in: filed there, it would show another tenant's account to
+// that tenant's admins. An account with no tenant files under none. Neither
+// state ever carries a password or its hash.
+func (h *UsersHandler) audit(r *http.Request, action string, id uuid.UUID, tenantID string, before, after map[string]any) {
+	if h.host == nil {
+		return
+	}
+	var opts []compliance.AuditOption
+	if tenantID == "" {
+		opts = append(opts, compliance.WithoutTenant())
+	}
+	var b, a any
+	if before != nil {
+		b = before
+	}
+	if after != nil {
+		a = after
+	}
+	compliance.RecordAuditWithState(core.WithTenantID(r.Context(), tenantID), h.host, action, "user", id.String(),
+		clientIP(r), r.UserAgent(), b, a, opts...)
 }

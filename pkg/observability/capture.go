@@ -31,6 +31,12 @@ type CaptureEntry struct {
 	// Truncated is true when the middleware hit the per-body capture limit
 	// and the body in this entry is a prefix, not the full content.
 	Truncated bool `json:"truncated,omitempty"`
+
+	// BodiesWithheld is true when the engine kept both bodies out of this
+	// entry because the route carries credentials or configuration. A sink
+	// that repeats the request later, such as a replay, keeps the answer's
+	// body out for the same reason.
+	BodiesWithheld bool `json:"bodies_withheld,omitempty"`
 }
 
 // CaptureSink receives captured request/response entries.

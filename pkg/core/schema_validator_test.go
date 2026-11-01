@@ -7,56 +7,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCustomValidator_PatternIsTheFallback(t *testing.T) {
+// A name no plugin registered is not found, so the schema engine decides what
+// it means rather than the registry inventing a validator for it.
+func TestCustomValidator_UnclaimedNameIsNotFound(t *testing.T) {
 	ResetCustomValidators()
 	t.Cleanup(ResetCustomValidators)
 
 	fn, ok := LookupCustomValidator("nobody-claims-this")
-	require.True(t, ok, "an unclaimed name must still resolve, or the schema refuses every value")
-
-	assert.True(t, fn("AB1234", `[A-Z]{2}\d{4}`, nil).OK)
-	assert.False(t, fn("ab1234", `[A-Z]{2}\d{4}`, nil).OK)
+	assert.False(t, ok)
+	assert.Nil(t, fn)
 }
 
-// A body is anchored, so a validator means the whole value. Without this a
-// pattern accepts anything that merely contains a match, which reads as
-// working until the first value with a prefix.
-func TestCustomValidator_PatternMatchesTheWholeValue(t *testing.T) {
-	ResetCustomValidators()
-	t.Cleanup(ResetCustomValidators)
-	fn, _ := LookupCustomValidator("x")
-
-	assert.False(t, fn("xxAB1234yy", `[A-Z]{2}\d{4}`, nil).OK)
-	assert.True(t, fn("AB1234", `^[A-Z]{2}\d{4}$`, nil).OK, "an already anchored body is not double anchored")
-}
-
-func TestCustomValidator_PatternRefusesAnUnusableBody(t *testing.T) {
-	ResetCustomValidators()
-	t.Cleanup(ResetCustomValidators)
-	fn, _ := LookupCustomValidator("x")
-
-	res := fn("anything", "[unterminated", nil)
-	assert.False(t, res.OK)
-	assert.Contains(t, res.Error, "not usable")
-
-	empty := fn("anything", "", nil)
-	assert.False(t, empty.OK)
-	assert.Contains(t, empty.Error, "nothing to check")
-}
-
-// A non-string is compared by its printed form, and a nil value is left to the
-// required rule rather than failed here.
-func TestCustomValidator_PatternOnNonStrings(t *testing.T) {
-	ResetCustomValidators()
-	t.Cleanup(ResetCustomValidators)
-	fn, _ := LookupCustomValidator("x")
-
-	assert.True(t, fn(42, `\d+`, nil).OK)
-	assert.False(t, fn(42, `[A-Z]+`, nil).OK)
-	assert.True(t, fn(nil, `[A-Z]+`, nil).OK, "an absent value is the required rule's business")
-}
-
-func TestCustomValidator_APluginNameWinsOverThePattern(t *testing.T) {
+func TestCustomValidator_APluginNameResolvesToItsFunction(t *testing.T) {
 	ResetCustomValidators()
 	t.Cleanup(ResetCustomValidators)
 
@@ -70,8 +32,6 @@ func TestCustomValidator_APluginNameWinsOverThePattern(t *testing.T) {
 	fn, ok := LookupCustomValidator("postcode")
 	require.True(t, ok)
 
-	// The body would refuse this under the pattern interpreter, so a pass
-	// proves the registered function ran instead.
 	res := fn("SW1A 1AA", `\d+`, nil)
 	assert.True(t, res.OK)
 	assert.Equal(t, "not a postcode we deliver to", fn("nope", `\d+`, nil).Error)

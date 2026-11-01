@@ -1,9 +1,9 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 
@@ -48,7 +48,7 @@ func schemaExportHandler(host core.Host) http.HandlerFunc {
 
 		bundle, err := schemaimport.ExportBundle(r.Context(), eng, instanceSource(host))
 		if err != nil {
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to export content types")
+			httpx.StoreError(w, r, err, "failed to export content types")
 			return
 		}
 
@@ -132,8 +132,11 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 		apply := strings.EqualFold(r.URL.Query().Get("apply"), "true")
 		if !apply {
 			plan, err := schemaimport.PlanImport(r.Context(), eng, bundle)
+			if refusedDefinition(w, r, err) {
+				return
+			}
 			if err != nil {
-				httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to plan the import")
+				httpx.StoreError(w, r, err, "failed to plan the import")
 				return
 			}
 			out.Plan = plan
@@ -143,6 +146,9 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 		}
 
 		plan, err := schemaimport.ApplyBundle(r.Context(), eng, bundle)
+		if refusedDefinition(w, r, err) {
+			return
+		}
 		out.Plan = plan
 		if blocked := plan.Blocked(); len(blocked) > 0 {
 			// A refusal to start names the schemas whose references cannot be
@@ -156,14 +162,26 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 			// The engine's error wraps the database's, which names tables,
 			// constraints and columns, so it goes to the log and the answer
 			// is fixed.
-			slog.ErrorContext(r.Context(), "schema import: apply failed", "err", err)
-			httpx.ErrorReq(w, r, httpx.StoreStatusFor(err), "failed to apply the import")
+			httpx.StoreError(w, r, err, "failed to apply the import")
 			return
 		}
 		out.Applied = true
 		w.Header().Set("Cache-Control", "no-store")
 		respond(w, http.StatusOK, out)
 	}
+}
+
+// refusedDefinition answers an import the schema engine refused because a
+// definition in it is invalid, and reports whether it did. The engine names
+// the schema and the field it could not accept, which is what the operator has
+// to fix, so the message is the answer.
+func refusedDefinition(w http.ResponseWriter, r *http.Request, err error) bool {
+	var invalid *schemaimport.InvalidSchemaError
+	if !errors.As(err, &invalid) {
+		return false
+	}
+	httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, err.Error()) //nolint:raw-error-text
+	return true
 }
 
 // convertUpload turns an upload into a bundle, through a converter when the

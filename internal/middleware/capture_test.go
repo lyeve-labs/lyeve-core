@@ -428,6 +428,9 @@ func TestRequestCapture_WithholdsCredentialBodies(t *testing.T) {
 				t.Errorf("bodies captured = %v, want %v (request %q, response %q)",
 					gotBodies, !tc.withheld, entry.RequestBody, entry.ResponseBody)
 			}
+			if entry.BodiesWithheld != tc.withheld {
+				t.Errorf("BodiesWithheld = %v, want %v", entry.BodiesWithheld, tc.withheld)
+			}
 		})
 	}
 }
@@ -466,6 +469,9 @@ func TestRequestCaptureWithholding_DeclaredRouteKeepsItsBodiesOut(t *testing.T) 
 			gotBodies := len(entry.RequestBody) > 0 || len(entry.ResponseBody) > 0
 			if gotBodies == tc.withheld {
 				t.Errorf("bodies captured = %v, want %v", gotBodies, !tc.withheld)
+			}
+			if entry.BodiesWithheld != tc.withheld {
+				t.Errorf("BodiesWithheld = %v, want %v", entry.BodiesWithheld, tc.withheld)
 			}
 		})
 	}

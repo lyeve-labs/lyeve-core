@@ -186,6 +186,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	authHandler.WithSetupToken(setupToken)
 	authHandler.WithMemberships(o.memberships)
+	authHandler.host = o.scalingHost
 	// A plugin that verifies a second factor of its own completes the
 	// challenge through this handler, so both read one record of used
 	// challenges.
@@ -193,6 +194,13 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		SetMFAChallengeCompleter(core.MFAChallengeCompleter)
 	}); ok {
 		reg.SetMFAChallengeCompleter(authHandler)
+	}
+	// A plugin that asks for a password or an authenticator code asks this
+	// handler, so its wrong answers count against the token routes' lockouts.
+	if reg, ok := o.scalingHost.(interface {
+		SetStepUpChecker(core.StepUpChecker)
+	}); ok {
+		reg.SetStepUpChecker(authHandler)
 	}
 	// The document describes what this router mounts, so it is built from the
 	// same values the mounts are.
@@ -227,6 +235,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		usersHandler.revokeRefresh = o.refreshTokenStore.RevokeAllForUser
 	}
 	usersHandler.passwordPolicy = passwordPolicy
+	usersHandler.host = o.scalingHost
 
 	// Kubernetes health probes
 	// Mounted on the outer router before JWT auth middleware: Kubernetes
@@ -277,6 +286,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		// coming back as a malformed-body 400.
 		jsonGuard := apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes)
 		r.Get("/setup", authHandler.SetupStatus)
+		r.Get("/auth/sign-in-routes", signInRoutesHandler(o.pluginRoutes, o.entitlements.Withholds))
 		r.With(jsonGuard).Post("/setup", authHandler.Setup)
 		if publicRL != nil {
 			r.With(jsonGuard, publicRL.WrapFunc("POST", "/api/admin/auth/login")).Post("/auth/login", authHandler.Login)

@@ -11,6 +11,8 @@ import (
 // hookBusAdapter wraps *hooks.Registry to implement core.HookBus.
 type hookBusAdapter struct {
 	registry *hooks.Registry
+	// instanceID names this replica on an event whose publisher named none.
+	instanceID string
 }
 
 // Subscribe registers handler for the given schema and event type.
@@ -22,16 +24,22 @@ func (h *hookBusAdapter) Subscribe(schema string, event core.EventType, handler 
 
 	// Wrap the public EventHandler into the internal hooks.Hook signature.
 	fn := func(ctx context.Context, e hooks.Event) error {
+		instanceID := e.InstanceID
+		if instanceID == "" {
+			instanceID = h.instanceID
+		}
 		return handler(ctx, core.Event{
-			Type:      core.EventType(e.Type),
-			Schema:    e.Schema,
-			Data:      e.Data,
-			OldData:   e.OldData,
-			TenantID:  e.TenantID,
-			RecordID:  e.RecordID,
-			Source:    e.Source,
-			ActorID:   e.ActorID,
-			ActorKind: e.ActorKind,
+			Type:       core.EventType(e.Type),
+			Schema:     e.Schema,
+			Data:       e.Data,
+			OldData:    e.OldData,
+			TenantID:   e.TenantID,
+			RecordID:   e.RecordID,
+			InstanceID: instanceID,
+			Timestamp:  e.Timestamp,
+			Source:     e.Source,
+			ActorID:    e.ActorID,
+			ActorKind:  e.ActorKind,
 		})
 	}
 

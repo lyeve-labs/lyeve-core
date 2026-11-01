@@ -109,13 +109,14 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	userStore := db.NewUserStore(pool)
 	// Auto-mounted via RoutesPlugin.
 
-	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once), streamSlots: new(streamSlots),
+	contentHandler := &ContentHandler{store: contentStore, schemas: contentSchemas, rules: o.contentRules, hooks: hookRegistry, perms: o.permissionChecker, localizer: o.contentLocalizer, revisions: o.recordRevisions, streamDeadlineWarn: new(sync.Once), streamSlots: new(streamSlots),
 		streamCredential: streamCredential(tokenVersionGetter(userStore), o.apiKeyAuth)}
 
 	secureCook := cfg.SecureCookie
 	authHandler := NewAuthHandler(userStore, o.mfaStore, pool, cfg.JWTSecret, cfg.JWTExpirySecs, secureCook)
 	authHandler.WithSharedLockoutBackend(o.lockoutBackend)
 	authHandler.WithMemberships(o.memberships)
+	authHandler.host = o.scalingHost
 	// Wire per-tenant DEK encryption. Prefer a KeyStore injected by the runtime
 	// (KEK resolved through the secret-custody chain). Otherwise fall back to
 	// building one from ENCRYPTION_KEY.

@@ -34,7 +34,7 @@ var _ compliance.SubjectExporter = (*sysUserExporter)(nil)
 // DSAR registry. Lives here rather than in the boot path because runtime.go
 // already binds the name "compliance" to the internal controls package.
 func registerSysUserExporter(host core.Host) {
-	compliance.RegisterSubjectExporter(newSysUserExporter(host))
+	compliance.RegisterSubjectExporterAs(compliance.EngineExportSection, newSysUserExporter(host))
 }
 
 // ExportSubject returns the accounts of the tenant ctx names whose email, id

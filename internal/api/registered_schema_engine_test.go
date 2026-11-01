@@ -33,6 +33,7 @@ func TestContentAPI_FollowsAnEngineRegisteredAfterTheHostWasBuilt(t *testing.T) 
 
 	host := enginehost.NewHost(pool, pool.SQLDB(), &config.Config{}, nil, "test")
 	source := core.LazySchemaSource(host.(core.SchemaSourceProvider).SchemaSource)
+	rules := core.LazyContentRules(host.(core.ContentRulesProvider).ContentRules)
 
 	// Nothing has registered, and this host was never given the built-in
 	// engine either, so the reader has to say there is no engine rather than
@@ -63,6 +64,7 @@ func TestContentAPI_FollowsAnEngineRegisteredAfterTheHostWasBuilt(t *testing.T) 
 	// builds it.
 	router, err := NewAPIRouter(pool, cfg, nil,
 		WithSchemaSource(source),
+		WithContentRules(rules),
 		WithLifetime(testLifetime(t)),
 	)
 	require.NoError(t, err)
