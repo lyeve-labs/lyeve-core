@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -34,10 +33,9 @@ func registerKernelPurgeHandlers(logger *slog.Logger) {
 func checkPurgeCoverage(ctx context.Context, q core.Querier, dialect string, logger *slog.Logger) error {
 	scoped, err := core.ListTenantScopedTables(ctx, q, dialect)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "FATAL: cannot list tenant-scoped tables for purge validation: %v\n", err)
-		fmt.Fprintf(os.Stderr, "The purge registration validator must be able to query information_schema\n")
-		fmt.Fprintf(os.Stderr, "to verify every tenant_id-bearing table has a registered purge handler.\n")
-		fmt.Fprintf(os.Stderr, "Fix the database connection and restart.\n")
+		logger.Error("purge registration validator cannot list tenant-scoped tables",
+			"err", err,
+			"hint", "the check reads information_schema to find every table with a tenant_id column. Fix the database connection and restart")
 		return fmt.Errorf("purge validation: cannot list tenant-scoped tables: %w", err)
 	}
 
@@ -51,17 +49,9 @@ func checkPurgeCoverage(ctx context.Context, q core.Querier, dialect string, log
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "FATAL: %d tenant-scoped table(s) without a registered purge handler:\n", len(missing))
-	for _, t := range missing {
-		fmt.Fprintf(os.Stderr, "  - %s\n", t)
-	}
-	fmt.Fprintf(os.Stderr, "\nEvery table with a tenant_id column needs a purge path. The owning plugin\n")
-	fmt.Fprintf(os.Stderr, "declares it through core.TenantPurger, which the engine asks of every\n")
-	fmt.Fprintf(os.Stderr, "compiled plugin whether or not it starts.\n")
-	fmt.Fprintf(os.Stderr, "Deleting a tenant would otherwise leave its rows in these tables, so the\n")
-	fmt.Fprintf(os.Stderr, "engine refuses to start.\n")
 	logger.Error("purge registration validator found uncovered tables",
 		"uncovered", missing,
+		"hint", "every table with a tenant_id column needs a purge path. The owning plugin declares it through core.TenantPurger, which the engine asks of every compiled plugin whether or not it starts. Deleting a tenant would otherwise leave its rows in these tables, so the engine refuses to start",
 		"covered_tables", len(core.CoveredTableSet()),
 		"scoped_tables", len(scoped),
 		"handlers", core.TenantPurgeHandlerCount())
