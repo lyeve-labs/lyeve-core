@@ -103,9 +103,9 @@ func buildAdminExtraMW(ctx context.Context, cfg *config.Config, activator *plugi
 	latencyTracker *apimw.LatencyTracker) []api.RouterOption {
 	var mw []api.RouterOption
 
-	mw = append(mw, api.WithMiddleware(drainer.Middleware))
+	mw = append(mw, api.WithAdmissionMiddleware(drainer.Middleware))
 	if cfg.BackpressureEnabled {
-		mw = append(mw, api.WithMiddleware(backpressureResult.Middleware))
+		mw = append(mw, api.WithAdmissionMiddleware(backpressureResult.Middleware))
 	}
 	mw = append(mw, api.WithMiddleware(apimw.StripForwardedHeaders()))
 	if cfg.InstanceRegion != "" {
@@ -169,9 +169,9 @@ func buildAPIExtraMW(ctx context.Context, cfg *config.Config, activator *plugin.
 	latencyTracker *apimw.LatencyTracker) []api.RouterOption {
 	var mw []api.RouterOption
 
-	mw = append(mw, api.WithMiddleware(drainer.Middleware))
+	mw = append(mw, api.WithAdmissionMiddleware(drainer.Middleware))
 	if cfg.BackpressureEnabled {
-		mw = append(mw, api.WithMiddleware(backpressureResult.Middleware))
+		mw = append(mw, api.WithAdmissionMiddleware(backpressureResult.Middleware))
 	}
 	mw = append(mw, api.WithMiddleware(apimw.StripForwardedHeaders()))
 	if cfg.InstanceRegion != "" {

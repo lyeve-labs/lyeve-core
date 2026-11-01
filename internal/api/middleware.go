@@ -544,6 +544,12 @@ func tokenVersionCheck(getTokenVersion func(ctx context.Context, userID string) 
 				next.ServeHTTP(w, r)
 				return
 			}
+			// hideEndedSession read this session's version earlier in the
+			// request and found it current.
+			if checked, _ := r.Context().Value(sessionCheckedKey{}).(*auth.Claims); checked == claims {
+				next.ServeHTTP(w, r)
+				return
+			}
 			// Never the read that takes the request's tenant connection.
 			// Taken here, before any handler runs, it would stay with a
 			// handler that streams until its client leaves, and a few idle
@@ -574,6 +580,74 @@ func tokenVersionCheck(getTokenVersion func(ctx context.Context, userID string) 
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// sessionCheckedKey holds the claims hideEndedSession found current, so the
+// route's own tokenVersionCheck does not read the same version again.
+type sessionCheckedKey struct{}
+
+// hiddenSessionKey holds the claims hideEndedSession took off a request.
+type hiddenSessionKey struct{}
+
+type hiddenSession struct {
+	claims *auth.Claims
+	core   *core.AuthClaims
+}
+
+// hideEndedSession keeps the claims of a session the engine has ended away
+// from the plugin middleware. A token's signature, expiry and type are
+// checked when it is read, but whether its account logged out, was disabled
+// or was erased is checked by the route groups, which run after the plugin
+// middleware. A plugin middleware that judged the caller by role would act
+// for a session that no longer exists.
+//
+// hide takes the claims off the request when the token's version is behind
+// the account's, when the account is gone, and when the version cannot be
+// read, so a plugin middleware sees no caller. restore puts them back after
+// the plugin middleware, so the route answers as it always has: 401 for an
+// ended session and 503 for a store that could not answer. A session hide
+// found current is marked, and tokenVersionCheck passes it without a second
+// read.
+func hideEndedSession(getTokenVersion func(ctx context.Context, userID string) (int, error)) (hide, restore func(http.Handler) http.Handler) {
+	if getTokenVersion == nil {
+		pass := func(next http.Handler) http.Handler { return next }
+		return pass, pass
+	}
+	hide = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := claimsFromCtx(r)
+			if claims == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			ctx := r.Context()
+			// The read the route's own check makes, on the same terms.
+			current, err := getTokenVersion(db.WithoutTakingTenantConn(ctx), claims.UserID)
+			if err == nil && claims.TokenVersion >= current {
+				next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, sessionCheckedKey{}, claims)))
+				return
+			}
+			ctx = context.WithValue(ctx, hiddenSessionKey{}, hiddenSession{claims: claims, core: core.GetClaims(ctx)})
+			ctx = context.WithValue(ctx, auth.ClaimsKey, (*auth.Claims)(nil))
+			ctx = context.WithValue(ctx, core.ClaimsKey, (*core.AuthClaims)(nil))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+	restore = func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			h, ok := ctx.Value(hiddenSessionKey{}).(hiddenSession)
+			// A plugin middleware that authenticated the request itself keeps
+			// the caller it set.
+			if ok && claimsFromCtx(r) == nil && core.GetClaims(ctx) == nil {
+				ctx = context.WithValue(ctx, auth.ClaimsKey, h.claims)
+				ctx = context.WithValue(ctx, core.ClaimsKey, h.core)
+				r = r.WithContext(ctx)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+	return hide, restore
 }
 
 // errTokenSubject marks a token whose subject is not a user id.
