@@ -205,10 +205,10 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 		// published, not draft. A row written without a status is visible,
 		// and the read path defaults to published, so defaulting the column
 		// the other way makes every insert invisible to the very next list.
-		cols = append(cols,
-			"_status "+boundedText+" NOT NULL DEFAULT 'published'",
-			"published_at "+tsType,
-		)
+		// _status is the only column draft and publish adds. A published_at
+		// here collided with a declared field of that name, which a WordPress
+		// post type carries.
+		cols = append(cols, "_status "+boundedText+" NOT NULL DEFAULT 'published'")
 	}
 
 	var pivots []string
