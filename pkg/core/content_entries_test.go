@@ -150,6 +150,32 @@ func TestScopedHost_ContentEntryReader_ReachedThroughTheWriter(t *testing.T) {
 	assert.Equal(t, []ContentEntryInput{in}, fake.saved, "the id, expected revision and note reach the store untouched")
 }
 
+// A consumer that compares a write with the stored entry reads the entry's
+// meta beside its fields, so a value kept in meta can be compared too.
+func TestScopedHost_ContentEntryReader_CarriesMeta(t *testing.T) {
+	inner := &entryWriterHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "content", CapAll)
+	consumer := NewScopedHost(inner, "pages", CapRoutes)
+
+	id := uuid.New()
+	meta := map[string]any{"contact": "ada@example.com", "seo": map[string]any{"title": "Home"}}
+	fake := &fakeEntryStore{entry: ContentEntry{ID: id, Schema: "pages", Revision: 2, Fields: map[string]any{"title": "Home"}, Meta: meta}}
+	require.NoError(t, owner.RegisterContentEntryWriter(fake))
+
+	r, ok := consumer.ContentEntryWriter().(ContentEntryReader)
+	require.True(t, ok)
+	ctx := WithTenantID(context.Background(), "acme")
+	got, err := r.ContentEntry(ctx, id)
+	require.NoError(t, err)
+	assert.Equal(t, meta, got.Meta)
+	past, err := r.ContentEntryRevision(ctx, id, 2)
+	require.NoError(t, err)
+	assert.Equal(t, meta, past.Meta)
+
+	var none ContentEntry
+	assert.Nil(t, none.Meta, "an entry a store read without meta holds none")
+}
+
 // fakeVersionStore is a store that also lists an entry's revisions.
 type fakeVersionStore struct {
 	fakeEntryStore
