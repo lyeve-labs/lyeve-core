@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +49,9 @@ type ContentStore struct {
 	// miss for every test double that does not report a database name.
 	dbName     string
 	dbNameOnce sync.Once
+
+	// listPlans holds a *listPlan per tenant and schema name.
+	listPlans sync.Map
 
 	ListCacheHits   atomic.Uint64
 	ListCacheMisses atomic.Uint64
@@ -171,9 +176,10 @@ func (s *ContentStore) Caching() bool { return s.itemCache != nil && s.listCache
 
 // FlushCaches drops every cached item and list entry. Callers use it when the
 // backing schema changes: the cached rows carry the pre-migration column set,
-// which a schema edit alone would leave in place until the TTL lapsed. No-op
-// when caching is disabled.
+// which a schema edit alone would leave in place until the TTL lapsed. It also
+// drops the list plans, so a deleted schema's definition is not kept.
 func (s *ContentStore) FlushCaches(ctx context.Context) {
+	s.listPlans.Clear()
 	if s.itemCache != nil {
 		_ = s.itemCache.Flush(ctx) // err suppressed: cache is best-effort
 	}
@@ -456,30 +462,17 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		}
 	}
 
-	// Build filter-key allowlist: system columns + resolved schema field columns.
-	allowed := map[string]bool{
-		"id":         true,
-		"created_at": true,
-		"updated_at": true,
-		"_status":    true,
-		"deleted_at": true,
-	}
-	for _, f := range sc.Fields {
-		col := fieldColumn(f)
-		allowed[col] = true
-	}
-
-	// Validate filter keys against the allowlist.
+	plan := s.listPlanFor(tenantID, schemaName, sc)
 	for key := range filters {
-		if !allowed[key] {
+		if !plan.allowed[key] {
 			return nil, fmt.Errorf("%w: unknown filter key %q", domain.ErrBadRequest, key)
 		}
 	}
 
-	d := dialect.Must(s.pool.Engine())
+	d := plan.dialect
 	// $1=tenant, $2=limit, $3=offset; filter clauses start at $4.
 	args := []any{tenantID, limit, offset}
-	whereClauses := []string{fmt.Sprintf("%s = $1", d.QuoteIdentifier(TenantColumnName))}
+	whereClauses := []string{plan.tenantClause}
 	if sc.WithSoftDelete {
 		whereClauses = append(whereClauses, "deleted_at IS NULL")
 	}
@@ -489,12 +482,15 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 			whereClauses = append(whereClauses, "(_status = 'published' OR _status IS NULL)")
 		}
 	}
+	// The keys go in sorted order, so one set of filters is one statement
+	// text however the map is walked. The statement caches on the
+	// connection and the plan caches on the server match by that text.
 	i := 4
-	for col, val := range filters {
+	for _, col := range slices.Sorted(maps.Keys(filters)) {
 		// col is allowlist-validated above. Quote so reserved-word field names
 		// (e.g. "order") don't break the query.
 		whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", d.QuoteIdentifier(col), filterParam(s.pool.Engine(), sc, col, i)))
-		args = append(args, val)
+		args = append(args, filters[col])
 
 		i++
 	}
@@ -503,16 +499,13 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		where = "WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	// Dialect-aware pagination: PG/MySQL use LIMIT/OFFSET, MSSQL uses OFFSET/FETCH.
-	// $2=limit, $3=offset (see args above).
-	pagination := dialect.LimitOffsetPlaceholders(d, 2, 3)
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
 		SELECT id, created_at, updated_at,
 		       %s
 		FROM %s r
 		%s
 		ORDER BY created_at DESC, id DESC
-		%s`, dataColumnExpr(s.pool.Engine(), sc, "r"), table, where, pagination),
+		%s`, plan.selectExpr, table, where, plan.pagination),
 		args...,
 	)
 	if err != nil {
@@ -540,6 +533,54 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		_ = s.listCache.Set(ctx, key, cloneContents(items), 0) // err suppressed: cache is best-effort
 	}
 	return items, nil
+}
+
+// listPlan is the part of a list query that follows from the schema
+// definition alone: the columns a filter may name, the projection and the
+// pagination.
+type listPlan struct {
+	sc           *domain.Schema
+	dialect      dialect.Dialect
+	allowed      map[string]bool
+	tenantClause string
+	selectExpr   string
+	pagination   string
+}
+
+// listPlanFor answers the list plan for sc, built once per definition. A
+// schema source caches what it hands out, so the same pointer is the same
+// definition, and a changed definition arrives as a new pointer, which builds
+// a new plan.
+func (s *ContentStore) listPlanFor(tenantID, schemaName string, sc *domain.Schema) *listPlan {
+	key := tenantID + "\x00" + schemaName
+	if v, ok := s.listPlans.Load(key); ok {
+		if p := v.(*listPlan); p.sc == sc {
+			return p
+		}
+	}
+	d := dialect.Must(s.pool.Engine())
+	allowed := map[string]bool{
+		"id":         true,
+		"created_at": true,
+		"updated_at": true,
+		"_status":    true,
+		"deleted_at": true,
+	}
+	for _, f := range sc.Fields {
+		allowed[fieldColumn(f)] = true
+	}
+	p := &listPlan{
+		sc:           sc,
+		dialect:      d,
+		allowed:      allowed,
+		tenantClause: d.QuoteIdentifier(TenantColumnName) + " = $1",
+		selectExpr:   dataColumnExpr(s.pool.Engine(), sc, "r"),
+		// $2=limit, $3=offset. PostgreSQL and MySQL use LIMIT and OFFSET,
+		// SQL Server OFFSET and FETCH.
+		pagination: dialect.LimitOffsetPlaceholders(d, 2, 3),
+	}
+	s.listPlans.Store(key, p)
+	return p
 }
 
 // typedFilters answers filters with each value parsed by the type of the
