@@ -514,6 +514,9 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/trace", pprof.Trace)
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/heap", memoryProfileGuard("heap", pprof.Handler("heap")))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+		// Goroutines parked on a channel or lock nothing else can reach. Writing
+		// it runs one collection, so it costs about what a heap profile does.
+		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/goroutineleak", pprof.Handler("goroutineleak"))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/allocs", memoryProfileGuard("allocs", pprof.Handler("allocs")))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/block", pprof.Handler("block"))
 		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
