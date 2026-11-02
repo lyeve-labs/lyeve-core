@@ -83,6 +83,25 @@ func (r *Relay) Attached() bool {
 	return r.transport != nil
 }
 
+// Replicas reports how many replicas are running and whether the count is
+// known. Only a transport that keeps a roster can count them, so an install
+// with no transport, a transport without a roster or a roster that fails to
+// answer reports this replica alone, as not known.
+func (r *Relay) Replicas(ctx context.Context) (n int, known bool) {
+	r.mu.RLock()
+	t := r.transport
+	r.mu.RUnlock()
+	roster, ok := t.(Roster)
+	if !ok {
+		return 1, false
+	}
+	n, err := roster.Replicas(ctx)
+	if err != nil || n < 1 {
+		return 1, false
+	}
+	return n, true
+}
+
 // Broadcast implements Bus. The payload is checked whether or not a transport
 // is attached, so a message too large to carry is refused on every install
 // rather than only on a replicated one.

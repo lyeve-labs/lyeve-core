@@ -66,6 +66,14 @@ type Transport interface {
 	Run(ctx context.Context, deliver func(context.Context, Message))
 }
 
+// Roster is implemented by a Transport that knows which replicas are running,
+// such as one that keeps a heartbeat per replica in its store. It is optional:
+// a transport that only carries messages has no count to give.
+type Roster interface {
+	// Replicas counts the replicas running now, this one included.
+	Replicas(ctx context.Context) (int, error)
+}
+
 // MaxPayload bounds one message. Anything larger belongs in a table the
 // message points at.
 const MaxPayload = 64 << 10
