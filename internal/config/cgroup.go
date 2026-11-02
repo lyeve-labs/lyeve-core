@@ -16,17 +16,13 @@ const cgroupV1Unlimited = 1 << 62
 // when it sets none or the files cannot be read. fsys is the root of the file
 // system.
 //
-// In a container the cgroup v2 file at the mount's root is the container's
-// own. On a host the root of the hierarchy has no memory.max, and the limit
-// sits at the process's own path, which /proc/self/cgroup names, as a systemd
-// unit's MemoryMax does. A limit on any parent binds as well, so the smallest
-// on the way to the root wins. Cgroup v1 keeps the limit under the memory
+// The limit sits at the process's own path, which /proc/self/cgroup names:
+// the root of the mount in a container with its own cgroup namespace, a child
+// of it when the engine runs in a limited child cgroup, or a systemd unit's
+// path on a host, where MemoryMax sets it. A limit on any parent binds as
+// well, so the smallest on the way to the root wins. Cgroup v1 keeps the limit under the memory
 // controller's own mount.
 func cgroupMemoryLimit(fsys fs.FS) int64 {
-	if data, err := fs.ReadFile(fsys, "sys/fs/cgroup/memory.max"); err == nil {
-		n, _ := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-		return max(n, 0)
-	}
 	data, err := fs.ReadFile(fsys, "proc/self/cgroup")
 	if err != nil {
 		return 0
