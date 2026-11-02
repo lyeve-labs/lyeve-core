@@ -61,7 +61,10 @@ type Options struct {
 // primary pool. Everything it changes is process-wide, so the engine builds
 // one.
 type Tuner struct {
-	root     fs.FS
+	root fs.FS
+	// cg is the process's cgroup paths, parsed once: a process does not
+	// move between cgroups while it runs.
+	cg       config.Cgroup
 	db       *sql.DB
 	dialect  string
 	cfg      *config.Config
@@ -113,6 +116,7 @@ func New(opts Options) *Tuner {
 	}
 	t := &Tuner{
 		root:     opts.Root,
+		cg:       config.ReadCgroup(opts.Root),
 		db:       opts.DB,
 		dialect:  opts.Dialect,
 		cfg:      opts.Config,
@@ -161,11 +165,17 @@ func (t *Tuner) SetSharedCache(shared bool) {
 func (t *Tuner) Tick() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.cpuStartVar == "" && t.cpuMode == core.CPUAutomatic {
-		t.applyAutomaticCPU(config.CgroupCPULimit(t.root))
+	followCPU := t.cpuStartVar == "" && t.cpuMode == core.CPUAutomatic
+	followMemory := t.memStartVar == "" && (t.mem.Mode == core.MemoryAutomatic || t.mem.Mode == core.MemoryRatio)
+	if !followCPU && !followMemory {
+		return
 	}
-	if t.memStartVar == "" && (t.mem.Mode == core.MemoryAutomatic || t.mem.Mode == core.MemoryRatio) {
-		limit, base := t.memoryLimit()
+	cpuLimit, memoryLimit := t.cg.Limits(t.root)
+	if followCPU {
+		t.applyAutomaticCPU(cpuLimit)
+	}
+	if followMemory {
+		limit, base := t.memoryFrom(memoryLimit)
 		if limit > 0 {
 			t.memBase = base
 			if target := shareOf(limit, t.ratio()); target != t.memApplied {
@@ -205,7 +215,8 @@ func (t *Tuner) SetCPULimit(threads int) (core.RuntimeSettingsView, error) {
 		// Go's default even where the engine's rule then holds one thread.
 		runtime.SetDefaultGOMAXPROCS()
 		t.cpuOne = false
-		t.applyAutomaticCPU(config.CgroupCPULimit(t.root))
+		cpuLimit, _ := t.cg.Limits(t.root)
+		t.applyAutomaticCPU(cpuLimit)
 	} else {
 		t.cpuMode = core.CPUFixed
 		t.cpuThreads = threads
@@ -363,7 +374,7 @@ func (t *Tuner) cpuSetting() core.Setting {
 		s.Source, s.Live = core.SourceMachine, true
 		// Go's default is the CPU limit rounded up, never below 2, and the
 		// limit is the source only where that is below the machine's count.
-		if limit := config.CgroupCPULimit(t.root); limit > 0 && max(2, int(math.Ceil(limit))) < t.hostCPUs {
+		if limit, _ := t.cg.Limits(t.root); limit > 0 && max(2, int(math.Ceil(limit))) < t.hostCPUs {
 			s.Source = core.SourceContainer
 		}
 	}
@@ -521,8 +532,15 @@ func (t *Tuner) resolve(key string) config.Resolution {
 // follows the machine: the cgroup's, else the machine's memory, else 0. It
 // names where the limit came from.
 func (t *Tuner) memoryLimit() (int64, string) {
-	if n := config.CgroupMemoryLimit(t.root); n > 0 {
-		return n, core.SourceContainer
+	_, cgroupLimit := t.cg.Limits(t.root)
+	return t.memoryFrom(cgroupLimit)
+}
+
+// memoryFrom is memoryLimit over a cgroup limit already read, with 0 for
+// none.
+func (t *Tuner) memoryFrom(cgroupLimit int64) (int64, string) {
+	if cgroupLimit > 0 {
+		return cgroupLimit, core.SourceContainer
 	}
 	if n := config.MachineMemory(t.root); n > 0 {
 		return n, core.SourceMachine

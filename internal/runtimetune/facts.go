@@ -43,11 +43,12 @@ func (t *Tuner) RuntimeFacts(ctx context.Context) core.RuntimeFacts {
 		Replicas:    noRoster,
 		SharedCache: notChosenYet,
 	}
-	if n := config.CgroupCPULimit(t.root); n > 0 {
-		f.CPULimit = known(n, core.SourceContainer)
+	cpuLimit, memoryLimit := t.cg.Limits(t.root)
+	if cpuLimit > 0 {
+		f.CPULimit = known(cpuLimit, core.SourceContainer)
 	}
-	if n := config.CgroupMemoryLimit(t.root); n > 0 {
-		f.MemoryLimit = known(n, core.SourceContainer)
+	if memoryLimit > 0 {
+		f.MemoryLimit = known(memoryLimit, core.SourceContainer)
 	}
 	if n := config.MachineMemory(t.root); n > 0 {
 		f.HostMemory = known(n, core.SourceMachine)
