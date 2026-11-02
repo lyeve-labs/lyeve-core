@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A plugin that writes content entries can name the entry to update and the revision its edit started from. A save from a revision that is no longer current is refused as a conflict instead of overwriting the newer one, and every save reports the revision it wrote. The same plugin can read an entry, or one of its past revisions, with its revision number.
 - The same plugin can list an entry's past revisions, newest first and a page at a time, with who wrote each, when, the note it carries and the kind of write, and learn whether saves record a revision now.
 - An entry that plugin reads carries the entry's metadata beside its fields, so a plugin that compares a save with the stored entry can compare a value kept in the metadata too.
+- A schema field can declare a precision and a scale, and a plugin can read a value as an exact whole number or decimal, check it against a field's precision and scale, and compare two decimals by value, by the same rules the engine applies when it stores one.
 
 ### Fixed
 
