@@ -115,28 +115,21 @@ func TestWorkerPool_ContextCancellation(t *testing.T) {
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	var wg sync.WaitGroup
+	var ran atomic.Int64
 	const rejectedTasks = 20
-	wg.Add(rejectedTasks)
 	for i := 0; i < rejectedTasks; i++ {
 		pool.Submit(cancelCtx, func(ctx context.Context) error {
-			defer wg.Done()
+			ran.Add(1)
 			return nil
 		})
 	}
 
-	// Tasks submitted with canceled context should never run. Their wg.Done
-	// would never be called. Use a timeout to verify they don't complete.
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		t.Error("tasks with canceled context should not have run")
-	case <-time.After(500 * time.Millisecond):
-		// Expected: wg.Wait never returns because tasks were rejected.
+	// Shutdown waits for every task the pool accepted, so each canceled task
+	// has been refused, or has run, by the time it returns.
+	close(blockCh)
+	pool.Shutdown()
+	if n := ran.Load(); n != 0 {
+		t.Errorf("%d tasks with a canceled context ran", n)
 	}
 
 	// A task the pool refused to start never ran, so it is counted as dropped
@@ -148,10 +141,6 @@ func TestWorkerPool_ContextCancellation(t *testing.T) {
 	if f := pool.Failed(); f != 0 {
 		t.Errorf("no task ran, so none can have failed, got %d", f)
 	}
-
-	// Release blocked tasks so the pool can drain.
-	close(blockCh)
-	pool.Shutdown()
 }
 
 // TestWorkerPool_ShutdownDrainsAll submits tasks, calls Shutdown, and verifies
