@@ -5,12 +5,9 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
-	runtimedebug "runtime/debug"
-	rtmetrics "runtime/metrics"
 	"strings"
 	"time"
 
@@ -21,6 +18,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/debug"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
+	"github.com/lyeve-labs/lyeve-core/internal/runtimetune"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -528,7 +526,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 
 			// GC config: the collector percentage and the memory limit in force.
 			r.With(requireRole("admin", "super_admin")).Get("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
-				gogc, memLimit := gcSettings()
+				gogc, memLimit := runtimetune.GCSettings()
 				respond(w, http.StatusOK, map[string]any{"gogc": gogc, "memory_limit": memLimit})
 			})
 
@@ -549,14 +547,15 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc is required")
 					return
 				}
-				// A negative percentage turns the collector off. Without a memory
-				// limit nothing then bounds the heap short of the kernel's OOM kill.
-				if _, memLimit := gcSettings(); *input.GOGC < 0 && memLimit == 0 {
+				// The only refusal is a negative percentage without a memory
+				// limit, which turns the collector off with nothing bounding the
+				// heap short of the kernel's OOM kill.
+				old, err := runtimetune.SetGCPercent(*input.GOGC)
+				if err != nil {
 					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit")
 					return
 				}
-				old := runtimedebug.SetGCPercent(*input.GOGC)
-				gogc, memLimit := gcSettings()
+				gogc, memLimit := runtimetune.GCSettings()
 				respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": gogc, "memory_limit": memLimit})
 			})
 
@@ -665,17 +664,4 @@ func withBodyLimits(overrides, limits map[string]int64) map[string]int64 {
 		}
 	}
 	return out
-}
-
-// gcSettings returns the collector percentage and the memory limit in force,
-// with 0 for no memory limit. The percentage is read from runtime/metrics,
-// because debug.SetGCPercent reports it only by replacing it.
-func gcSettings() (gogc, memLimit int64) {
-	sample := []rtmetrics.Sample{{Name: "/gc/gogc:percent"}}
-	rtmetrics.Read(sample)
-	memLimit = runtimedebug.SetMemoryLimit(-1)
-	if memLimit == math.MaxInt64 {
-		memLimit = 0
-	}
-	return int64(sample[0].Value.Uint64()), memLimit
 }
