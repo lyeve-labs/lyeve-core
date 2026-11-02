@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `GET /api/admin/debug/pprof/goroutineleak` serves Go's goroutine leak profile to a super admin: the goroutines parked on a channel or lock that nothing else can reach, so nothing can ever wake them. Writing it runs one garbage collection, and it needs no full goroutine dump.
+
 ### Changed
 
 - A content read by id or a content list computes its entity tag once instead of twice, so a page of 50 entries allocates about half the memory it did. Responses and their entity tags are unchanged, and a conditional request with the tag a client was served still answers 304.
