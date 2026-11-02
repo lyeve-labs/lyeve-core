@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"runtime"
 	"runtime/debug"
+	"sync"
 	"testing"
 	"testing/fstest"
 
@@ -219,6 +220,90 @@ func TestTick_TakesTheStartsThreadCount(t *testing.T) {
 
 	tuner.Tick()
 	assert.Equal(t, goDefault(), runtime.GOMAXPROCS(0))
+}
+
+// A variable that LYEVE_OVERRIDABLE opened still set the start value, and
+// nothing has replaced it, so the follower leaves both values as they
+// started.
+func TestTick_OpenedVariableHoldsItsStartValue(t *testing.T) {
+	clean(t)
+	t.Setenv("CPU_QUOTA", "2")
+	t.Setenv("MEMORY_LIMIT_BYTES", "536870912")
+	t.Setenv(config.OverridableEnvKey, "CPU_QUOTA,MEMORY_LIMIT_BYTES")
+	runtime.GOMAXPROCS(2)
+	debug.SetMemoryLimit(share(512*mib, 0.85))
+	root := machine("max 100000", "1073741824")
+	tuner := newTuner(root)
+
+	setFile(root, "sys/fs/cgroup/cpu.max", "50000 100000")
+	setFile(root, "sys/fs/cgroup/memory.max", "2147483648")
+	tuner.Tick()
+	assert.Equal(t, 2, runtime.GOMAXPROCS(0))
+	assert.Equal(t, share(512*mib, 0.85), debug.SetMemoryLimit(-1))
+	view := tuner.RuntimeSettings()
+	assert.False(t, view.CPU.Pinned)
+	assert.Equal(t, "CPU_QUOTA", view.CPU.Variable)
+	assert.False(t, view.Memory.Pinned)
+	assert.Equal(t, "MEMORY_LIMIT_BYTES", view.Memory.Variable)
+}
+
+// One core is the last limit that holds one thread, and anything above it
+// gives the count back to Go's default.
+func TestTick_OneCoreIsTheBoundary(t *testing.T) {
+	if runtime.NumCPU() < 2 {
+		t.Skip("the engine's rule differs from Go's only on a machine with two or more CPUs")
+	}
+	clean(t)
+	root := machine("max 100000", "max")
+	tuner := newTuner(root)
+
+	for _, step := range []struct {
+		cpuMax string
+		want   int
+	}{
+		{cpuMax: "100000 100000", want: 1},
+		{cpuMax: "100001 100000", want: goDefault()},
+		{cpuMax: "100000 100000", want: 1},
+		{cpuMax: "150000 100000", want: goDefault()},
+	} {
+		setFile(root, "sys/fs/cgroup/cpu.max", step.cpuMax)
+		tuner.Tick()
+		assert.Equal(t, step.want, runtime.GOMAXPROCS(0), "cpu.max %s", step.cpuMax)
+	}
+}
+
+// Writes from plugins run against the follower's tick. The race detector
+// reads this test, and the last write must still hold after a tick.
+func TestTuner_SettersAgainstTheTick(t *testing.T) {
+	clean(t)
+	tuner := newTuner(machine("50000 100000", "1073741824"))
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				tuner.Tick()
+			}
+		}
+	})
+	for i := range 2000 {
+		_, _ = tuner.SetCPULimit(i % 2)
+		_, _ = tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryRatio, Ratio: 0.6})
+		_, _ = tuner.SetGCPercent(100 + i%2)
+		_ = tuner.RuntimeSettings()
+		_ = tuner.RuntimeFacts(context.Background())
+	}
+	close(stop)
+	wg.Wait()
+
+	_, err := tuner.SetCPULimit(2)
+	require.NoError(t, err)
+	tuner.Tick()
+	assert.Equal(t, 2, runtime.GOMAXPROCS(0), "a fixed count survives the tick")
+	assert.Equal(t, share(gib, 0.6), debug.SetMemoryLimit(-1))
 }
 
 func TestSetMemoryLimit_EachModeReadsBack(t *testing.T) {
