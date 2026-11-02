@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	goruntime "runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -171,21 +170,6 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	if os.Getenv("GOMEMLIMIT") == "" && cfg.MemoryLimitBytes > 0 {
 		limit := int64(float64(cfg.MemoryLimitBytes) * 0.85)
 		debug.SetMemoryLimit(limit)
-	}
-
-	// GOMAXPROCS
-	// The memory limit above is read from the cgroup, and the CPU allowance
-	// has to be too, or the scheduler sizes itself for the host. Under a
-	// one-core quota Go would build a P and a garbage collection worker for
-	// every core the machine has, arrange that much parallel work, and leave
-	// the kernel to throttle the excess. That surfaces as latency spikes with
-	// nothing in the logs to attribute them to.
-	//
-	// GOMAXPROCS in the environment wins, the way GOMEMLIMIT does above.
-	if os.Getenv("GOMAXPROCS") == "" && cfg.CPUQuota > 0 && cfg.CPUQuota < goruntime.NumCPU() {
-		goruntime.GOMAXPROCS(cfg.CPUQuota)
-		slog.Info("sized the scheduler to the cgroup cpu allowance",
-			"gomaxprocs", cfg.CPUQuota, "host_cpus", goruntime.NumCPU())
 	}
 
 	// Goroutine Concurrency Engine
