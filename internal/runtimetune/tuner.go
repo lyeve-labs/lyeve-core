@@ -320,8 +320,8 @@ func (t *Tuner) SetDatabaseMaxConns(n int) (core.RuntimeSettingsView, error) {
 	if s := t.startSetting("DATABASE_MAX_CONNECTIONS"); s.Pinned {
 		return core.RuntimeSettingsView{}, &core.PinnedError{Variable: s.Variable}
 	}
-	if n < 0 || n > core.MaxDatabaseConns {
-		return core.RuntimeSettingsView{}, fmt.Errorf("database connections must be between 1 and %d, or 0 for the start value", core.MaxDatabaseConns)
+	if n != 0 && (n < core.MinDatabaseConns || n > core.MaxDatabaseConns) {
+		return core.RuntimeSettingsView{}, fmt.Errorf("database connections must be between %d and %d, or 0 for the start value", core.MinDatabaseConns, core.MaxDatabaseConns)
 	}
 	size := n
 	if size == 0 {

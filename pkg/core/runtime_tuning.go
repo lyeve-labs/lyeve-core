@@ -47,7 +47,8 @@ type RuntimeTuning interface {
 	// limit below the container's or the machine's memory is in force.
 	SetGCPercent(percent int) (RuntimeSettingsView, error)
 	// SetDatabaseMaxConns sizes the primary pool's open and idle connections,
-	// from 1 to MaxDatabaseConns. 0 returns it to the size it started with.
+	// from MinDatabaseConns to MaxDatabaseConns. 0 returns it to the size it
+	// started with, which the deployment may have set below the floor.
 	// The view carries a warning when the pool claims a large share of what
 	// the database accepts.
 	SetDatabaseMaxConns(n int) (RuntimeSettingsView, error)
@@ -60,8 +61,13 @@ type RuntimeTuningProvider interface {
 	RuntimeTuning() RuntimeTuning
 }
 
-// MaxDatabaseConns bounds SetDatabaseMaxConns.
-const MaxDatabaseConns = 10000
+// The bounds of SetDatabaseMaxConns. The floor is the start's warmup
+// parallelism of 4, plus 1, so a pool the console sets never serializes
+// every tenant's database work on one connection.
+const (
+	MinDatabaseConns = 5
+	MaxDatabaseConns = 10000
+)
 
 // MaxGCPercent bounds SetGCPercent while no memory limit below the
 // container's or the machine's memory is in force. Above it the heap may grow

@@ -69,6 +69,29 @@ func TestSetDatabaseMaxConns_ResizesTheRunningPool(t *testing.T) {
 	})
 }
 
+// A pool below the floor serializes every tenant's database work, so a write
+// cannot set one. The start size stays the deployment's, below the floor too.
+func TestSetDatabaseMaxConns_RefusesBelowTheFloor(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		clean(t)
+		tuner, sqlDB := poolTuner(t, host)
+
+		for n := 1; n < core.MinDatabaseConns; n++ {
+			_, err := tuner.SetDatabaseMaxConns(n)
+			assert.Error(t, err, "n = %d", n)
+		}
+		assert.Equal(t, startConns, sqlDB.Stats().MaxOpenConnections)
+
+		_, err := tuner.SetDatabaseMaxConns(core.MinDatabaseConns)
+		require.NoError(t, err)
+		assert.Equal(t, core.MinDatabaseConns, sqlDB.Stats().MaxOpenConnections)
+
+		_, err = tuner.SetDatabaseMaxConns(0)
+		require.NoError(t, err)
+		assert.Equal(t, startConns, sqlDB.Stats().MaxOpenConnections, "0 returns the pool to the start size below the floor")
+	})
+}
+
 // Backpressure reads the pool's cap from its live stats on each poll, so its
 // pressure follows a resize without a restart.
 func TestSetDatabaseMaxConns_BackpressureUsesTheNewCap(t *testing.T) {
