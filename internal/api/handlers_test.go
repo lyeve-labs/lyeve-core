@@ -18,6 +18,8 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
+	"github.com/lyeve-labs/lyeve-core/internal/testsupply/schemaengine"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
@@ -1264,8 +1266,10 @@ func TestContentHandler_BulkCreate_UnderLimit_ReachesStore(t *testing.T) {
 	// validation to pass (500 items is fine, 1 item is fine, the body is valid
 	// JSON) and the handler to proceed to the store call, which will be nil
 	// and panic. This proves the validation logic works. Store integration
-	// needs db tests.
-	h := &ContentHandler{store: nil, schemas: nil, hooks: reg, perms: nil}
+	// needs db tests. A handler with no schema source answers 503 before the
+	// store, so this one has a schema and rules that pass every item.
+	h := &ContentHandler{store: nil, schemas: newFakeSchemaSource(&core.Schema{Name: "posts"}),
+		rules: &fixtureRules{eng: schemaengine.New(nil)}, hooks: reg, perms: nil}
 
 	body := `{"items":[{"title":"hello"}]}`
 	r := httptest.NewRequest(http.MethodPost, "/content/posts/bulk", strings.NewReader(body))

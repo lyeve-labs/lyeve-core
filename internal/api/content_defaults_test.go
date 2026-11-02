@@ -84,6 +84,16 @@ func (f *fixtureRules) refused(data map[string]any) []core.SchemaValidationError
 // as the bodies POST /api/admin/schemas accepts: a required field with a
 // default, a boolean with a default and a relation between two schemas.
 var contentDefaultSchemas = map[string][]string{
+	"ledgers": {`{
+		"name": "ledgers",
+		"display_name": "Ledgers",
+		"fields": [
+			{"name": "ref_no", "field_type": "integer"},
+			{"name": "amount", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "rate", "field_type": "number"},
+			{"name": "meta", "field_type": "json"}
+		]
+	}`},
 	"drafts": {`{
 		"name": "drafts",
 		"display_name": "Drafts",

@@ -40,11 +40,17 @@ type Schema struct {
 // SchemaField is one column or property within a Schema.
 type SchemaField struct {
 	Name      string `json:"name"`
-	FieldType string `json:"field_type"` // text, number, boolean, datetime, json, relation, media, email, uid
+	FieldType string `json:"field_type"` // text, number, integer, decimal, boolean, datetime, json, relation, media, email, uid
 	Required  bool   `json:"required"`
 	Unique    bool   `json:"unique"`
 	Indexed   bool   `json:"indexed"`
 	Default   any    `json:"default,omitempty"`
+
+	// Precision and Scale size a decimal field (DecimalSpec answers the
+	// defaults). They are pointers because a scale of 0 is a real scale,
+	// which omitempty on a plain int would drop.
+	Precision *int `json:"precision,omitempty"`
+	Scale     *int `json:"scale,omitempty"`
 
 	// Validation rules applied when content is created or updated.
 	// Only enforced when the field holds a value, unless Required.
