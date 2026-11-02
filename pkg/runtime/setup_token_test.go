@@ -60,4 +60,24 @@ func TestFirstRunSetupToken(t *testing.T) {
 			assert.Contains(t, logged.String(), "standard error", "the log says where the token went")
 		})
 	}
+
+	// Setup mode has no database and always generates a token, through the
+	// same console.
+	t.Run("setup mode prints one", func(t *testing.T) {
+		t.Parallel()
+		var logged, console bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logged, nil))
+
+		tok, err := setupModeToken(&config.SetupRequiredError{}, logger, &console)
+		require.NoError(t, err)
+
+		assert.Equal(t, api.SetupTokenFromLog, tok.Source())
+		assert.NotContains(t, logged.String(), "setup_token", "no token field may reach the log")
+		printed, ok := strings.CutPrefix(strings.TrimSpace(console.String()), "setup_token=")
+		require.True(t, ok, "the console carries the token line")
+		require.NotEmpty(t, printed)
+		assert.True(t, tok.Matches(printed), "the printed token must be the one setup accepts")
+		assert.NotContains(t, logged.String(), printed, "the token itself never reaches the log")
+		assert.Contains(t, logged.String(), "standard error", "the log says where the token went")
+	})
 }

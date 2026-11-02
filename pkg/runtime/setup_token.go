@@ -44,10 +44,17 @@ func firstRunSetupToken(ctx context.Context, cfg *config.Config, users userCount
 		logger.Error("setup: could not generate a setup token; set LYEVE_SETUP_TOKEN", "error", err)
 		return api.NewSetupTokenFromEnv("")
 	}
+	announceSetupToken(logger, console, plain, cfg.InstanceID)
+	return tok
+}
+
+// announceSetupToken writes a generated token to the console and logs only
+// where it went. Setup mode and first run both use it, so neither can put the
+// token on a log line.
+func announceSetupToken(logger *slog.Logger, console io.Writer, plain, instanceID string) {
 	_, _ = fmt.Fprintf(console, "setup_token=%s\n", plain) // err suppressed: without a console, LYEVE_SETUP_TOKEN is the way in
 	logger.Warn("setup: no account exists yet. A one-time setup token was written to this process's standard error, outside the log. "+
 		"Enter it on the admin's first-run page. It works until the first super admin is created. "+
 		"With more than one replica, set LYEVE_SETUP_TOKEN instead, since each replica prints its own.",
-		"instance_id", cfg.InstanceID)
-	return tok
+		"instance_id", instanceID)
 }
