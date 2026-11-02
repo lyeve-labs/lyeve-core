@@ -80,3 +80,58 @@ func TestContentStore_UpsertRefusesADecimalPastItsScale(t *testing.T) {
 		assert.Equal(t, "2.50", row.Data["amount"], "a refused update changed the row")
 	})
 }
+
+// A list filter compares an integer or decimal field with the value parsed by
+// the field's type. Bound as text, MySQL compares a BIGINT with a string as a
+// double, so a filter on 9007199254740993 would also match 9007199254740992.
+// A decimal filter matches by value whatever its scale, 19.9 and 19.90 share
+// one cached page, and a value the field cannot hold is the caller's 400.
+func TestContentAPI_FiltersIntegerAndDecimalFieldsExactly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"ledgers"}, func(t *testing.T, fx schemaContentFixture) {
+		store := fx.content.store
+		for _, row := range []map[string]any{
+			{"ref_no": int64(9007199254740992), "amount": "5.00"},
+			{"ref_no": int64(9007199254740993), "amount": "19.90"},
+		} {
+			_, err := store.Insert(fx.ctx, "ledgers", row)
+			require.NoError(t, err)
+		}
+		list := func(query string) *httptest.ResponseRecorder {
+			return fx.send(t, fx.ctx, http.MethodGet, "/api/v1/content/ledgers?"+query,
+				map[string]string{"schema": "ledgers"}, nil, fx.content.List)
+		}
+		rows := func(rr *httptest.ResponseRecorder) []map[string]any {
+			t.Helper()
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+			var out []struct {
+				Data map[string]any `json:"data"`
+			}
+			dec := json.NewDecoder(strings.NewReader(rr.Body.String()))
+			dec.UseNumber()
+			require.NoError(t, dec.Decode(&out), rr.Body.String())
+			data := make([]map[string]any, len(out))
+			for i, o := range out {
+				data[i] = o.Data
+			}
+			return data
+		}
+
+		got := rows(list("filters[ref_no]=9007199254740993"))
+		require.Len(t, got, 1)
+		assert.Equal(t, json.Number("9007199254740993"), got[0]["ref_no"])
+
+		got = rows(list("filters[amount]=19.9"))
+		require.Len(t, got, 1)
+		assert.Equal(t, "19.90", got[0]["amount"])
+		hits := store.ListCacheHits.Load()
+		require.Len(t, rows(list("filters[amount]=19.90")), 1)
+		assert.Equal(t, hits+1, store.ListCacheHits.Load(), "19.9 and 19.90 are one cached page")
+
+		for _, q := range []string{"filters[ref_no]=abc", "filters[ref_no]=1.5", "filters[amount]=abc", "filters[amount]=1.005"} {
+			assert.Equal(t, http.StatusBadRequest, list(q).Code, q)
+		}
+	})
+}

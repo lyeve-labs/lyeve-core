@@ -421,6 +421,23 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		return []*domain.Content{}, nil
 	}
 
+	// A filtered list resolves its schema before the cache, so the key holds
+	// each value as the column compares it: 10 and 10.00 on a decimal field
+	// are one entry. An unfiltered list keeps the cache read first.
+	var (
+		sc    *domain.Schema
+		table string
+		err   error
+	)
+	if len(filters) > 0 {
+		if sc, table, err = s.table(ctx, schemaName); err != nil {
+			return nil, err
+		}
+		if filters, err = typedFilters(sc, filters); err != nil {
+			return nil, err
+		}
+	}
+
 	// Cache read
 	tenantID := tenant.ID(ctx)
 	if s.listCache != nil && writeTx(ctx) == nil {
@@ -433,9 +450,10 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		s.ListCacheMisses.Add(1)
 	}
 
-	sc, table, err := s.table(ctx, schemaName)
-	if err != nil {
-		return nil, err
+	if sc == nil {
+		if sc, table, err = s.table(ctx, schemaName); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build filter-key allowlist: system columns + resolved schema field columns.
@@ -475,7 +493,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 	for col, val := range filters {
 		// col is allowlist-validated above. Quote so reserved-word field names
 		// (e.g. "order") don't break the query.
-		whereClauses = append(whereClauses, fmt.Sprintf("%s = $%d", d.QuoteIdentifier(col), i))
+		whereClauses = append(whereClauses, fmt.Sprintf("%s = %s", d.QuoteIdentifier(col), filterParam(s.pool.Engine(), sc, col, i)))
 		args = append(args, val)
 
 		i++
@@ -522,6 +540,81 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		_ = s.listCache.Set(ctx, key, cloneContents(items), 0) // err suppressed: cache is best-effort
 	}
 	return items, nil
+}
+
+// typedFilters answers filters with each value parsed by the type of the
+// field it names, in a new map: an int64 for an integer field and the
+// canonical text for a decimal field. Bound as text, MySQL compares a BIGINT
+// or a DECIMAL column with a string as a double, so 9007199254740993 would
+// match 9007199254740992 too. A value its field cannot hold is
+// domain.ErrBadRequest. Every other value is kept as the caller sent it.
+func typedFilters(sc *domain.Schema, filters map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(filters))
+	for col, val := range filters {
+		f, ok := filterField(sc, col)
+		if !ok || val == nil {
+			out[col] = val
+			continue
+		}
+		typed, err := filterValue(f, val)
+		if err != nil {
+			return nil, err
+		}
+		out[col] = typed
+	}
+	return out, nil
+}
+
+// filterValue parses one filter value by its field's type.
+func filterValue(f domain.SchemaField, val any) (any, error) {
+	switch f.FieldType {
+	case "integer":
+		n, err := core.IntegerValue(val)
+		if err != nil {
+			return nil, fmt.Errorf("%w: filter %q: %w", domain.ErrBadRequest, f.Name, err)
+		}
+		return n, nil
+	case "decimal":
+		p, sc := core.DecimalSpec(f)
+		text, err := core.DecimalValue(val, p, sc)
+		if errors.Is(err, core.ErrDecimalSpec) {
+			// The definition is broken, not the caller's value.
+			return nil, fmt.Errorf("content list: field %q: %w", f.Name, err)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%w: filter %q: %w", domain.ErrBadRequest, f.Name, err)
+		}
+		return text, nil
+	}
+	return val, nil
+}
+
+// filterField answers the field of sc whose column is col.
+func filterField(sc *domain.Schema, col string) (domain.SchemaField, bool) {
+	for _, f := range sc.Fields {
+		if !f.System && fieldColumn(f) == col {
+			return f, true
+		}
+	}
+	return domain.SchemaField{}, false
+}
+
+// filterParam is the placeholder $n as the column col compares it. A decimal
+// is bound as its canonical text and cast to the column's own type, so the
+// comparison is exact on every dialect. typedFilters has already refused a
+// precision or scale out of bounds, so the numbers written into the cast are
+// the checked ones.
+func filterParam(engine string, sc *domain.Schema, col string, n int) string {
+	ph := fmt.Sprintf("$%d", n)
+	f, ok := filterField(sc, col)
+	if !ok || f.FieldType != "decimal" {
+		return ph
+	}
+	p, scale := core.DecimalSpec(f)
+	if engine == "mysql" {
+		return fmt.Sprintf("CAST(%s AS DECIMAL(%d,%d))", ph, p, scale)
+	}
+	return fmt.Sprintf("CAST(%s AS NUMERIC(%d,%d))", ph, p, scale)
 }
 
 // GetByID returns a single row by its UUID primary key, scoped to the
