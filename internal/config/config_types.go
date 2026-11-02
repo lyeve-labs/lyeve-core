@@ -314,11 +314,6 @@ type Config struct {
 	// Auto-detected from cgroup when unset. Falls back to 0 (no soft limit).
 	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (auto-detected from cgroup)
 
-	// CPUQuota is the container CPU allowance in whole cores, rounded up, for
-	// GOMAXPROCS tuning. Auto-detected from cgroup when unset. Falls back to 0,
-	// which leaves the Go default of one thread per host core.
-	CPUQuota int // CPU_QUOTA (auto-detected from cgroup)
-
 	// DBConcurrency enables parallel warmup/stop for plugins.
 	DBWarmupParallelism   int // DB_WARMUP_PARALLELISM (default 4)
 	PluginStopParallelism int // PLUGIN_STOP_PARALLELISM (default 8)
