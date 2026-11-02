@@ -131,25 +131,20 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 
 	// The caller's attributes are the derived logger's, then the record's,
 	// all under the open groups. A record's value wins over a derived one.
-	recordKeys := make(map[string]bool, r.NumAttrs())
-	recordAttrs := make([]slog.Attr, 0, r.NumAttrs())
-	r.Attrs(func(a slog.Attr) bool {
-		a.Key = h.group + a.Key
-		recordKeys[a.Key] = true
-		recordAttrs = append(recordAttrs, a)
-		return true
-	})
-	caller := make([]slog.Attr, 0, len(h.derived)+len(recordAttrs))
-	own := make(map[string]bool, len(h.derived)+len(recordAttrs))
-	for _, a := range h.derived {
-		if !recordKeys[a.Key] {
-			caller = append(caller, a)
+	// A logger with neither derived fields nor a group has only the record's,
+	// which are read in place, so the line every request writes pays for no
+	// merge.
+	plain := len(h.derived) == 0 && h.group == ""
+	var own map[string]bool
+	var caller []slog.Attr
+	if plain {
+		own = make(map[string]bool, r.NumAttrs())
+		r.Attrs(func(a slog.Attr) bool {
 			own[a.Key] = true
-		}
-	}
-	caller = append(caller, recordAttrs...)
-	for k := range recordKeys {
-		own[k] = true
+			return true
+		})
+	} else {
+		own, caller = h.mergeCaller(r)
 	}
 
 	// The console line follows the stored entry's rule below, so each key
@@ -162,11 +157,17 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 			enriched.AddAttrs(a)
 		}
 	}
-	for _, a := range caller {
-		if (a.Key == "tenant_id" && tenant != "") || (a.Key == "plugin" && plugin != "") {
-			continue
+	addCaller := func(a slog.Attr) bool {
+		if (a.Key != "tenant_id" || tenant == "") && (a.Key != "plugin" || plugin == "") {
+			enriched.AddAttrs(a)
 		}
-		enriched.AddAttrs(a)
+		return true
+	}
+	if plain {
+		r.Attrs(addCaller)
+	}
+	for _, a := range caller {
+		addCaller(a)
 	}
 	if tenant != "" {
 		enriched.AddAttrs(slog.String("tenant_id", tenant))
@@ -182,12 +183,19 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Context attrs first, then the record's, so a caller's value wins where
 	// both name the same key. tenant and plugin are applied last: those are
 	// facts about the request, not something a log line may claim.
-	entryAttrs := make(map[string]any, len(attrs)+len(caller)+2)
+	entryAttrs := make(map[string]any, len(attrs)+r.NumAttrs()+len(h.derived)+2)
 	for _, a := range attrs {
 		entryAttrs[a.Key] = storedValue(a)
 	}
-	for _, a := range caller {
+	storeCaller := func(a slog.Attr) bool {
 		entryAttrs[a.Key] = storedValue(a)
+		return true
+	}
+	if plain {
+		r.Attrs(storeCaller)
+	}
+	for _, a := range caller {
+		storeCaller(a)
 	}
 	if tenant != "" {
 		entryAttrs["tenant_id"] = logstream.Clip(tenant, logstream.MaxValueBytes)
@@ -211,6 +219,33 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	return h.inner.Handle(ctx, enriched)
+}
+
+// mergeCaller returns the derived attributes the record does not override,
+// then the record's, every key under the open groups, and the set of keys
+// they name.
+func (h *EnrichHandler) mergeCaller(r slog.Record) (map[string]bool, []slog.Attr) {
+	recordKeys := make(map[string]bool, r.NumAttrs())
+	recordAttrs := make([]slog.Attr, 0, r.NumAttrs())
+	r.Attrs(func(a slog.Attr) bool {
+		a.Key = h.group + a.Key
+		recordKeys[a.Key] = true
+		recordAttrs = append(recordAttrs, a)
+		return true
+	})
+	caller := make([]slog.Attr, 0, len(h.derived)+len(recordAttrs))
+	own := make(map[string]bool, len(h.derived)+len(recordAttrs))
+	for _, a := range h.derived {
+		if !recordKeys[a.Key] {
+			caller = append(caller, a)
+			own[a.Key] = true
+		}
+	}
+	caller = append(caller, recordAttrs...)
+	for k := range recordKeys {
+		own[k] = true
+	}
+	return own, caller
 }
 
 // storedValue is attrValue for an entry the tailer's ring and the sink's
