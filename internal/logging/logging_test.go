@@ -202,9 +202,10 @@ func TestLevelMap_Level_NoOverrides(t *testing.T) {
 	assert.Equal(t, slog.LevelInfo, lm.Level("any-tenant", "any-plugin"))
 }
 
-// A line logged while a request is served names who made it by id and the
-// route serving it, never the caller's address.
-func TestEnrichAttrs_NamesTheActorAndTheRoute(t *testing.T) {
+// A line logged while a request is served names who made it by id, never the
+// caller's address. The route stays on the access line, because chi recycles
+// its route context once the request returns.
+func TestEnrichAttrs_NamesTheActorNotTheRoute(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.RoutePatterns = []string{"/api/admin/users/{id}"}
 	base := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
@@ -226,7 +227,7 @@ func TestEnrichAttrs_NamesTheActorAndTheRoute(t *testing.T) {
 				assert.NotContains(t, a.Value.String(), "@", "attribute %q carries an address", a.Key)
 			}
 			assert.Equal(t, tc.want, got["actor"])
-			assert.Equal(t, "/api/admin/users/{id}", got["route"])
+			assert.NotContains(t, got, "route")
 		})
 	}
 
