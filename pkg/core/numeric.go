@@ -20,9 +20,9 @@ const (
 	DecimalDefaultScale     = 2
 )
 
-// maxExactFloat is 2^53, the largest magnitude below which every whole
-// float64 is the integer it reads as. A whole float64 past it may already be
-// a neighbor of the number a client meant, rounded by its JSON encoder.
+// maxExactFloat is 2^53. Below it every whole float64 is the only integer
+// that reads as it. 2^53 itself is also what 2^53+1 rounds to, so a float64
+// at or past it may be a neighbor of the number its writer meant.
 const maxExactFloat = 1 << 53
 
 var (
@@ -58,7 +58,7 @@ func DecimalSpec(f SchemaField) (precision, scale int) {
 }
 
 // IntegerValue answers v as an int64 when it is one exactly: an integer kind
-// within the int64 range, a whole float64 no larger than 2^53 in magnitude,
+// within the int64 range, a whole float64 smaller than 2^53 in magnitude,
 // or a json.Number or string strconv.ParseInt reads. Anything else is
 // ErrNumericForm.
 func IntegerValue(v any) (int64, error) {
@@ -102,7 +102,7 @@ func IntegerValue(v any) (int64, error) {
 }
 
 func wholeFloat(f float64) (int64, error) {
-	if f != math.Trunc(f) || math.Abs(f) > maxExactFloat {
+	if f != math.Trunc(f) || math.Abs(f) >= maxExactFloat {
 		return 0, fmt.Errorf("%w: %v", ErrNumericForm, f)
 	}
 	return int64(f), nil

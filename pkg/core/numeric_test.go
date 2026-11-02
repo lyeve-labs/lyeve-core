@@ -19,7 +19,8 @@ func TestIntegerValue_TakesOnlyExactIntegers(t *testing.T) {
 		{int64(math.MinInt64), math.MinInt64},
 		{42, 42},
 		{uint64(math.MaxInt64), math.MaxInt64},
-		{float64(1 << 53), 1 << 53},
+		{float64(1<<53 - 1), 1<<53 - 1},
+		{-float64(1<<53 - 1), -(1<<53 - 1)},
 		{-12.0, -12},
 		{json.Number("9007199254740993"), 9007199254740993},
 		{json.Number("-9223372036854775808"), math.MinInt64},
@@ -33,6 +34,11 @@ func TestIntegerValue_TakesOnlyExactIntegers(t *testing.T) {
 
 	refused := []any{
 		12.5,
+		// 2^53 is also the float64 nearest 2^53+1, so a client that sent
+		// 9007199254740993 and decoded it as a float arrives here.
+		float64(1 << 53),
+		float64(9007199254740993),
+		-float64(1 << 53),
 		float64(1<<53) + 2,
 		math.NaN(),
 		math.Inf(1),
