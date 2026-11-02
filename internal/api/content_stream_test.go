@@ -326,6 +326,14 @@ func TestContentHandler_Stream_RechecksDraftModePerEvent(t *testing.T) {
 		editor := openStreamAs(t, fx.content, asEditor(fx.ctx), "posts")
 
 		createdID(t, fx.create(t, "posts", map[string]any{"title": "before the switch"}))
+		// A stream asks for the mode when it handles a change, so a change
+		// still queued when the mode switches on reads as a possible draft and
+		// is withheld from a reader. Each reader holds the first row before
+		// the switch.
+		for name, stream := range readers {
+			require.Eventually(t, func() bool { return len(stream.events(t)) == 1 },
+				5*time.Second, 10*time.Millisecond, "%s: the first row never arrived", name)
+		}
 		fx.enableDraftPublish(t, "posts")
 		fx.createStatus(t, "posts", "draft", map[string]any{"title": "draft after the switch"})
 		fx.createStatus(t, "posts", "published", map[string]any{"title": "published after the switch"})
