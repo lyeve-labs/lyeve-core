@@ -293,19 +293,11 @@ func resolveConfig() (*Config, error) {
 		backpressurePoolPressureThreshold = n
 	}
 
-	// Memory limit: the process's cgroup first, then the env var.
-	memoryLimitBytes := cgroupMemoryLimit(os.DirFS("/"))
-	if memoryLimitBytes == 0 {
-		if v := lookup("MEMORY_LIMIT_BYTES"); v != "" {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be a number: %w", err)
-			}
-			if n < 0 {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be non-negative, got %d", n)
-			}
-			memoryLimitBytes = n
-		}
+	// Memory limit: MEMORY_LIMIT_BYTES, then the process's cgroup, then the
+	// machine's memory.
+	memoryLimitBytes, err := memoryLimit(lookup("MEMORY_LIMIT_BYTES"), os.DirFS("/"))
+	if err != nil {
+		return nil, err
 	}
 
 	dbWarmupParallelism := 4

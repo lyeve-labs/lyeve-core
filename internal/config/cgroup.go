@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"io/fs"
 	"path"
 	"slices"
@@ -69,4 +70,55 @@ func smallerLimit(a, b int64) int64 {
 		return a
 	}
 	return min(a, b)
+}
+
+// memoryLimit returns the limit the engine sets Go's soft memory limit from:
+// MEMORY_LIMIT_BYTES when it is set above 0, then the limit of the process's
+// cgroup, then the machine's total memory, so a VM with no container limit
+// follows its own memory. fsys is the root of the file system. GOMEMLIMIT,
+// which the runtime reads itself, wins over all three where the soft limit is
+// set.
+func memoryLimit(override string, fsys fs.FS) (int64, error) {
+	if override != "" {
+		n, err := strconv.ParseInt(override, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("MEMORY_LIMIT_BYTES must be a number: %w", err)
+		}
+		if n < 0 {
+			return 0, fmt.Errorf("MEMORY_LIMIT_BYTES must be non-negative, got %d", n)
+		}
+		if n > 0 {
+			return n, nil
+		}
+	}
+	if n := cgroupMemoryLimit(fsys); n > 0 {
+		return n, nil
+	}
+	return machineMemory(fsys), nil
+}
+
+// machineMemory returns the MemTotal line of /proc/meminfo in bytes, or 0
+// when it cannot be read.
+func machineMemory(fsys fs.FS) int64 {
+	data, err := fs.ReadFile(fsys, "proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	for line := range strings.Lines(string(data)) {
+		rest, ok := strings.CutPrefix(line, "MemTotal:")
+		if !ok {
+			continue
+		}
+		// The kernel writes the value in kibibytes: "MemTotal: 65843264 kB".
+		fields := strings.Fields(rest)
+		if len(fields) != 2 || fields[1] != "kB" {
+			return 0
+		}
+		n, err := strconv.ParseInt(fields[0], 10, 64)
+		if err != nil || n <= 0 {
+			return 0
+		}
+		return n << 10
+	}
+	return 0
 }
