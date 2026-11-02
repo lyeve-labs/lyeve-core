@@ -41,6 +41,15 @@ func HoldPreparation(t testing.TB) {
 	t.Cleanup(preparing.Unlock)
 }
 
+// StopPreparation stops the preparation of test databases for the rest of the
+// process. It returns once a preparation already running has finished. A
+// TestMain calls it after its tests and before it lists the goroutines still
+// running, because a preparation's connections and migration readers would
+// read as leaked goroutines.
+func StopPreparation() {
+	preparing.Lock()
+}
+
 // prepareHeld runs prepare under the read side of preparing.
 func prepareHeld(prepare func() readyDB) readyDB {
 	preparing.RLock()
