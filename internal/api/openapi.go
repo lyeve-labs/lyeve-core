@@ -188,8 +188,8 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"post": {
 			Tags:        []string{"Admin / Auth"},
 			Summary:     "Initial admin setup (first-run only)",
-			Description: "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine logs at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
-			RequestBody: jsonBody(map[string]any{"email": "admin@example.com", "password": "changeme", "setup_token": "from-the-engine-log"}),
+			Description: "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+			RequestBody: jsonBody(map[string]any{"email": "admin@example.com", "password": "changeme", "setup_token": "from-the-engine-stderr"}),
 			Responses:   map[string]any{"201": ok200, "400": err400, "401": err401, "409": map[string]any{"description": "Setup already complete"}},
 		},
 	}

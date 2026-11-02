@@ -1890,7 +1890,7 @@ body (json, newline):
         ]
       },
       "post": {
-        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine logs at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1898,7 +1898,7 @@ body (json, newline):
                 "example": {
                   "email": "admin@example.com",
                   "password": "changeme",
-                  "setup_token": "from-the-engine-log"
+                  "setup_token": "from-the-engine-stderr"
                 },
                 "type": "object"
               }
