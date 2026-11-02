@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/lyeve-labs/lyeve-core/internal/api"
@@ -18,11 +20,14 @@ type userCounter interface {
 // router, so a router rebuilt by hot reload keeps it.
 //
 // LYEVE_SETUP_TOKEN wins when set. Otherwise, while no account exists, a
-// random token is generated and printed once: reading the log proves access to
-// the host, which is the principal setup should trust. An install that already
+// random token is generated and written once to the console: reading the
+// process's own output proves access to the host, which is the principal
+// setup should trust. The token never goes through slog, because the log
+// chain also feeds the stored log, the in-process rings and any external
+// sink, and a reader of those is not that principal. An install that already
 // has accounts gets no token, and neither does one whose count fails, so setup
 // stays closed rather than guessing.
-func firstRunSetupToken(ctx context.Context, cfg *config.Config, users userCounter, logger *slog.Logger) *api.SetupToken {
+func firstRunSetupToken(ctx context.Context, cfg *config.Config, users userCounter, logger *slog.Logger, console io.Writer) *api.SetupToken {
 	if cfg.SetupToken != "" {
 		return api.NewSetupTokenFromEnv(cfg.SetupToken)
 	}
@@ -39,9 +44,17 @@ func firstRunSetupToken(ctx context.Context, cfg *config.Config, users userCount
 		logger.Error("setup: could not generate a setup token; set LYEVE_SETUP_TOKEN", "error", err)
 		return api.NewSetupTokenFromEnv("")
 	}
-	logger.Warn("setup: no account exists yet. Enter this setup token on the admin's first-run page. "+
-		"It works until the first super admin is created. With more than one replica, set LYEVE_SETUP_TOKEN instead, "+
-		"since each replica prints its own.",
-		"setup_token", plain, "instance_id", cfg.InstanceID)
+	announceSetupToken(logger, console, plain, cfg.InstanceID)
 	return tok
+}
+
+// announceSetupToken writes a generated token to the console and logs only
+// where it went. Setup mode and first run both use it, so neither can put the
+// token on a log line.
+func announceSetupToken(logger *slog.Logger, console io.Writer, plain, instanceID string) {
+	_, _ = fmt.Fprintf(console, "setup_token=%s\n", plain) // err suppressed: without a console, LYEVE_SETUP_TOKEN is the way in
+	logger.Warn("setup: no account exists yet. A one-time setup token was written to this process's standard error, outside the log. "+
+		"Enter it on the admin's first-run page. It works until the first super admin is created. "+
+		"With more than one replica, set LYEVE_SETUP_TOKEN instead, since each replica prints its own.",
+		"instance_id", instanceID)
 }

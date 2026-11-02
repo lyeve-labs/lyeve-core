@@ -3,9 +3,9 @@ package runtime
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,14 +22,16 @@ type fixedCount struct {
 
 func (f fixedCount) Count(context.Context) (int64, error) { return f.n, f.err }
 
+// The slog chain feeds the stored log, the rings and every external sink, so
+// the token has to reach the console of the process and nothing that logs.
 func TestFirstRunSetupToken(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name       string
-		envToken   string
-		users      fixedCount
-		wantSource string
-		wantLogged bool
+		name        string
+		envToken    string
+		users       fixedCount
+		wantSource  string
+		wantPrinted bool
 	}{
 		{"operator token wins", "operator-setup-token-0123", fixedCount{n: 0}, api.SetupTokenFromEnv, false},
 		{"fresh install prints one", "", fixedCount{n: 0}, api.SetupTokenFromLog, true},
@@ -39,27 +41,43 @@ func TestFirstRunSetupToken(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var buf bytes.Buffer
-			logger := slog.New(slog.NewJSONHandler(&buf, nil))
+			var logged, console bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logged, nil))
 
-			tok := firstRunSetupToken(context.Background(), &config.Config{SetupToken: tc.envToken}, tc.users, logger)
+			tok := firstRunSetupToken(context.Background(), &config.Config{SetupToken: tc.envToken}, tc.users, logger, &console)
 
 			assert.Equal(t, tc.wantSource, tok.Source())
-			var printed string
-			for _, line := range bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n")) {
-				var rec map[string]any
-				if json.Unmarshal(line, &rec) == nil {
-					if v, ok := rec["setup_token"].(string); ok {
-						printed = v
-					}
-				}
-			}
-			if !tc.wantLogged {
-				assert.Empty(t, printed, "no token may reach the log")
+			assert.NotContains(t, logged.String(), "setup_token", "no token field may reach the log")
+			if !tc.wantPrinted {
+				assert.Empty(t, console.String())
 				return
 			}
+			printed, ok := strings.CutPrefix(strings.TrimSpace(console.String()), "setup_token=")
+			require.True(t, ok, "the console carries the token line")
 			require.NotEmpty(t, printed)
 			assert.True(t, tok.Matches(printed), "the printed token must be the one setup accepts")
+			assert.NotContains(t, logged.String(), printed, "the token itself never reaches the log")
+			assert.Contains(t, logged.String(), "standard error", "the log says where the token went")
 		})
 	}
+
+	// Setup mode has no database and always generates a token, through the
+	// same console.
+	t.Run("setup mode prints one", func(t *testing.T) {
+		t.Parallel()
+		var logged, console bytes.Buffer
+		logger := slog.New(slog.NewJSONHandler(&logged, nil))
+
+		tok, err := setupModeToken(&config.SetupRequiredError{}, logger, &console)
+		require.NoError(t, err)
+
+		assert.Equal(t, api.SetupTokenFromLog, tok.Source())
+		assert.NotContains(t, logged.String(), "setup_token", "no token field may reach the log")
+		printed, ok := strings.CutPrefix(strings.TrimSpace(console.String()), "setup_token=")
+		require.True(t, ok, "the console carries the token line")
+		require.NotEmpty(t, printed)
+		assert.True(t, tok.Matches(printed), "the printed token must be the one setup accepts")
+		assert.NotContains(t, logged.String(), printed, "the token itself never reaches the log")
+		assert.Contains(t, logged.String(), "standard error", "the log says where the token went")
+	})
 }
