@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	mw "github.com/lyeve-labs/lyeve-core/internal/middleware"
@@ -54,28 +55,42 @@ func BenchmarkRateLimiter_Allow(b *testing.B) {
 	})
 }
 
-// BenchmarkRateLimiter_Contention measures contention when many distinct IPs
-// hit the rate limiter concurrently: exercises the map+mutex path.
+// BenchmarkRateLimiter_Contention admits requests from every benchmark
+// goroutine at once through one limiter. shared_key sends every goroutine
+// through one bucket, and key_per_goroutine gives each goroutine its own, so
+// the two differ by the bucket's own lock and share the map's.
 func BenchmarkRateLimiter_Contention(b *testing.B) {
-	rateLimiter := mw.RateLimiter(200, 100)
-	handler := rateLimiter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := mw.RateLimiter(1e9, 1_000_000)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
-	ips := []string{
-		"192.0.2.1:1000", "192.0.2.2:1001", "192.0.2.3:1002", "192.0.2.4:1003",
-		"192.0.2.5:1004", "192.0.2.6:1005", "192.0.2.7:1006", "192.0.2.8:1007",
+	run := func(b *testing.B, addr func() string) {
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			req.RemoteAddr = addr()
+			for pb.Next() {
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code != http.StatusOK {
+					b.Errorf("unexpected status %d", rec.Code)
+					return
+				}
+			}
+		})
 	}
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		idx := b.N % len(ips)
-		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-		req.RemoteAddr = ips[idx]
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-	}
+	b.Run("shared_key", func(b *testing.B) {
+		run(b, func() string { return "192.0.2.1:12345" })
+	})
+
+	b.Run("key_per_goroutine", func(b *testing.B) {
+		var next atomic.Int64
+		run(b, func() string {
+			i := next.Add(1)
+			return fmt.Sprintf("198.18.%d.%d:12345", i/256, i%256)
+		})
+	})
 }
 
 // SecurityHeaders benchmarks
