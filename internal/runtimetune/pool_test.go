@@ -119,9 +119,11 @@ func TestSetDatabaseMaxConns_PinnedUnlessOpened(t *testing.T) {
 			t.Setenv(config.OverridableEnvKey, "DATABASE_MAX_CONNECTIONS")
 			tuner, sqlDB := poolTuner(t, host)
 
-			_, err := tuner.SetDatabaseMaxConns(7)
+			view, err := tuner.SetDatabaseMaxConns(7)
 			require.NoError(t, err)
 			assert.Equal(t, 7, sqlDB.Stats().MaxOpenConnections)
+			assert.Equal(t, core.Setting{Value: 7, Source: core.SourceSet}, view.DatabaseMaxConns,
+				"a written value no longer names the variable it replaced")
 		})
 	})
 }

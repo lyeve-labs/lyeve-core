@@ -423,7 +423,9 @@ func (t *Tuner) poolSetting() core.Setting {
 	s.Value = cur
 	want := int(t.cfg.DatabaseMaxConns)
 	if t.dbSet > 0 {
-		s.Source, want = core.SourceSet, t.dbSet
+		// A write replaces the start value, so the variable no longer
+		// names where the value came from.
+		s.Source, s.Variable, want = core.SourceSet, "", t.dbSet
 	}
 	if cur != want {
 		s.Source = core.SourceRunning
