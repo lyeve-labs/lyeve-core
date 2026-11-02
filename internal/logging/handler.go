@@ -37,6 +37,13 @@ func (m *staticLevelManager) DefaultLevel() slog.Level     { return m.level }
 type EnrichHandler struct {
 	inner slog.Handler
 	state *handlerState
+	// derived holds what logger.With added, keyed under the groups open at
+	// the time. It stays here rather than in inner because the stored entry
+	// and the tail are built in Handle, and one precedence rule then decides
+	// every key for the console, the ring, the sink and the tail alike.
+	derived []slog.Attr
+	// group is the open groups as "a.b.", the prefix of every later key.
+	group string
 }
 
 // handlerState holds the level manager and sink that a root handler shares
@@ -122,28 +129,45 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	tenant := tenantFromCtx(ctx)
 	plugin := PluginFromCtx(ctx)
 
-	// The console line follows the stored entry's rule below, so each key
-	// appears once: a context attribute gives way to the record's own value,
-	// and tenant_id and plugin come from the context alone, last. EnrichAttrs
-	// names tenant_id and plugin too, so those are left to this handler.
-	own := make(map[string]bool, r.NumAttrs())
+	// The caller's attributes are the derived logger's, then the record's,
+	// all under the open groups. A record's value wins over a derived one.
+	recordKeys := make(map[string]bool, r.NumAttrs())
+	recordAttrs := make([]slog.Attr, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
-		own[a.Key] = true
+		a.Key = h.group + a.Key
+		recordKeys[a.Key] = true
+		recordAttrs = append(recordAttrs, a)
 		return true
 	})
+	caller := make([]slog.Attr, 0, len(h.derived)+len(recordAttrs))
+	own := make(map[string]bool, len(h.derived)+len(recordAttrs))
+	for _, a := range h.derived {
+		if !recordKeys[a.Key] {
+			caller = append(caller, a)
+			own[a.Key] = true
+		}
+	}
+	caller = append(caller, recordAttrs...)
+	for k := range recordKeys {
+		own[k] = true
+	}
+
+	// The console line follows the stored entry's rule below, so each key
+	// appears once: a context attribute gives way to the caller's value,
+	// and tenant_id and plugin come from the context alone, last. EnrichAttrs
+	// names tenant_id and plugin too, so those are left to this handler.
 	enriched := slog.NewRecord(r.Time, r.Level, r.Message, r.PC)
 	for _, a := range attrs {
 		if !own[a.Key] && a.Key != "tenant_id" && a.Key != "plugin" {
 			enriched.AddAttrs(a)
 		}
 	}
-	r.Attrs(func(a slog.Attr) bool {
+	for _, a := range caller {
 		if (a.Key == "tenant_id" && tenant != "") || (a.Key == "plugin" && plugin != "") {
-			return true
+			continue
 		}
 		enriched.AddAttrs(a)
-		return true
-	})
+	}
 	if tenant != "" {
 		enriched.AddAttrs(slog.String("tenant_id", tenant))
 	}
@@ -158,14 +182,13 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Context attrs first, then the record's, so a caller's value wins where
 	// both name the same key. tenant and plugin are applied last: those are
 	// facts about the request, not something a log line may claim.
-	entryAttrs := make(map[string]any, len(attrs)+r.NumAttrs()+2)
+	entryAttrs := make(map[string]any, len(attrs)+len(caller)+2)
 	for _, a := range attrs {
 		entryAttrs[a.Key] = storedValue(a)
 	}
-	r.Attrs(func(a slog.Attr) bool {
+	for _, a := range caller {
 		entryAttrs[a.Key] = storedValue(a)
-		return true
-	})
+	}
 	if tenant != "" {
 		entryAttrs["tenant_id"] = logstream.Clip(tenant, logstream.MaxValueBytes)
 	}
@@ -219,20 +242,28 @@ func attrValue(a slog.Attr) any {
 	}
 }
 
-// WithAttrs returns a new EnrichHandler with pre-added attributes.
+// WithAttrs returns a new EnrichHandler with pre-added attributes. Groups
+// flatten, so an attribute added under group g is stored as "g.key".
 func (h *EnrichHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return &EnrichHandler{
-		inner: h.inner.WithAttrs(attrs),
-		state: h.state,
+	if len(attrs) == 0 {
+		return h
 	}
+	derived := make([]slog.Attr, len(h.derived), len(h.derived)+len(attrs))
+	copy(derived, h.derived)
+	for _, a := range attrs {
+		a.Key = h.group + a.Key
+		derived = append(derived, a)
+	}
+	return &EnrichHandler{inner: h.inner, state: h.state, derived: derived, group: h.group}
 }
 
-// WithGroup returns a new EnrichHandler with grouped attributes.
+// WithGroup returns a new EnrichHandler whose later attributes are keyed
+// under name.
 func (h *EnrichHandler) WithGroup(name string) slog.Handler {
-	return &EnrichHandler{
-		inner: h.inner.WithGroup(name),
-		state: h.state,
+	if name == "" {
+		return h
 	}
+	return &EnrichHandler{inner: h.inner, state: h.state, derived: h.derived, group: h.group + name + "."}
 }
 
 // Logger creates a *slog.Logger backed by this handler.

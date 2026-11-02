@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Without a shared cache, the engine no longer keeps every used second-factor challenge and every failed sign-in window in memory for as long as it runs. Once one of these maps holds 4,096 entries, the next new entry clears those that have expired. Sign-in, second-factor checks and lockouts behave as before.
+- The fields a logger derived with `With` carries reach the stored log, the external log destinations and the live tail, not only the console and the in-process ring. A group opened with `WithGroup` flattens into `group.key` in every place. The tenant and the plugin still come from the request, and a field the log call names wins over a derived one of the same name, so a console line carries each key once.
 
 ## [0.59.0] - 2026-11-09
 
