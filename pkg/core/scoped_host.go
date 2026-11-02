@@ -1022,6 +1022,7 @@ var (
 	_ UserProvisionerSetter            = (*ScopedHost)(nil)
 	_ MetricsGathererProvider          = (*ScopedHost)(nil)
 	_ GoroutineTunablesProvider        = (*ScopedHost)(nil)
+	_ RuntimeTuningProvider            = (*ScopedHost)(nil)
 	_ LogRingProvider                  = (*ScopedHost)(nil)
 	_ EngineRateLimitsProvider         = (*ScopedHost)(nil)
 	_ APIRoutesProvider                = (*ScopedHost)(nil)
@@ -1058,6 +1059,17 @@ func (h *ScopedHost) ValidatePassword(password string) error {
 func (h *ScopedHost) GoroutineTunables() GoroutineTunables {
 	if p, ok := h.inner.(GoroutineTunablesProvider); ok {
 		return p.GoroutineTunables()
+	}
+	return nil
+}
+
+// RuntimeTuning forwards to inner if it implements RuntimeTuningProvider,
+// and answers nil otherwise, so a plugin reports the settings as
+// unavailable. Like the goroutine tunables, the role needs no capability of
+// its own: the plugin that serves it decides who may change what.
+func (h *ScopedHost) RuntimeTuning() RuntimeTuning {
+	if p, ok := h.inner.(RuntimeTuningProvider); ok {
+		return p.RuntimeTuning()
 	}
 	return nil
 }

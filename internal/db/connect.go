@@ -150,15 +150,8 @@ const poolCrowdingRatio = 0.34
 // blocked from running a wide pool, and a server that will not answer the
 // question is not a reason to refuse to start.
 func warnIfPoolCrowdsServer(ctx context.Context, db *sql.DB, engine string, maxConns int32) {
-	q := serverMaxConnQuery(engine)
-	if q == "" || maxConns <= 0 {
-		return
-	}
-	var serverMax int
-	if err := db.QueryRowContext(ctx, q).Scan(&serverMax); err != nil {
-		return
-	}
-	if !poolCrowdsServer(maxConns, serverMax) {
+	serverMax, crowded := poolCrowding(ctx, db, engine, maxConns)
+	if !crowded {
 		return
 	}
 	slog.Warn("database connection pool claims a large share of the server limit",
@@ -167,6 +160,31 @@ func warnIfPoolCrowdsServer(ctx context.Context, db *sql.DB, engine string, maxC
 		"server_max_connections", serverMax,
 		"instances_that_fit", serverMax/int(maxConns),
 		"hint", "lower DATABASE_MAX_CONNECTIONS or raise the server limit before scaling out")
+}
+
+// PoolCrowdingWarning runs the boot's crowding check for a pool resized while
+// the engine runs, and returns the warning to show, or "" when the pool is
+// not crowded or the server does not say its limit.
+func PoolCrowdingWarning(ctx context.Context, db *sql.DB, engine string, maxConns int32) string {
+	serverMax, crowded := poolCrowding(ctx, db, engine, maxConns)
+	if !crowded {
+		return ""
+	}
+	return fmt.Sprintf("a pool of %d connections claims more than a third of the %d the database accepts, so %d replicas fill it",
+		maxConns, serverMax, serverMax/int(maxConns))
+}
+
+// poolCrowding reads the server's connection limit and reports whether a
+// pool of maxConns crowds it.
+func poolCrowding(ctx context.Context, db *sql.DB, engine string, maxConns int32) (serverMax int, crowded bool) {
+	q := serverMaxConnQuery(engine)
+	if q == "" || maxConns <= 0 {
+		return 0, false
+	}
+	if err := db.QueryRowContext(ctx, q).Scan(&serverMax); err != nil {
+		return 0, false
+	}
+	return serverMax, poolCrowdsServer(maxConns, serverMax)
 }
 
 // serverMaxConnQuery returns the statement reading the server's connection
