@@ -23,6 +23,7 @@ import (
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
+	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 )
 
@@ -531,20 +532,28 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 
 		// Update GC at runtime (no restart needed).
 		r.With(sessionCurrent, requireRole("super_admin")).Post("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
+			// A missing percentage would decode to 0, which runs the collector
+			// without pause, so the field is required and no other is read.
 			var input struct {
-				GOGC int `json:"gogc"`
+				GOGC *int `json:"gogc"`
 			}
-			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			dec := json.NewDecoder(r.Body)
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&input); err != nil {
 				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+				return
+			}
+			if input.GOGC == nil {
+				httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc is required")
 				return
 			}
 			// A negative percentage turns the collector off. Without a memory
 			// limit nothing then bounds the heap short of the kernel's OOM kill.
-			if _, memLimit := gcSettings(); input.GOGC < 0 && memLimit == 0 {
-				respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "gogc below zero turns the garbage collector off, which needs a memory limit"})
+			if _, memLimit := gcSettings(); *input.GOGC < 0 && memLimit == 0 {
+				httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit")
 				return
 			}
-			old := runtimedebug.SetGCPercent(input.GOGC)
+			old := runtimedebug.SetGCPercent(*input.GOGC)
 			gogc, memLimit := gcSettings()
 			respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": gogc, "memory_limit": memLimit})
 		})

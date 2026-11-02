@@ -93,3 +93,25 @@ func TestAdminRouter_GCConfigReportsNoMemoryLimitAsZero(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, float64(0), got["memory_limit"])
 }
+
+// A body that names no percentage, or names a field the endpoint does not
+// read, used to decode to a percentage of 0, which runs the collector without
+// pause. Both are refused, and the setting in force stays.
+func TestAdminRouter_GCConfigRefusesABodyWithoutAPercentage(t *testing.T) {
+	setGC(t, 100, math.MaxInt64)
+
+	for _, tt := range []struct {
+		body string
+		code int
+	}{
+		{body: `{}`, code: http.StatusUnprocessableEntity},
+		{body: `{"gogc": null}`, code: http.StatusUnprocessableEntity},
+		{body: `{"memory_limit": 1}`, code: http.StatusBadRequest},
+		{body: `{"gogc": 50, "memory_limit": 1}`, code: http.StatusBadRequest},
+	} {
+		rec := gcConfigRequest(t, http.MethodPost, tt.body)
+
+		assert.Equal(t, tt.code, rec.Code, "%s: %s", tt.body, rec.Body.String())
+		assert.Equal(t, int64(100), gogcInForce(), "%s: the refused setting was applied", tt.body)
+	}
+}
