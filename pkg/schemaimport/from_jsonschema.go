@@ -3,6 +3,8 @@ package schemaimport
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"sort"
 	"strings"
 
@@ -36,7 +38,9 @@ type jsonSchemaDoc struct {
 	Enum        []any                    `json:"enum"`
 	Items       *jsonSchemaDoc           `json:"items"`
 	MaxLength   *int                     `json:"maxLength"`
-	Default     any                      `json:"default"`
+	Default     json.RawMessage          `json:"default"`
+	Minimum     json.RawMessage          `json:"minimum"`
+	Maximum     json.RawMessage          `json:"maximum"`
 
 	ContentMediaType string `json:"contentMediaType"`
 
@@ -217,11 +221,18 @@ func jsonSchemaField(conv *Conversion, schema, prop string, p jsonSchemaDoc, kno
 
 	switch primaryType(p.Type) {
 	case "string":
-		return domain.SchemaField{FieldType: stringFieldType(p), Default: p.Default}, true
-	case "integer", "number":
-		return domain.SchemaField{FieldType: "number", Default: p.Default}, true
+		return domain.SchemaField{FieldType: stringFieldType(p), Default: sourceDefault(p.Default)}, true
+	case "integer":
+		f := domain.SchemaField{FieldType: "integer"}
+		f.Default = exactDefault(conv, schema, prop, f, p.Default)
+		if p.Format == "uint64" || pastInt64(p.Minimum) || pastInt64(p.Maximum) {
+			conv.note(schema, prop, "imported as integer: the source allows values past the int64 range, which this field refuses")
+		}
+		return f, true
+	case "number":
+		return domain.SchemaField{FieldType: "number", Default: sourceDefault(p.Default)}, true
 	case "boolean":
-		return domain.SchemaField{FieldType: "boolean", Default: p.Default}, true
+		return domain.SchemaField{FieldType: "boolean", Default: sourceDefault(p.Default)}, true
 	case "array":
 		if p.Items != nil {
 			if target := refTarget(p.Items.Ref); target != "" {
@@ -330,6 +341,16 @@ func primaryType(t any) string {
 }
 
 // decodeToJSON reads YAML or JSON into canonical JSON bytes.
+// pastInt64 reports whether a numeric bound lies outside the int64 range. A
+// bound that is not a number reads as no bound.
+func pastInt64(bound json.RawMessage) bool {
+	if len(bound) == 0 {
+		return false
+	}
+	r, ok := new(big.Rat).SetString(string(bound))
+	return ok && (r.Cmp(new(big.Rat).SetInt64(math.MaxInt64)) > 0 || r.Cmp(new(big.Rat).SetInt64(math.MinInt64)) < 0)
+}
+
 func decodeToJSON(data []byte) (json.RawMessage, error) {
 	var tree any
 	if err := yaml.Unmarshal(data, &tree); err != nil {
