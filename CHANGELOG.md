@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - A list read after a bulk create shows the new entries, on every replica. Before, a bulk create was the one content write that left the cached lists of its content type in place, so a list served the entries from before the batch for up to the cache lifetime, 60 seconds by default.
+- A content change stream that closes releases its handler and the records it had buffered. Before, the slot the stream's handler left behind kept them reachable until another stream on the same content type took the slot, and the list of handlers stayed at its largest size after a burst of streams.
 
 ## [0.57.0] - 2026-11-01
 

@@ -188,7 +188,17 @@ func (r *Registry) Unregister(token string) {
 			}
 		}
 	}
+	// The slot past the new length is still in the backing array, and a stream's
+	// closure there keeps its buffered records reachable until a later Register
+	// overwrites it.
+	hooks[lastIdx] = nil
 	hooks = hooks[:lastIdx]
+	// A burst of streams on one schema leaves the array at its peak size, so
+	// copy down once most of it is empty. The order is kept, so every index
+	// in byID stays valid.
+	if len(hooks) < cap(hooks)/4 {
+		hooks = append([]Hook(nil), hooks...)
+	}
 	if len(hooks) == 0 {
 		delete(r.hooks, info.key)
 	} else {
