@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/pprof"
-	"os"
 	"runtime"
 	runtimedebug "runtime/debug"
+	rtmetrics "runtime/metrics"
 	"strings"
 	"time"
 
@@ -523,17 +524,10 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			// tenant on the instance.
 			r.With(requireRole("super_admin")).Get("/debug/latency", latencyStatsHandler(o.latencyTracker))
 
-			// GC config: read current GOGC and GOMEMLIMIT.
+			// GC config: the collector percentage and the memory limit in force.
 			r.With(requireRole("admin", "super_admin")).Get("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
-				var memLimit int64
-				if ml := runtimedebug.SetMemoryLimit(-1); ml > 0 {
-					memLimit = ml
-				}
-				respond(w, http.StatusOK, map[string]any{
-					"gogc":         os.Getenv("GOGC"),
-					"gomemlimit":   os.Getenv("GOMEMLIMIT"),
-					"memory_limit": memLimit,
-				})
+				gogc, memLimit := gcSettings()
+				respond(w, http.StatusOK, map[string]any{"gogc": gogc, "memory_limit": memLimit})
 			})
 
 			// Update GC at runtime (no restart needed).
@@ -545,8 +539,15 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 					respond(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 					return
 				}
+				// A negative percentage turns the collector off. Without a memory
+				// limit nothing then bounds the heap short of the kernel's OOM kill.
+				if _, memLimit := gcSettings(); input.GOGC < 0 && memLimit == 0 {
+					respond(w, http.StatusUnprocessableEntity, map[string]string{"error": "gogc below zero turns the garbage collector off, which needs a memory limit"})
+					return
+				}
 				old := runtimedebug.SetGCPercent(input.GOGC)
-				respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": input.GOGC})
+				gogc, memLimit := gcSettings()
+				respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": gogc, "memory_limit": memLimit})
 			})
 
 			// The views over the scaling primitives beside this snapshot, the
@@ -654,4 +655,17 @@ func withBodyLimits(overrides, limits map[string]int64) map[string]int64 {
 		}
 	}
 	return out
+}
+
+// gcSettings returns the collector percentage and the memory limit in force,
+// with 0 for no memory limit. The percentage is read from runtime/metrics,
+// because debug.SetGCPercent reports it only by replacing it.
+func gcSettings() (gogc, memLimit int64) {
+	sample := []rtmetrics.Sample{{Name: "/gc/gogc:percent"}}
+	rtmetrics.Read(sample)
+	memLimit = runtimedebug.SetMemoryLimit(-1)
+	if memLimit == math.MaxInt64 {
+		memLimit = 0
+	}
+	return int64(sample[0].Value.Uint64()), memLimit
 }
