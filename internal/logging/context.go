@@ -13,7 +13,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"go.opentelemetry.io/otel/trace"
 
@@ -75,8 +74,11 @@ func RequestIDFromCtx(ctx context.Context) string {
 // Log enrichment helpers
 
 // EnrichAttrs returns log attributes extracted from the context, including
-// trace-id, span-id, tenant-id, request-id, plugin name, actor and route. These are
-// attached to every log record by the EnrichHandler.
+// trace-id, span-id, tenant-id, request-id, plugin name and actor. These are
+// attached to every log record by the EnrichHandler. The route is left to the
+// access line: chi pools its route context and hands it to another request
+// once this one returns, so a line logged later would read that request's
+// route.
 func EnrichAttrs(ctx context.Context) []slog.Attr {
 	var attrs []slog.Attr
 
@@ -101,12 +103,6 @@ func EnrichAttrs(ctx context.Context) []slog.Attr {
 
 	if actor := Actor(ctx); actor != "" {
 		attrs = append(attrs, slog.String("actor", actor))
-	}
-
-	if rctx := chi.RouteContext(ctx); rctx != nil {
-		if route := rctx.RoutePattern(); route != "" {
-			attrs = append(attrs, slog.String("route", route))
-		}
 	}
 
 	return attrs
