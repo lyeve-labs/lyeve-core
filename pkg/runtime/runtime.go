@@ -180,9 +180,10 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// only for an explicit CPU_QUOTA, or for a limit of one core or less,
 	// where Go's default of two serves no better. The runtime follower keeps
 	// the second rule applied as the limit changes.
-	if n := schedulerProcs(os.Getenv("GOMAXPROCS"), cfg.CPUQuota, config.CgroupCPULimit(os.DirFS("/")), goruntime.NumCPU()); n > 0 {
-		goruntime.GOMAXPROCS(n)
-		slog.Info("sized the scheduler", "gomaxprocs", n, "cpu_quota", cfg.CPUQuota)
+	startProcs := schedulerProcs(os.Getenv("GOMAXPROCS"), cfg.CPUQuota, config.CgroupCPULimit(os.DirFS("/")), goruntime.NumCPU())
+	if startProcs > 0 {
+		goruntime.GOMAXPROCS(startProcs)
+		slog.Info("sized the scheduler", "gomaxprocs", startProcs, "cpu_quota", cfg.CPUQuota)
 	}
 
 	// Goroutine Concurrency Engine
@@ -232,6 +233,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			tracker:    tracker,
 			parallel:   parallel,
 			asyncHooks: asyncHooks,
+			startProcs: startProcs,
 		})
 	}
 
@@ -518,10 +520,11 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// starts, and the follower that keeps the first two on the cgroup's
 	// limits while the process runs.
 	tuner := wireRuntimeTuning(hostBase, tracker, runtimetune.Options{
-		DB:       rawDB,
-		Dialect:  pool.Engine(),
-		Config:   cfg,
-		Replicas: replicas.bus,
+		DB:         rawDB,
+		Dialect:    pool.Engine(),
+		Config:     cfg,
+		Replicas:   replicas.bus,
+		StartProcs: startProcs,
 	})
 
 	// Capabilities and HasFeature answer from the license the manager loaded.

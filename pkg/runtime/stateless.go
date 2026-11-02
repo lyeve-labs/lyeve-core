@@ -34,6 +34,9 @@ type statelessScaling struct {
 	tracker    *engine.GoroutineTracker
 	parallel   *engine.ParallelEngine
 	asyncHooks *engine.AsyncHookExecutor
+	// startProcs is the thread count the boot passed to
+	// runtime.GOMAXPROCS, or 0 for Go's default.
+	startProcs int
 }
 
 // runStateless boots the engine with no database, the mode LYEVE_MODE=stateless
@@ -98,7 +101,7 @@ func runStateless(ctx context.Context, cfg *config.Config, opts Options, blog *b
 	wireStatelessHost(hostBase, cfg, mgr, blog, scaling)
 	// No database and no replicas, so the role reports those facts unknown,
 	// and no plugin offers a shared cache backend in this mode.
-	wireRuntimeTuning(hostBase, scaling.tracker, runtimetune.Options{Config: cfg}).SetSharedCache(false)
+	wireRuntimeTuning(hostBase, scaling.tracker, runtimetune.Options{Config: cfg, StartProcs: scaling.startProcs}).SetSharedCache(false)
 
 	activator := plugin.NewActivator(hostBase, logger)
 	if setter, ok := hostBase.(interface{ WithFlowRegistry(core.FlowRegistry) }); ok {

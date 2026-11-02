@@ -52,6 +52,9 @@ type Options struct {
 	Resolver *config.Resolver
 	// Replicas counts the replicas. Nil reports this one alone.
 	Replicas Replicas
+	// StartProcs is the thread count the engine passed to
+	// runtime.GOMAXPROCS at start, or 0 when it left Go's default.
+	StartProcs int
 }
 
 // Tuner implements core.RuntimeTuning over the process's runtime and its
@@ -99,7 +102,7 @@ type Tuner struct {
 var _ core.RuntimeTuning = (*Tuner)(nil)
 
 // New returns a tuner over the state the engine started with, which the
-// engine set before calling it: the thread count from schedulerProcs and the
+// engine set before calling it: the thread count in opts.StartProcs and the
 // soft limit from the configured memory limit.
 func New(opts Options) *Tuner {
 	if opts.Root == nil {
@@ -120,9 +123,9 @@ func New(opts Options) *Tuner {
 		mem:      core.MemoryLimit{Mode: core.MemoryAutomatic},
 	}
 	t.cpuStartVar, _ = t.cpuVariable()
-	if t.cpuStartVar == "" {
-		t.cpuOne = EngineProcs(config.CgroupCPULimit(t.root), t.hostCPUs) == 1
-	}
+	// The start's own count, not the limit read again: a limit that changed
+	// since then would leave one thread held with nothing to hand it back.
+	t.cpuOne = t.cpuStartVar == "" && opts.StartProcs == 1
 	t.memStartVar, _ = t.memoryVariable()
 	t.memApplied = debug.SetMemoryLimit(-1)
 	_, t.memBase = t.memoryLimit()

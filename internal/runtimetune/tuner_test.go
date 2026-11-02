@@ -200,6 +200,26 @@ func TestTick_FollowsTheCPULimit(t *testing.T) {
 	assert.Equal(t, 2, runtime.GOMAXPROCS(0), "a fixed count does not follow")
 }
 
+// The start applied one thread under a one-core limit, and the limit grew
+// before the tuner was built. The tuner takes the start's count as given,
+// rather than reading the limit again, so the next tick hands the count back
+// to Go's default.
+func TestTick_TakesTheStartsThreadCount(t *testing.T) {
+	if runtime.NumCPU() < 2 {
+		t.Skip("the engine's rule differs from Go's only on a machine with two or more CPUs")
+	}
+	clean(t)
+	runtime.GOMAXPROCS(1)
+	tuner := runtimetune.New(runtimetune.Options{
+		Root:       machine("max 100000", "max"),
+		Resolver:   config.NewResolver(nil),
+		StartProcs: 1,
+	})
+
+	tuner.Tick()
+	assert.Equal(t, goDefault(), runtime.GOMAXPROCS(0))
+}
+
 func TestSetMemoryLimit_EachModeReadsBack(t *testing.T) {
 	clean(t)
 	tuner := newTuner(machine("max 100000", "1073741824"))
