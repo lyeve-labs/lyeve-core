@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The fields a logger derived with `With` carries reach the stored log, the external log destinations and the live tail, not only the console and the in-process ring. A group opened with `WithGroup` flattens into `group.key` in every place. The tenant and the plugin still come from the request, and a field the log call names wins over a derived one of the same name, so a console line carries each key once.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security
