@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A request's trace span is named by the method and the route that served it, such as `GET /api/v1/content/{schema}/{id}`, or by the method alone when no route matched. It records the path as a copy cut to 256 bytes and no longer records `url.full`, which on a server request held the query string. A method outside the nine standard ones is recorded as `_OTHER`. Before, the span was named by the raw path, so a trace backend saw one name per identifier, and its attributes kept the whole request line alive until the span was exported, about 540 MB for 1,000 requests carrying a 256 KiB query.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security

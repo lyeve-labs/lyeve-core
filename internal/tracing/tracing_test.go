@@ -66,13 +66,13 @@ func TestHTTPMiddleware_SpanCreated(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	assert.Equal(t, "GET /api/v1/content/posts", span.Name)
+	assert.Equal(t, "GET", span.Name, "a span no route matched is named by its method alone")
 	assert.Equal(t, apitrace.SpanKindServer, span.SpanKind)
 
 	attrs := spanAttrs(span)
 	assert.Equal(t, "GET", attrs["http.request.method"])
 	assert.Equal(t, "/api/v1/content/posts", attrs["url.path"])
-	assert.Equal(t, "/api/v1/content/posts", attrs["url.full"])
+	assert.NotContains(t, attrs, "url.full")
 	assert.Equal(t, "http", attrs["url.scheme"])
 	assert.Equal(t, "api.example.com", attrs["server.address"])
 	assert.Equal(t, "TestAgent/1.0", attrs["user_agent.original"])
@@ -97,7 +97,7 @@ func TestHTTPMiddleware_ErrorStatus(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	assert.Equal(t, "GET /api/v1/missing", span.Name)
+	assert.Equal(t, "GET", span.Name)
 	attrs := spanAttrs(span)
 	assert.Equal(t, "404", attrs["http.response.status_code"])
 	assert.Equal(t, "Error", span.Status.Code.String())
@@ -120,7 +120,7 @@ func TestHTTPMiddleware_5xxError(t *testing.T) {
 	require.Len(t, spans, 1)
 	span := spans[0]
 
-	assert.Equal(t, "POST /api/v1/data", span.Name)
+	assert.Equal(t, "POST", span.Name)
 	assert.Equal(t, "Internal Server Error", span.Status.Description)
 }
 
