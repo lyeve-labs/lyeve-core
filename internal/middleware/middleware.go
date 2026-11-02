@@ -29,6 +29,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
@@ -291,6 +292,11 @@ func TenantHeader(multiTenant bool, validators ...core.TenantValidatorFunc) func
 	// tenant claims are gated behind multiTenant.
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if slot, ok := r.Context().Value(actorSlotKey{}).(*atomic.Pointer[string]); ok {
+				if actor := logging.Actor(r.Context()); actor != "" {
+					slot.Store(&actor)
+				}
+			}
 			tenantID := ""
 			// Domain routing ran above and left the host's tenant on the core
 			// key, which the credential's tenant replaces below. A sign-in
@@ -526,6 +532,17 @@ func superAdminSlotFrom(ctx context.Context) *atomic.Bool {
 		return b
 	}
 	return new(atomic.Bool)
+}
+
+type actorSlotKey struct{}
+
+// WithActorSlot returns a context carrying a fresh slot for the caller's id,
+// and the slot. TenantHeader fills it, because every credential has been
+// read by the time it runs, so the access log, which wraps the whole chain
+// and never sees the claims, can name who made the request.
+func WithActorSlot(ctx context.Context) (context.Context, *atomic.Pointer[string]) {
+	p := new(atomic.Pointer[string])
+	return context.WithValue(ctx, actorSlotKey{}, p), p
 }
 
 // hasCredential reports whether the request carried any credential at all: a
