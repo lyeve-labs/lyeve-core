@@ -21,7 +21,12 @@ import (
 // reported.
 func Main(m *testing.M) int {
 	code := m.Run()
-	if n := Find(os.Stderr); n > 0 {
+	n, err := Find(os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "leakcheck: %v\n", err)
+		return 1
+	}
+	if n > 0 {
 		fmt.Fprintf(os.Stderr, "leakcheck: leaked goroutines: %d\n", n)
 		return 1
 	}
@@ -30,16 +35,26 @@ func Main(m *testing.M) int {
 
 // Find runs the leak detection and returns how many goroutines it reported.
 // When there are any, it writes their stacks to w.
-func Find(w io.Writer) int {
-	p := pprof.Lookup("goroutineleak")
+func Find(w io.Writer) (int, error) {
+	return find(pprof.Lookup("goroutineleak"), w)
+}
+
+// profile is the part of a pprof profile that find reads.
+type profile interface {
+	WriteTo(w io.Writer, debug int) error
+	Count() int
+}
+
+// find reads p, and fails when it cannot be written, because a check that
+// read nothing has not found the leaks absent.
+func find(p profile, w io.Writer) (int, error) {
 	var buf bytes.Buffer
 	if err := p.WriteTo(&buf, 1); err != nil {
-		fmt.Fprintf(w, "leakcheck: write the goroutineleak profile: %v\n", err)
-		return 0
+		return 0, fmt.Errorf("write the goroutineleak profile: %w", err)
 	}
 	n := p.Count()
 	if n > 0 {
 		_, _ = w.Write(buf.Bytes())
 	}
-	return n
+	return n, nil
 }
