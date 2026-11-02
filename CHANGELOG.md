@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The same plugin can list an entry's past revisions, newest first and a page at a time, with who wrote each, when, the note it carries and the kind of write, and learn whether saves record a revision now.
 - An entry that plugin reads carries the entry's metadata beside its fields, so a plugin that compares a save with the stored entry can compare a value kept in the metadata too.
 
+### Fixed
+
+- A list read after a bulk create shows the new entries, on every replica. Before, a bulk create was the one content write that left the cached lists of its content type in place, so a list served the entries from before the batch for up to the cache lifetime, 60 seconds by default.
+
 ## [0.57.0] - 2026-11-01
 
 ### Security
