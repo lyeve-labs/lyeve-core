@@ -39,6 +39,15 @@ func TestCgroupMemoryLimit(t *testing.T) {
 			want: 0,
 		},
 		{
+			name: "a limited child under an unlimited container root reads the child",
+			files: fstest.MapFS{
+				"proc/self/cgroup":                file("0::/engine\n"),
+				"sys/fs/cgroup/memory.max":        file("max\n"),
+				"sys/fs/cgroup/engine/memory.max": file("268435456\n"),
+			},
+			want: 256 * mib,
+		},
+		{
 			name: "a systemd unit on a v2 host reads its own path",
 			files: fstest.MapFS{
 				"proc/self/cgroup":                                    file("0::/system.slice/lyeve.service\n"),
