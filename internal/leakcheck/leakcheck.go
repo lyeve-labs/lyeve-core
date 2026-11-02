@@ -22,7 +22,7 @@ import (
 func Main(m *testing.M) int {
 	code := m.Run()
 	if n := Find(os.Stderr); n > 0 {
-		fmt.Fprintf(os.Stderr, "leakcheck: %d goroutines leaked\n", n)
+		fmt.Fprintf(os.Stderr, "leakcheck: leaked goroutines: %d\n", n)
 		return 1
 	}
 	return code
