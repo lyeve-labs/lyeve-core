@@ -39,12 +39,16 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     serves every other secret and never this one.
 //   - core.CapStepUp, because the plugin asks the person at a session for
 //     the account's password or an authenticator code before a sensitive
-//     action: analytics, before it hands a person their own data export, and
+//     action: analytics, before it hands a person their own data export,
 //     mfa, before a session that did not sign in recently adds the account's
-//     first second factor.
+//     first second factor, and site-builder, before a person approves a
+//     builder connection.
 //   - core.CapPasskeyRevoke, because the plugin removes an account's
 //     passkeys: password-reset, at a reset, so a passkey added from a stolen
 //     session stops signing in once the password changes.
+//   - core.CapTenantRoles, because the plugin acts for a person long after
+//     their session ended and re-checks the roles they hold in the tenant
+//     on every call: site-builder, for each call a connection signs.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -91,7 +95,7 @@ var capPolicy = map[string]core.Capability{
 	"schema":               core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSectionsRead,
 	"scim":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapUserProvisioner,
 	"search":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"site-builder":         core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapStepUp,
+	"site-builder":         core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapStepUp | core.CapTenantRoles,
 	"storage":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapStorage | core.CapSessionKey,
 	"synthetic-monitoring": core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"telemetry":            core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapMetrics | core.CapSessionKey,
