@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `GET /api/admin/debug/pprof/goroutineleak` serves Go's goroutine leak profile to a super admin: the goroutines parked on a channel or lock that nothing else can reach, so nothing can ever wake them. Writing it runs one garbage collection, and it needs no full goroutine dump.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security
