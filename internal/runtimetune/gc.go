@@ -10,7 +10,14 @@ import (
 	"math"
 	"runtime/debug"
 	"runtime/metrics"
+	"sync"
 )
+
+// gcMu makes each check of the collector against the memory limit, and the
+// change it allows, one step. The engine's endpoint and the role each check
+// the other's setting, and without it both checks can pass before either
+// change lands, which leaves the collector off with no limit.
+var gcMu sync.Mutex
 
 // ErrCollectorOffNeedsLimit refuses to turn the garbage collector off, or to
 // remove the memory limit while it is off. Without a limit nothing bounds the
@@ -34,6 +41,8 @@ func GCSettings() (gogc, memLimit int64) {
 // replaced. A negative percentage is refused with ErrCollectorOffNeedsLimit
 // unless a memory limit is in force, and the percentage in force stays.
 func SetGCPercent(percent int) (int, error) {
+	gcMu.Lock()
+	defer gcMu.Unlock()
 	if _, memLimit := GCSettings(); percent < 0 && memLimit == 0 {
 		return 0, ErrCollectorOffNeedsLimit
 	}
