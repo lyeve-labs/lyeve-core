@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -51,47 +52,78 @@ func decodeContentBody(r io.Reader, sc *domain.Schema, v any) error {
 // type its field reads: an int64 for an integer field, the literal text for a
 // decimal field, and a float64 everywhere else, inside json fields and
 // undeclared keys too, which is what they held before. A number it cannot
-// convert is left as it came, for the content rules to refuse by the field's
-// name.
-func coerceNumbers(sc *domain.Schema, data map[string]any) {
+// convert to its field's type is left as it came, for the content rules to
+// refuse by the field's name. A number no float64 holds, such as 1e400, is
+// errNumberRange, which the float decode refused as invalid JSON.
+func coerceNumbers(sc *domain.Schema, data map[string]any) error {
 	if !hasExactNumbers(sc) {
-		return
+		return nil
 	}
 	for k, v := range data {
 		switch exactFieldType(sc, k) {
 		case "integer":
 			if n, isNum := v.(json.Number); isNum {
+				if !floatRange(n) {
+					return errNumberRange
+				}
 				if i, err := core.IntegerValue(n); err == nil {
 					data[k] = i
 				}
 			}
 		case "decimal":
 			if n, isNum := v.(json.Number); isNum {
+				if !floatRange(n) {
+					return errNumberRange
+				}
 				data[k] = string(n)
 			}
 		default:
-			data[k] = numbersAsFloats(v)
+			f, err := numbersAsFloats(v)
+			if err != nil {
+				return err
+			}
+			data[k] = f
 		}
 	}
+	return nil
+}
+
+// errNumberRange is a JSON number outside the float64 range.
+var errNumberRange = errors.New("number out of range")
+
+// floatRange reports whether n is within the float64 range.
+func floatRange(n json.Number) bool {
+	_, err := strconv.ParseFloat(string(n), 64)
+	return err == nil
 }
 
 // numbersAsFloats replaces every json.Number in v with its float64.
-func numbersAsFloats(v any) any {
+func numbersAsFloats(v any) (any, error) {
 	switch t := v.(type) {
 	case json.Number:
-		if f, err := strconv.ParseFloat(string(t), 64); err == nil {
-			return f
+		f, err := strconv.ParseFloat(string(t), 64)
+		if err != nil {
+			return nil, errNumberRange
 		}
+		return f, nil
 	case map[string]any:
 		for k, e := range t {
-			t[k] = numbersAsFloats(e)
+			f, err := numbersAsFloats(e)
+			if err != nil {
+				return nil, err
+			}
+			t[k] = f
 		}
 	case []any:
 		for i, e := range t {
-			t[i] = numbersAsFloats(e)
+			f, err := numbersAsFloats(e)
+			if err != nil {
+				return nil, err
+			}
+			t[i] = f
 		}
 	}
-	return v
+	return v, nil
 }
 
 // exactFieldType answers "integer" or "decimal" for a key that names such a

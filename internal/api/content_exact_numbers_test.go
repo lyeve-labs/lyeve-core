@@ -174,3 +174,24 @@ func TestContentAPI_AFailedSchemaLookupStoresNothing(t *testing.T) {
 		assert.Empty(t, rows, "a write whose schema could not be read stored a row")
 	})
 }
+
+// A number no float64 holds was refused as invalid JSON by the float decode.
+// Kept as text for a schema with exact fields, it is refused the same way.
+func TestContentAPI_ANumberPastFloatRangeIsInvalidJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"ledgers"}, func(t *testing.T, fx schemaContentFixture) {
+		for _, body := range []string{
+			`{"data":{"meta":{"n":1e400}}}`,
+			`{"data":{"ref_no":1e400}}`,
+			`{"data":{"amount":-1e400}}`,
+		} {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/content/ledgers", strings.NewReader(body))
+			r = chiCtx(r.WithContext(fx.ctx), map[string]string{"schema": "ledgers"})
+			rr := httptest.NewRecorder()
+			fx.content.Create(rr, r)
+			assert.Equal(t, http.StatusBadRequest, rr.Code, "%s: %s", body, rr.Body.String())
+		}
+	})
+}

@@ -174,7 +174,10 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		storeError(w, r, scErr, "failed to load schema for validation")
 		return
 	}
-	coerceNumbers(sc, input.Data)
+	if err := coerceNumbers(sc, input.Data); err != nil {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+		return
+	}
 
 	data, ok := h.prepareCreate(w, r, sc, input.Data)
 	if !ok {
@@ -238,7 +241,10 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input.Data = withoutStatus(input.Data)
-	coerceNumbers(sc, input.Data)
+	if err := coerceNumbers(sc, input.Data); err != nil {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+		return
+	}
 
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
@@ -351,8 +357,13 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for _, item := range body.Items {
+		if err := coerceNumbers(sc, item); err != nil {
+			httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+	}
 	for i, item := range body.Items {
-		coerceNumbers(sc, item)
 		data, ok := h.prepareCreate(w, r, sc, item)
 		if !ok {
 			return
