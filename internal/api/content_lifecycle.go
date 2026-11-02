@@ -201,7 +201,11 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	// A revision can predate the content type's current rules, so it is
 	// checked as an update of every field it holds before anything is written.
 	restored := withoutStatus(rev.Data)
-	if !h.validatePatch(w, r, schemaName, restored, existing.Data) {
+	sc, ok := h.schemaForValidation(w, r, schemaName)
+	if !ok {
+		return
+	}
+	if !h.validatePatch(w, r, sc, restored, existing.Data) {
 		return
 	}
 	// A restore is an update, so it asks the subscribers an update asks.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // A JSON number past 2^53 is not a float64. Decoded as one, 9007199254740993
@@ -133,5 +135,42 @@ func TestContentAPI_FiltersIntegerAndDecimalFieldsExactly(t *testing.T) {
 		for _, q := range []string{"filters[ref_no]=abc", "filters[ref_no]=1.5", "filters[amount]=abc", "filters[amount]=1.005"} {
 			assert.Equal(t, http.StatusBadRequest, list(q).Code, q)
 		}
+	})
+}
+
+// flakySchemas fails the one lookup numbered failOn and answers the rest from
+// the source it wraps.
+type flakySchemas struct {
+	core.SchemaSource
+	calls  atomic.Int64
+	failOn int64
+}
+
+func (s *flakySchemas) GetByName(ctx context.Context, name string) (*core.Schema, error) {
+	if s.calls.Add(1) == s.failOn {
+		return nil, core.ErrServiceUnavailable
+	}
+	return s.SchemaSource.GetByName(ctx, name)
+}
+
+// A write reads its schema once, to choose how its body's numbers decode and
+// to validate it. Read twice, a lookup that failed for the decode and
+// succeeded for the rules stored a body decoded as floats, rounded. The
+// first lookup a create makes is the transport gate's, which serves a schema
+// it cannot load, so the write's own lookup is the second.
+func TestContentAPI_AFailedSchemaLookupStoresNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"ledgers"}, func(t *testing.T, fx schemaContentFixture) {
+		h := &ContentHandler{store: fx.content.store, rules: fx.content.rules, hooks: fx.content.hooks,
+			schemas: &flakySchemas{SchemaSource: fx.content.schemas, failOn: 2}}
+		rr := fx.send(t, fx.ctx, http.MethodPost, "/api/v1/content/ledgers", map[string]string{"schema": "ledgers"},
+			map[string]any{"data": map[string]any{"ref_no": json.Number("9007199254740993")}}, h.Create)
+		assert.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+
+		rows, err := fx.content.store.List(fx.ctx, "ledgers", 10, 0, nil)
+		require.NoError(t, err)
+		assert.Empty(t, rows, "a write whose schema could not be read stored a row")
 	})
 }

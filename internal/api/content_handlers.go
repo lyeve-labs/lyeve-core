@@ -165,14 +165,18 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	sc := h.numberSchema(r, schemaName)
+	sc, scErr := h.writeSchema(r, schemaName)
 	if err := decodeContentBody(r.Body, sc, &input); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
+		return
+	}
 	coerceNumbers(sc, input.Data)
 
-	data, ok := h.prepareCreate(w, r, schemaName, input.Data)
+	data, ok := h.prepareCreate(w, r, sc, input.Data)
 	if !ok {
 		return
 	}
@@ -224,9 +228,13 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	sc := h.numberSchema(r, schemaName)
+	sc, scErr := h.writeSchema(r, schemaName)
 	if err := decodeContentBody(r.Body, sc, &input); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
 		return
 	}
 	input.Data = withoutStatus(input.Data)
@@ -238,7 +246,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.validatePatch(w, r, schemaName, input.Data, existing.Data) {
+	if !h.validatePatch(w, r, sc, input.Data, existing.Data) {
 		return
 	}
 
@@ -325,7 +333,7 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Items []map[string]any `json:"items"`
 	}
-	sc := h.numberSchema(r, schemaName)
+	sc, scErr := h.writeSchema(r, schemaName)
 	if err := decodeContentBody(r.Body, sc, &body); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
@@ -338,10 +346,14 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "bulk insert limited to 500 items per request")
 		return
 	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
+		return
+	}
 
 	for i, item := range body.Items {
 		coerceNumbers(sc, item)
-		data, ok := h.prepareCreate(w, r, schemaName, item)
+		data, ok := h.prepareCreate(w, r, sc, item)
 		if !ok {
 			return
 		}

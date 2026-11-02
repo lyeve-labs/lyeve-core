@@ -11,19 +11,14 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
-// numberSchema answers the schema a content write's body decodes against, or
-// nil when there is none to read. A nil schema decodes the body as before, and
-// the write then fails where the content rules load the schema, with the
-// answer it always had.
-func (h *ContentHandler) numberSchema(r *http.Request, schemaName string) *domain.Schema {
+// writeSchema looks up, once per write, the schema a content write decodes
+// its body against and validates it by. The caller answers the lookup's error
+// after the decode, so a malformed body is a 400 whatever the schema.
+func (h *ContentHandler) writeSchema(r *http.Request, schemaName string) (*domain.Schema, error) {
 	if h.schemas == nil {
-		return nil
+		return nil, core.ErrNoSchemaEngine
 	}
-	sc, err := h.schemas.GetByName(r.Context(), schemaName)
-	if err != nil {
-		return nil
-	}
-	return sc
+	return h.schemas.GetByName(r.Context(), schemaName)
 }
 
 // hasExactNumbers reports whether sc declares an integer or a decimal field,

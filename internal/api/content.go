@@ -416,11 +416,7 @@ func publishedOnly(mask func(map[string]any) map[string]any) func(map[string]any
 //
 // A patch that passes has its integer and decimal values rewritten in the form
 // the store binds, so the hooks after it read that form.
-func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, schemaName string, patch, current map[string]any) bool {
-	s, ok := h.schemaForValidation(w, r, schemaName)
-	if !ok {
-		return false
-	}
+func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s *domain.Schema, patch, current map[string]any) bool {
 	errs, err := h.contentRules().ValidatePatch(r.Context(), s, patch, current)
 	if err != nil {
 		rulesUnavailable(w, r, err)
@@ -441,11 +437,7 @@ func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s
 // Returns the data to insert, or false when the refusal has been written.
 // Its integer and decimal values are in the form the store binds, as
 // validatePatch leaves them.
-func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, schemaName string, data map[string]any) (map[string]any, bool) {
-	s, ok := h.schemaForValidation(w, r, schemaName)
-	if !ok {
-		return nil, false
-	}
+func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s *domain.Schema, data map[string]any) (map[string]any, bool) {
 	data, errs, err := h.contentRules().PrepareCreate(r.Context(), s, data)
 	if err != nil {
 		rulesUnavailable(w, r, err)
