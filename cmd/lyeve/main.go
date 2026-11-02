@@ -61,6 +61,7 @@ import (
 	_ "github.com/lyeve-labs/lyeve-plugin-schema/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-scim/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-search/plugin"
+	_ "github.com/lyeve-labs/lyeve-plugin-site-builder/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-storage/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-telemetry/plugin"
@@ -84,7 +85,7 @@ var expectedPlugins = []string{
 	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "permissions", "pii-mask", "query-monitor",
 	"rate-limit", "realtime", "recommendations", "request-capture", "review", "usage",
 	"saml",
-	"schema", "scim", "search", "storage", "telemetry", "waf",
+	"schema", "scim", "search", "site-builder", "storage", "telemetry", "waf",
 	"data-residency",
 }
 

@@ -91,6 +91,7 @@ var capPolicy = map[string]core.Capability{
 	"schema":               core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSectionsRead,
 	"scim":                 core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapUserProvisioner,
 	"search":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
+	"site-builder":         core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapStepUp,
 	"storage":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapStorage | core.CapSessionKey,
 	"synthetic-monitoring": core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"telemetry":            core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapMetrics | core.CapSessionKey,
