@@ -131,3 +131,44 @@ func TestInMemoryLockout_SweepOfLiveWindowsWaitsForTheMapToDouble(t *testing.T) 
 	assert.Equal(t, maxTrackedLockouts+1, len(l.entries), "a sweep dropped a window still in force")
 	assert.Equal(t, 2*maxTrackedLockouts, l.sweepAt)
 }
+
+// The challenge-attempt map follows the same rule: once a sweep of live
+// entries frees nothing, the next one waits until the map has doubled. An
+// expired entry planted after the first sweep shows whether the map was
+// scanned again.
+func TestInMemoryMFALockout_SweepOfLiveChallengesWaitsForTheMapToDouble(t *testing.T) {
+	t.Parallel()
+
+	l := NewInMemoryMFALockout(5, 15*time.Minute)
+	l.mu.Lock()
+	for i := range maxTrackedChallenges {
+		l.challengeEntries[fmt.Sprintf("live-%d", i)] = &challengeEntryState{
+			counter: new(atomic.Int64), createdAt: time.Now(),
+		}
+	}
+	l.mu.Unlock()
+
+	l.loadChallengeCounter("first")
+	l.mu.Lock()
+	l.challengeEntries["expired"] = &challengeEntryState{
+		counter: new(atomic.Int64), createdAt: time.Now().Add(-2 * challengeTokenTTL),
+	}
+	l.mu.Unlock()
+
+	l.loadChallengeCounter("second")
+	l.mu.Lock()
+	_, kept := l.challengeEntries["expired"]
+	size := len(l.challengeEntries)
+	l.mu.Unlock()
+	assert.True(t, kept, "the map was scanned again before it doubled")
+	assert.Equal(t, maxTrackedChallenges+3, size)
+
+	for i := size; i < 2*maxTrackedChallenges; i++ {
+		l.loadChallengeCounter(fmt.Sprintf("more-%d", i))
+	}
+	l.loadChallengeCounter("past-double")
+	l.mu.Lock()
+	_, kept = l.challengeEntries["expired"]
+	l.mu.Unlock()
+	assert.False(t, kept, "the map was not swept once it doubled")
+}

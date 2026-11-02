@@ -24,8 +24,8 @@ const DefaultMFALockoutWindow = 15 * time.Minute
 // Each challenge token can be attempted this many times before it is exhausted.
 const DefaultMFAChallengeMaxAttempts = 5
 
-// maxTrackedChallenges is the soft cap on the challenge-attempt map. When a new
-// entry would push the map past this size, expired entries are swept first.
+// maxTrackedChallenges is the size at which the challenge-attempt map is first
+// swept of expired entries.
 // Unique challenge hashes are never re-accessed once their flow ends, so the
 // per-key lazy prune cannot reclaim them on its own.
 const maxTrackedChallenges = 4096
@@ -65,10 +65,11 @@ type InMemoryMFALockout struct {
 	// This prevents replay of a valid challenge within its expiry window.
 	usedJTIs map[string]time.Time
 
-	// jtiSweepAt and userSweepAt are the sizes that trigger the next sweep of
-	// usedJTIs and entries (see nextSweep).
-	jtiSweepAt  int
-	userSweepAt int
+	// jtiSweepAt, userSweepAt and challengeSweepAt are the sizes that trigger
+	// the next sweep of usedJTIs, entries and challengeEntries (see nextSweep).
+	jtiSweepAt       int
+	userSweepAt      int
+	challengeSweepAt int
 }
 
 // mfaLockoutUserState tracks failures and the last reset time for a single user.
@@ -104,6 +105,7 @@ func NewInMemoryMFALockout(maxAttempts int, window time.Duration) *InMemoryMFALo
 		usedJTIs:             make(map[string]time.Time),
 		jtiSweepAt:           maxTrackedJTIs,
 		userSweepAt:          maxTrackedMFAUsers,
+		challengeSweepAt:     maxTrackedChallenges,
 	}
 }
 
@@ -220,8 +222,9 @@ func (l *InMemoryMFALockout) loadChallengeCounter(challengeHash string) *atomic.
 
 	if !ok {
 		// keep the map bounded (see maxTrackedChallenges)
-		if len(l.challengeEntries) >= maxTrackedChallenges {
+		if len(l.challengeEntries) >= l.challengeSweepAt {
 			l.pruneExpiredChallengesLocked()
+			l.challengeSweepAt = nextSweep(len(l.challengeEntries), maxTrackedChallenges)
 		}
 		entry = &challengeEntryState{
 			counter:   new(atomic.Int64),
