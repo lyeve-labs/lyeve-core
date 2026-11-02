@@ -379,7 +379,17 @@ func (e *Engine) columnType(fieldType, boundedText, unboundedText, tsType string
 			return "BOOLEAN"
 		}
 	case "number":
-		return "DOUBLE PRECISION"
+		// The exact column a shipped install creates, not a float. A bare
+		// NUMERIC keeps no fraction on MySQL or SQL Server, so those two name
+		// the precision and scale.
+		switch e.host.Dialect() {
+		case "mysql":
+			return "DECIMAL(38,10)"
+		case "mssql":
+			return "NUMERIC(38,10)"
+		default:
+			return "NUMERIC"
+		}
 	case "date", "datetime":
 		return tsType
 	case "json":
