@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"strconv"
+	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -22,6 +23,11 @@ const (
 	reasonNoRoster        = "no transport that keeps a roster of the replicas is running"
 	reasonNotChosenYet    = "the engine has not chosen its cache backend yet"
 )
+
+// factsReadLimit bounds the database reads together, and the roster read on
+// its own. They run on the primary pool, so without it a saturated pool would
+// hold the caller for its whole deadline.
+const factsReadLimit = 2 * time.Second
 
 // RuntimeFacts implements core.RuntimeTuning.
 func (t *Tuner) RuntimeFacts(ctx context.Context) core.RuntimeFacts {
@@ -43,11 +49,15 @@ func (t *Tuner) RuntimeFacts(ctx context.Context) core.RuntimeFacts {
 	if n := config.MachineMemory(t.root); n > 0 {
 		f.HostMemory = known(n, core.SourceMachine)
 	}
-	f.DatabaseConnLimit, f.DatabaseConnsOpen, f.DatabaseCores = databaseFacts(ctx, t.db, t.dialect)
+	dbCtx, cancel := context.WithTimeout(ctx, factsReadLimit)
+	f.DatabaseConnLimit, f.DatabaseConnsOpen, f.DatabaseCores = databaseFacts(dbCtx, t.db, t.dialect)
+	cancel()
 	if t.replicas != nil {
-		if n, ok := t.replicas.Replicas(ctx); ok {
+		rosterCtx, cancel := context.WithTimeout(ctx, factsReadLimit)
+		if n, ok := t.replicas.Replicas(rosterCtx); ok {
 			f.Replicas = known(n, core.SourceCluster)
 		}
+		cancel()
 		f.TransportAttached = t.replicas.Attached()
 	}
 	if c := t.sharedCache.Load(); c != 0 {

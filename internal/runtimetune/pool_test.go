@@ -272,3 +272,49 @@ func TestRuntimeFacts_FailedReadIsNotAMissingGrant(t *testing.T) {
 		}
 	})
 }
+
+// runtimeFacts reads the facts and fails the test when the read is not back
+// within limit.
+func runtimeFacts(t *testing.T, tuner *runtimetune.Tuner, limit time.Duration) core.RuntimeFacts {
+	t.Helper()
+	done := make(chan core.RuntimeFacts, 1)
+	go func() { done <- tuner.RuntimeFacts(context.Background()) }()
+	select {
+	case f := <-done:
+		return f
+	case <-time.After(limit):
+		t.Fatalf("the facts were not back after %s", limit)
+		return core.RuntimeFacts{}
+	}
+}
+
+// A pool with no connection free answers the facts after a bound of their
+// own rather than the caller's whole deadline.
+func TestRuntimeFacts_BoundedWhenThePoolIsFull(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		clean(t)
+		tuner, sqlDB := poolTuner(t, host)
+		sqlDB.SetMaxOpenConns(1)
+		conn, err := sqlDB.Conn(context.Background())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close() })
+
+		f := runtimeFacts(t, tuner, 10*time.Second)
+		assert.Equal(t, reasonUnreadable, f.DatabaseConnLimit.Reason)
+		assert.Equal(t, reasonUnreadable, f.DatabaseConnsOpen.Reason)
+	})
+}
+
+// hangingReplicas is a roster that answers only when its context ends.
+type hangingReplicas struct{}
+
+func (hangingReplicas) Replicas(ctx context.Context) (int, bool) { <-ctx.Done(); return 0, false }
+func (hangingReplicas) Attached() bool                           { return true }
+
+func TestRuntimeFacts_BoundedWhenTheRosterHangs(t *testing.T) {
+	clean(t)
+	tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), Replicas: hangingReplicas{}, Resolver: config.NewResolver(nil)})
+
+	f := runtimeFacts(t, tuner, 10*time.Second)
+	assert.False(t, f.Replicas.Known)
+}
