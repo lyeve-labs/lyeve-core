@@ -38,7 +38,7 @@ func (i *Interceptor) Handle(ctx context.Context, r slog.Record) error {
 	entry := Entry{
 		Timestamp: r.Time,
 		Level:     slogToStreamLevel(r.Level),
-		Message:   r.Message,
+		Message:   Clip(r.Message, MaxMessageBytes),
 		Attrs:     attrsToMap(attrs),
 	}
 
@@ -48,9 +48,9 @@ func (i *Interceptor) Handle(ctx context.Context, r slog.Record) error {
 	for _, a := range attrs {
 		switch a.Key {
 		case "tenant_id":
-			entry.TenantID = a.Value.String()
+			entry.TenantID = Clip(a.Value.String(), MaxValueBytes)
 		case "plugin":
-			entry.Plugin = a.Value.String()
+			entry.Plugin = Clip(a.Value.String(), MaxValueBytes)
 		}
 	}
 
@@ -99,7 +99,8 @@ func slogToStreamLevel(l slog.Level) Level {
 	}
 }
 
-// attrsToMap flattens slog.Attrs into a string map, ignoring groups.
+// attrsToMap flattens slog.Attrs into a string map, ignoring groups. Each
+// value is clipped and copied, because the entry outlives the call.
 func attrsToMap(attrs []slog.Attr) map[string]string {
 	if len(attrs) == 0 {
 		return nil
@@ -109,7 +110,7 @@ func attrsToMap(attrs []slog.Attr) map[string]string {
 		if a.Key == "" {
 			continue
 		}
-		m[a.Key] = a.Value.String()
+		m[a.Key] = Clip(a.Value.String(), MaxValueBytes)
 	}
 	return m
 }

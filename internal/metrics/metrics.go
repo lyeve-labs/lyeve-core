@@ -215,7 +215,7 @@ func RecordRequest(r *http.Request, status int, durationSec float64) {
 	}
 	plugin := PluginLabel(r)
 	tenant := TenantLabel(r)
-	method := r.Method
+	method := middleware.StandardMethod(r.Method)
 	code := statusCodeBucket(status)
 
 	total.WithLabelValues(plugin, method, code, tenant).Inc()

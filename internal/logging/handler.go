@@ -10,6 +10,7 @@ import (
 	"time"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/lyeve-labs/lyeve-core/internal/logstream"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/observability"
 )
@@ -159,22 +160,22 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	// facts about the request, not something a log line may claim.
 	entryAttrs := make(map[string]any, len(attrs)+r.NumAttrs()+2)
 	for _, a := range attrs {
-		entryAttrs[a.Key] = attrValue(a)
+		entryAttrs[a.Key] = storedValue(a)
 	}
 	r.Attrs(func(a slog.Attr) bool {
-		entryAttrs[a.Key] = attrValue(a)
+		entryAttrs[a.Key] = storedValue(a)
 		return true
 	})
 	if tenant != "" {
-		entryAttrs["tenant_id"] = tenant
+		entryAttrs["tenant_id"] = logstream.Clip(tenant, logstream.MaxValueBytes)
 	}
 	if plugin != "" {
-		entryAttrs["plugin"] = plugin
+		entryAttrs["plugin"] = logstream.Clip(plugin, logstream.MaxValueBytes)
 	}
 	entry := observability.LogEntry{
 		Timestamp: r.Time.UTC().Format(time.RFC3339Nano),
 		Level:     r.Level.String(),
-		Message:   r.Message,
+		Message:   logstream.Clip(r.Message, logstream.MaxMessageBytes),
 		Attrs:     entryAttrs,
 	}
 
@@ -187,6 +188,17 @@ func (h *EnrichHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	return h.inner.Handle(ctx, enriched)
+}
+
+// storedValue is attrValue for an entry the tailer's ring and the sink's
+// buffer keep after the call returns. A string is clipped and copied, so the
+// entry neither grows with the caller's input nor keeps the caller's memory.
+func storedValue(a slog.Attr) any {
+	v := attrValue(a)
+	if s, ok := v.(string); ok {
+		return logstream.Clip(s, logstream.MaxValueBytes)
+	}
+	return v
 }
 
 // attrValue resolves an attribute to something JSON can carry.
