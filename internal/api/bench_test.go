@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -27,6 +28,8 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/testdialect"
+	"github.com/lyeve-labs/lyeve-core/internal/testhost"
+	"github.com/lyeve-labs/lyeve-core/internal/testsupply/schemaengine"
 )
 
 // Benchmark infrastructure: standalone PG container for benchmarks
@@ -252,38 +255,111 @@ func BenchmarkEngine_ContentCreate(b *testing.B) {
 	}
 }
 
+// contentAPIBench serves the public content API through NewAPIRouter, the
+// router the engine mounts, so a read passes the whole kernel chain: auth,
+// tenancy, capture, the cache middleware and the handler. Plugins add their
+// own middleware on top in a real install, and none is loaded here.
+type contentAPIBench struct {
+	router http.Handler
+	token  string
+	ids    []string
+}
+
+// contentAPIBenchRows is the page size of the published list scenario.
+const contentAPIBenchRows = 50
+
+func newContentAPIBench(b *testing.B) contentAPIBench {
+	b.Helper()
+	ctx := context.Background()
+	pool := tbDB(b)
+
+	eng := schemaengine.New(testhost.New(pool))
+	if err := eng.Apply(ctx, cmsBenchSchema, json.RawMessage(`{"name":"`+cmsBenchSchema+`","display_name":"Bench posts","fields":[`+
+		`{"name":"title","field_type":"text"},{"name":"slug","field_type":"text"},{"name":"body","field_type":"text"}]}`)); err != nil {
+		b.Fatalf("apply schema: %v", err)
+	}
+
+	cfg := &config.Config{
+		DatabaseDriver:   "postgres",
+		JWTSecrets:       []string{testSecret},
+		JWTSecret:        testSecret,
+		JWTExpirySecs:    3600,
+		CORSOrigins:      []string{"http://localhost:5173"},
+		MaxBodyBytes:     10 << 20,
+		MaxJSONBodyBytes: 1 << 20,
+		CacheTTL:         60 * time.Second,
+		CacheMaxEntries:  1000,
+	}
+	router, err := NewAPIRouter(pool, cfg, nil,
+		WithSchemaSource(eng.SchemaSource()),
+		WithContentRules(eng),
+		WithLifetime(testLifetime(b)),
+	)
+	if err != nil {
+		b.Fatalf("build api router: %v", err)
+	}
+
+	userID := uuid.New()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO sys_users (id, email, password_hash, roles, token_version) VALUES ($1, $2, $3, $4, $5)`,
+		userID, cmsBenchEmail, "$2a$10$placeholder-hash-for-bench", `{"super_admin"}`, 1); err != nil {
+		b.Fatalf("seed user: %v", err)
+	}
+	c := contentAPIBench{router: router, token: "Bearer " + adminJWT(userID, cmsBenchEmail, []string{"super_admin"})}
+
+	for i := range contentAPIBenchRows {
+		body := fmt.Sprintf(`{"data":{"title":"Item %d","slug":"item-%d","body":"%s"}}`, i, i, strings.Repeat("lorem ipsum ", 40))
+		rec := c.do(http.MethodPost, "/api/v1/content/"+cmsBenchSchema, body)
+		if rec.Code != http.StatusCreated {
+			b.Fatalf("create returned %d: %s", rec.Code, rec.Body.String())
+		}
+		var created struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.ID == "" {
+			b.Fatalf("create returned no id: %s", rec.Body.String())
+		}
+		c.ids = append(c.ids, created.ID)
+	}
+	return c
+}
+
+func (c contentAPIBench) do(method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("Authorization", c.token)
+	req.RemoteAddr = "192.0.2.1:12345"
+	rec := httptest.NewRecorder()
+	c.router.ServeHTTP(rec, req)
+	return rec
+}
+
+// BenchmarkEngine_ContentGet reads one entry by id through the public content
+// API.
 func BenchmarkEngine_ContentGet(b *testing.B) {
-	ctx := newCMSBenchContext(b)
-	// Create one doc to read repeatedly.
-	rec := ctx.doJSON(http.MethodPost, "/api/admin/content/"+cmsBenchSchema,
-		`{"title":"Read Target","slug":"read-target","status":"published"}`)
-	var created map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &created)
-	id, _ := created["id"].(string)
+	c := newContentAPIBench(b)
+	path := "/api/v1/content/" + cmsBenchSchema + "/" + c.ids[0]
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
-		r := ctx.doJSON(http.MethodGet, "/api/admin/content/"+cmsBenchSchema+"/"+id, "")
-		if r.Code >= 400 {
-			b.Fatalf("Get returned %d", r.Code)
+		if r := c.do(http.MethodGet, path, ""); r.Code != http.StatusOK {
+			b.Fatalf("get returned %d: %s", r.Code, r.Body.String())
 		}
 	}
 }
 
+// BenchmarkEngine_ContentList reads a page of 50 entries through the public
+// content API.
 func BenchmarkEngine_ContentList(b *testing.B) {
-	ctx := newCMSBenchContext(b)
-	for i := range 10 {
-		ctx.doJSON(http.MethodPost, "/api/admin/content/"+cmsBenchSchema,
-			fmt.Sprintf(`{"title":"Item %d","slug":"item-%d","status":"published"}`, i, i))
-	}
+	c := newContentAPIBench(b)
+	path := fmt.Sprintf("/api/v1/content/%s?limit=%d", cmsBenchSchema, contentAPIBenchRows)
 
 	b.ReportAllocs()
-	b.ResetTimer()
 	for b.Loop() {
-		r := ctx.doJSON(http.MethodGet, "/api/admin/content/"+cmsBenchSchema+"?limit=10", "")
-		if r.Code >= 400 {
-			b.Fatalf("List returned %d: %s", r.Code, r.Body.String())
+		if r := c.do(http.MethodGet, path, ""); r.Code != http.StatusOK {
+			b.Fatalf("list returned %d: %s", r.Code, r.Body.String())
 		}
 	}
 }

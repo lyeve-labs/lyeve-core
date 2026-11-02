@@ -2,6 +2,7 @@ package middleware_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,26 +12,46 @@ import (
 
 // RateLimiter benchmarks: per-IP token bucket check
 
-// BenchmarkRateLimiter_Allow measures the hot path where the rate limit fires
-// (bucket check + tokens decrement). Creates a fresh rate limiter per iteration
-// to avoid token exhaustion across Go benchmark rounds.
+// BenchmarkRateLimiter_Allow measures one admitted request through a limiter
+// built once, as the router builds it. The rate is high enough that no bucket
+// runs dry, so every iteration takes the allow path.
 func BenchmarkRateLimiter_Allow(b *testing.B) {
-	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.RemoteAddr = "192.0.2.1:12345"
+	handler := mw.RateLimiter(1e9, 1_000_000)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
 
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		rateLimiter := mw.RateLimiter(200, 100)
-		handler := rateLimiter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusOK)
-		}))
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			b.Fatalf("unexpected status %d", rec.Code)
+	b.Run("hot_key", func(b *testing.B) {
+		req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+		req.RemoteAddr = "192.0.2.1:12345"
+		b.ReportAllocs()
+		for b.Loop() {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				b.Fatalf("unexpected status %d", rec.Code)
+			}
 		}
-	}
+	})
+
+	// 1,024 addresses stay under DefaultMaxKeys, so each one keeps its bucket
+	// and the loop measures lookups across a populated map, not eviction.
+	b.Run("1024_keys", func(b *testing.B) {
+		reqs := make([]*http.Request, 1024)
+		for i := range reqs {
+			reqs[i] = httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			reqs[i].RemoteAddr = fmt.Sprintf("198.51.%d.%d:12345", i/256, i%256)
+		}
+		b.ReportAllocs()
+		i := 0
+		for b.Loop() {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, reqs[i%len(reqs)])
+			if rec.Code != http.StatusOK {
+				b.Fatalf("unexpected status %d", rec.Code)
+			}
+			i++
+		}
+	})
 }
 
 // BenchmarkRateLimiter_Contention measures contention when many distinct IPs
@@ -137,36 +158,6 @@ func BenchmarkTenantHeader_Disabled(b *testing.B) {
 	for b.Loop() {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
-	}
-}
-
-// Combined middleware stack benchmark (realistic request path)
-
-func BenchmarkFullStack(b *testing.B) {
-	// Simulates the actual middleware stack applied in the CMS router:
-	// MaxBodySize -> RateLimiter -> ResponseTime -> SecurityHeaders -> handler
-	mbs := mw.MaxBodySize(1 << 20)
-	rl := mw.RateLimiter(1_000_000, 100_000)
-	rt := mw.ResponseTime()
-	sh := mw.SecurityHeaders(false)
-
-	handler := mbs(rl(rt(sh(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
-	})))))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	req.RemoteAddr = "192.0.2.1:12345"
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for b.Loop() {
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			b.Fatalf("unexpected status %d", rec.Code)
-		}
 	}
 }
 
