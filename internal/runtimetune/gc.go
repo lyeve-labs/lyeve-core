@@ -19,10 +19,14 @@ import (
 // change lands, which leaves the collector off with no limit.
 var gcMu sync.Mutex
 
-// ErrCollectorOffNeedsLimit refuses to turn the garbage collector off, or to
-// remove the memory limit while it is off. Without a limit nothing bounds the
-// heap short of the kernel's OOM kill.
+// ErrCollectorOffNeedsLimit refuses to turn the garbage collector off without
+// a memory limit. Without a limit nothing bounds the heap short of the
+// kernel's OOM kill.
 var ErrCollectorOffNeedsLimit = errors.New("gogc below zero turns the garbage collector off, which needs a memory limit")
+
+// ErrLimitNeededByCollector refuses to remove the memory limit while the
+// garbage collector is off, by the same rule seen from the memory side.
+var ErrLimitNeededByCollector = errors.New("the garbage collector is off, so the memory limit cannot be removed until it is turned back on")
 
 // GCSettings returns the collector percentage and the memory limit in force,
 // with 0 for no memory limit. The percentage is read from runtime/metrics,

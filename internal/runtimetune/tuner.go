@@ -228,7 +228,7 @@ func (t *Tuner) SetMemoryLimit(m core.MemoryLimit) (core.RuntimeSettingsView, er
 	if gogc, _ := GCSettings(); target == math.MaxInt64 && gogc < 0 {
 		gcMu.Unlock()
 		t.mu.Unlock()
-		return core.RuntimeSettingsView{}, ErrCollectorOffNeedsLimit
+		return core.RuntimeSettingsView{}, ErrLimitNeededByCollector
 	}
 	debug.SetMemoryLimit(target)
 	gcMu.Unlock()

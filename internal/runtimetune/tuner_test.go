@@ -280,7 +280,8 @@ func TestSetMemoryLimit_NoneRefusedWhileTheCollectorIsOff(t *testing.T) {
 	before := debug.SetMemoryLimit(-1)
 
 	_, err = tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryNone})
-	require.ErrorIs(t, err, runtimetune.ErrCollectorOffNeedsLimit)
+	require.ErrorIs(t, err, runtimetune.ErrLimitNeededByCollector)
+	assert.NotContains(t, err.Error(), "gogc", "the refusal is worded for the memory change")
 	assert.Equal(t, before, debug.SetMemoryLimit(-1))
 }
 
