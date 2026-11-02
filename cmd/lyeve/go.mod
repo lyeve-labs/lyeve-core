@@ -100,6 +100,8 @@ replace github.com/lyeve-labs/lyeve-plugin-scim => ../../../lyeve-plugin-scim
 
 replace github.com/lyeve-labs/lyeve-plugin-search => ../../../lyeve-plugin-search
 
+replace github.com/lyeve-labs/lyeve-plugin-site-builder => ../../../lyeve-plugin-site-builder
+
 replace github.com/lyeve-labs/lyeve-plugin-storage => ../../../lyeve-plugin-storage
 
 replace github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring => ../../../lyeve-plugin-synthetic-monitoring
@@ -163,6 +165,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-schema v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-scim v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-search v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-site-builder v0.0.0
 	github.com/lyeve-labs/lyeve-plugin-storage v0.8.1
 	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-telemetry v0.6.0
