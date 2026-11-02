@@ -300,6 +300,20 @@ func resolveConfig() (*Config, error) {
 		return nil, err
 	}
 
+	// CPU_QUOTA overrides Go's own default, which follows the cgroup's CPU
+	// limit. The engine applies it only when GOMAXPROCS is not set.
+	var cpuQuota int
+	if v := lookup("CPU_QUOTA"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("CPU_QUOTA must be a number: %w", err)
+		}
+		if n < 0 {
+			return nil, fmt.Errorf("CPU_QUOTA must be non-negative, got %d", n)
+		}
+		cpuQuota = n
+	}
+
 	dbWarmupParallelism := 4
 	if v := lookup("DB_WARMUP_PARALLELISM"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -592,6 +606,7 @@ func resolveConfig() (*Config, error) {
 		BackpressureTenantQuotaPct:        backpressureTenantQuotaPct,
 		BackpressurePoolPressureThreshold: backpressurePoolPressureThreshold,
 		MemoryLimitBytes:                  memoryLimitBytes,
+		CPUQuota:                          cpuQuota,
 		DBWarmupParallelism:               dbWarmupParallelism,
 		PluginStopParallelism:             pluginStopParallelism,
 	}
