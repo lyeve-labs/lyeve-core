@@ -160,6 +160,7 @@ func TestRuntimeFacts_Database(t *testing.T) {
 		clean(t)
 		tuner, _ := poolTuner(t, host)
 		f := tuner.RuntimeFacts(context.Background())
+		requireReasonCodes(t, f)
 
 		assert.Equal(t, host.Dialect(), f.Dialect)
 		require.True(t, f.DatabaseConnsOpen.Known, "connections open: %s", f.DatabaseConnsOpen.Reason)
@@ -167,7 +168,7 @@ func TestRuntimeFacts_Database(t *testing.T) {
 		switch host.Dialect() {
 		case "mssql":
 			assert.False(t, f.DatabaseConnLimit.Known)
-			assert.Equal(t, core.FactReasonNoFixedLimit, f.DatabaseConnLimit.Reason)
+			assert.Equal(t, core.FactReasonNoFixedLimit, f.DatabaseConnLimit.ReasonCode)
 			require.True(t, f.DatabaseCores.Known, "cores: %s", f.DatabaseCores.Reason)
 			assert.GreaterOrEqual(t, f.DatabaseCores.Value, 1)
 		default:
@@ -225,7 +226,10 @@ func TestRuntimeFacts_SessionsUnknownWithoutTheGrant(t *testing.T) {
 		tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), DB: sqlDB, Dialect: "postgres", Resolver: config.NewResolver(nil)})
 
 		f := tuner.RuntimeFacts(context.Background())
+		requireReasonCodes(t, f)
 		assert.False(t, f.DatabaseConnsOpen.Known, "connections open read as %v", f.DatabaseConnsOpen.Value)
+		assert.Equal(t, core.FactReasonMissingGrant, f.DatabaseConnsOpen.ReasonCode)
+		assert.Equal(t, "pg_read_all_stats", f.DatabaseConnsOpen.Grant)
 		assert.Contains(t, f.DatabaseConnsOpen.Reason, "pg_read_all_stats")
 		assert.True(t, f.DatabaseConnLimit.Known, "connection limit: %s", f.DatabaseConnLimit.Reason)
 	})
@@ -241,8 +245,10 @@ func TestRuntimeFacts_SessionsUnknownWithoutTheGrant(t *testing.T) {
 		tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), DB: sqlDB, Dialect: "mssql", Resolver: config.NewResolver(nil)})
 
 		f := tuner.RuntimeFacts(context.Background())
+		requireReasonCodes(t, f)
 		for name, fact := range map[string]core.Fact{"connections open": f.DatabaseConnsOpen, "cores": f.DatabaseCores} {
 			assert.False(t, fact.Known, "%s read as %v", name, fact.Value)
+			assert.Equal(t, "VIEW SERVER STATE", fact.Grant, name)
 			assert.Contains(t, fact.Reason, "VIEW SERVER STATE", name)
 		}
 	})
@@ -261,12 +267,14 @@ func TestRuntimeFacts_FailedReadIsNotAMissingGrant(t *testing.T) {
 		cancel()
 
 		f := tuner.RuntimeFacts(ctx)
+		requireReasonCodes(t, f)
 		facts := map[string]core.Fact{"connection limit": f.DatabaseConnLimit, "connections open": f.DatabaseConnsOpen}
 		if host.Dialect() == "mssql" {
 			facts["cores"] = f.DatabaseCores
 		}
 		for name, fact := range facts {
 			assert.False(t, fact.Known, name)
+			assert.Equal(t, core.FactReasonUnreadable, fact.ReasonCode, name)
 			assert.Equal(t, reasonUnreadable, fact.Reason, name)
 		}
 	})
@@ -299,6 +307,7 @@ func TestRuntimeFacts_BoundedWhenThePoolIsFull(t *testing.T) {
 		t.Cleanup(func() { _ = conn.Close() })
 
 		f := runtimeFacts(t, tuner, 10*time.Second)
+		requireReasonCodes(t, f)
 		assert.Equal(t, reasonUnreadable, f.DatabaseConnLimit.Reason)
 		assert.Equal(t, reasonUnreadable, f.DatabaseConnsOpen.Reason)
 	})
@@ -315,7 +324,8 @@ func TestRuntimeFacts_BoundedWhenTheRosterHangs(t *testing.T) {
 	tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), Replicas: hangingReplicas{}, Resolver: config.NewResolver(nil)})
 
 	f := runtimeFacts(t, tuner, 10*time.Second)
-	assert.False(t, f.Replicas.Known)
+	requireReasonCodes(t, f)
+	assert.Equal(t, core.FactReasonNoRoster, f.Replicas.ReasonCode)
 }
 
 // The crowding check reads the limit the facts report, which on PostgreSQL

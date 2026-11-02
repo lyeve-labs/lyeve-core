@@ -12,18 +12,19 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
-// The reasons a fact is unknown.
-const (
-	reasonNoCPULimit      = "the container sets no CPU limit, or its limit cannot be read"
-	reasonNoMemoryLimit   = "the container sets no memory limit, or its limit cannot be read"
-	reasonNoHostMemory    = "the machine's memory cannot be read on this system"
-	reasonNoDatabase      = "this engine runs without a database"
-	reasonUnreadable      = "the database did not answer the read"
-	reasonNoServerState   = "the database account lacks the VIEW SERVER STATE permission"
-	reasonNoStatsGrant    = "the database account is not a member of pg_read_all_stats"
-	reasonCoresNotOverSQL = "this database does not report its CPU count to a client"
-	reasonNoRoster        = "no transport that keeps a roster of the replicas is running"
-	reasonNotChosenYet    = "the engine has not chosen its cache backend yet"
+// The facts that are unknown, each with its reason as a code and in words.
+var (
+	noCPULimit      = unknown(core.FactReasonNoCgroup, "the container sets no CPU limit, or its limit cannot be read")
+	noMemoryLimit   = unknown(core.FactReasonNoCgroup, "the container sets no memory limit, or its limit cannot be read")
+	noHostMemory    = unknown(core.FactReasonNoProc, "the machine's memory cannot be read on this system")
+	noDatabase      = unknown(core.FactReasonNoDatabase, "this engine runs without a database")
+	unreadable      = unknown(core.FactReasonUnreadable, "the database did not answer the read")
+	noFixedLimit    = unknown(core.FactReasonNoFixedLimit, "the database sets no fixed connection limit and accepts connections on demand")
+	coresNotOverSQL = unknown(core.FactReasonNotOverSQL, "this database does not report its CPU count to a client")
+	noRoster        = unknown(core.FactReasonNoRoster, "no transport that keeps a roster of the replicas is running")
+	notChosenYet    = unknown(core.FactReasonNotChosenYet, "the engine has not chosen its cache backend yet")
+	noServerState   = missingGrant("VIEW SERVER STATE", "the database account lacks the VIEW SERVER STATE permission")
+	noStatsGrant    = missingGrant("pg_read_all_stats", "the database account is not a member of pg_read_all_stats")
 )
 
 // factsReadLimit bounds the database reads together, and the roster read on
@@ -34,13 +35,13 @@ const factsReadLimit = 2 * time.Second
 // RuntimeFacts implements core.RuntimeTuning.
 func (t *Tuner) RuntimeFacts(ctx context.Context) core.RuntimeFacts {
 	f := core.RuntimeFacts{
-		CPULimit:    unknown(reasonNoCPULimit),
-		MemoryLimit: unknown(reasonNoMemoryLimit),
+		CPULimit:    noCPULimit,
+		MemoryLimit: noMemoryLimit,
 		HostCores:   known(t.hostCPUs, core.SourceMachine),
-		HostMemory:  unknown(reasonNoHostMemory),
+		HostMemory:  noHostMemory,
 		Dialect:     t.dialect,
-		Replicas:    unknown(reasonNoRoster),
-		SharedCache: unknown(reasonNotChosenYet),
+		Replicas:    noRoster,
+		SharedCache: notChosenYet,
 	}
 	if n := config.CgroupCPULimit(t.root); n > 0 {
 		f.CPULimit = known(n, core.SourceContainer)
@@ -72,7 +73,7 @@ func (t *Tuner) RuntimeFacts(ctx context.Context) core.RuntimeFacts {
 // cores from the database, each bounded by ctx.
 func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, open, cores core.Fact) {
 	if sqlDB == nil {
-		return unknown(reasonNoDatabase), unknown(reasonNoDatabase), unknown(reasonNoDatabase)
+		return noDatabase, noDatabase, noDatabase
 	}
 	switch dialect {
 	case "postgres", "postgresql":
@@ -80,24 +81,24 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 			// Without the grant the view hides other accounts' backend type,
 			// so only the caller's own sessions would count.
 			intFact(ctx, sqlDB, `SELECT CASE WHEN pg_has_role('pg_read_all_stats', 'USAGE')
-				THEN (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend') ELSE -1 END`, reasonNoStatsGrant),
-			unknown(reasonCoresNotOverSQL)
+				THEN (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend') ELSE -1 END`, noStatsGrant),
+			coresNotOverSQL
 	case "mysql":
 		return connLimit(ctx, sqlDB, dialect),
-			intFact(ctx, sqlDB, `SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'`, ""),
-			unknown(reasonCoresNotOverSQL)
+			intFact(ctx, sqlDB, `SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'`, core.Fact{}),
+			coresNotOverSQL
 	case "mssql":
 		return connLimit(ctx, sqlDB, dialect),
 			// Without the permission the view lists only the caller's own
 			// session, which would read as one connection open.
 			intFact(ctx, sqlDB, `SELECT CASE WHEN HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
-				THEN (SELECT count(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) ELSE -1 END`, reasonNoServerState),
+				THEN (SELECT count(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) ELSE -1 END`, noServerState),
 			// The view refuses the account outright without the permission,
 			// even inside a CASE, so the check runs as a branch.
 			intFact(ctx, sqlDB, `IF HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
-				SELECT cpu_count FROM sys.dm_os_sys_info ELSE SELECT -1`, reasonNoServerState)
+				SELECT cpu_count FROM sys.dm_os_sys_info ELSE SELECT -1`, noServerState)
 	default:
-		return unknown(reasonUnreadable), unknown(reasonUnreadable), unknown(reasonUnreadable)
+		return unreadable, unreadable, unreadable
 	}
 }
 
@@ -107,9 +108,9 @@ func connLimit(ctx context.Context, sqlDB *sql.DB, dialect string) core.Fact {
 	n, err := db.ServerConnLimit(ctx, sqlDB, dialect)
 	switch {
 	case errors.Is(err, db.ErrNoFixedConnLimit):
-		return unknown(core.FactReasonNoFixedLimit)
+		return noFixedLimit
 	case err != nil:
-		return unknown(reasonUnreadable)
+		return unreadable
 	default:
 		return known(n, core.SourceDatabase)
 	}
@@ -120,17 +121,17 @@ func connLimit(ctx context.Context, sqlDB *sql.DB, dialect string) core.Fact {
 // reports a read the database did not answer, so a timeout never reads as a
 // missing grant. Some servers answer these as text, so the value is scanned
 // as one.
-func intFact(ctx context.Context, sqlDB *sql.DB, query, denied string) core.Fact {
+func intFact(ctx context.Context, sqlDB *sql.DB, query string, denied core.Fact) core.Fact {
 	var s string
 	if err := sqlDB.QueryRowContext(ctx, query).Scan(&s); err != nil {
-		return unknown(reasonUnreadable)
+		return unreadable
 	}
 	n, err := strconv.Atoi(s)
 	switch {
-	case err == nil && n == -1 && denied != "":
-		return unknown(denied)
+	case err == nil && n == -1 && denied.ReasonCode != "":
+		return denied
 	case err != nil || n < 0:
-		return unknown(reasonUnreadable)
+		return unreadable
 	}
 	return known(n, core.SourceDatabase)
 }
@@ -139,6 +140,10 @@ func known(v any, source string) core.Fact {
 	return core.Fact{Value: v, Known: true, Source: source}
 }
 
-func unknown(reason string) core.Fact {
-	return core.Fact{Reason: reason}
+func unknown(code core.FactReason, reason string) core.Fact {
+	return core.Fact{ReasonCode: code, Reason: reason}
+}
+
+func missingGrant(grant, reason string) core.Fact {
+	return core.Fact{ReasonCode: core.FactReasonMissingGrant, Grant: grant, Reason: reason}
 }

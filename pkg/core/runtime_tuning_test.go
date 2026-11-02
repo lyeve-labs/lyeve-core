@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 )
@@ -66,5 +67,18 @@ func TestPinnedError_NamesTheVariable(t *testing.T) {
 	var pinned *PinnedError
 	if !errors.As(err, &pinned) || pinned.Variable != "GOMAXPROCS" {
 		t.Errorf("errors.As gave %+v, want the variable GOMAXPROCS", pinned)
+	}
+}
+
+// The reason code and the grant stay out of a Fact's JSON form, so a plugin
+// that serves facts as they are keeps the shape its readers know.
+func TestFact_JSONLeavesOutTheReasonCode(t *testing.T) {
+	f := Fact{Reason: "the database account lacks a grant", ReasonCode: FactReasonMissingGrant, Grant: "VIEW SERVER STATE"}
+	got, err := json.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"value":null,"known":false,"reason":"the database account lacks a grant"}`; string(got) != want {
+		t.Errorf("json = %s, want %s", got, want)
 	}
 }

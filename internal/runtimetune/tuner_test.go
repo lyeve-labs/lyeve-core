@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"testing"
@@ -400,6 +401,7 @@ func TestRuntimeFacts_MachineAndReplicas(t *testing.T) {
 		Resolver: config.NewResolver(nil),
 	})
 	f := tuner.RuntimeFacts(context.Background())
+	requireReasonCodes(t, f)
 	assert.Equal(t, core.Fact{Value: 1.5, Known: true, Source: core.SourceContainer}, f.CPULimit)
 	assert.Equal(t, core.Fact{Value: gib, Known: true, Source: core.SourceContainer}, f.MemoryLimit)
 	assert.Equal(t, core.Fact{Value: 8 * gib, Known: true, Source: core.SourceMachine}, f.HostMemory)
@@ -430,6 +432,7 @@ func TestRuntimeFacts_NothingReadable(t *testing.T) {
 		Resolver: config.NewResolver(nil),
 	})
 	f := tuner.RuntimeFacts(context.Background())
+	requireReasonCodes(t, f)
 	for name, fact := range map[string]core.Fact{
 		"cpu limit":    f.CPULimit,
 		"memory limit": f.MemoryLimit,
@@ -450,8 +453,37 @@ func TestRuntimeTuning_WithoutADatabase(t *testing.T) {
 	_, err := tuner.SetDatabaseMaxConns(5)
 	assert.True(t, errors.Is(err, core.ErrScalingPrimitiveMissing), "err = %v", err)
 	f := tuner.RuntimeFacts(context.Background())
+	requireReasonCodes(t, f)
+	assert.Equal(t, core.FactReasonNoDatabase, f.DatabaseConnLimit.ReasonCode)
 	assert.Equal(t, "this engine runs without a database", f.DatabaseConnLimit.Reason)
 	assert.Nil(t, tuner.RuntimeSettings().DatabaseMaxConns.Value)
+}
+
+// factReasons is every reason a fact can carry.
+var factReasons = []core.FactReason{
+	core.FactReasonNoCgroup, core.FactReasonNoProc, core.FactReasonNoDatabase, core.FactReasonMissingGrant,
+	core.FactReasonUnreadable, core.FactReasonNotOverSQL, core.FactReasonNoFixedLimit, core.FactReasonNoRoster,
+	core.FactReasonNotChosenYet,
+}
+
+// requireReasonCodes checks that every unknown fact in f carries one of the
+// FactReason constants and its words, and a missing grant its name, so a
+// caller maps each without reading the words. Every facts test calls it.
+func requireReasonCodes(t *testing.T, f core.RuntimeFacts) {
+	t.Helper()
+	v := reflect.ValueOf(f)
+	for i := range v.NumField() {
+		fact, ok := v.Field(i).Interface().(core.Fact)
+		if !ok || fact.Known {
+			continue
+		}
+		name := v.Type().Field(i).Name
+		assert.Contains(t, factReasons, fact.ReasonCode, "%s: %q", name, fact.Reason)
+		assert.NotEmpty(t, fact.Reason, name)
+		if fact.ReasonCode == core.FactReasonMissingGrant {
+			assert.NotEmpty(t, fact.Grant, name)
+		}
+	}
 }
 
 // share is the soft limit a ratio of limit gives, rounded as the tuner does.

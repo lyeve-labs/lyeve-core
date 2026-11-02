@@ -123,18 +123,54 @@ type MemoryLimit struct {
 
 // Fact is one thing the host read about the machine, the database or the
 // replicas. Value is set only when Known is true. Reason says why a fact is
-// unknown, in words that can be shown as they are.
+// unknown, in words that can be shown as they are, and ReasonCode says the
+// same as one of the FactReason constants, for a caller that words its own
+// sentences.
 type Fact struct {
 	Value  any    `json:"value"`
 	Known  bool   `json:"known"`
 	Source string `json:"source,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// ReasonCode and Grant stay out of the JSON form, so a caller that
+	// serves a Fact as it is keeps its shape and decides how to name them.
+	ReasonCode FactReason `json:"-"`
+	// Grant names the grant or permission the database account lacks,
+	// with FactReasonMissingGrant.
+	Grant string `json:"-"`
 }
 
-// FactReasonNoFixedLimit is the Reason of a database connection limit that
-// is unknown because the server sets none and grows on demand, which a
-// caller sizing a pool treats differently from a limit it failed to read.
-const FactReasonNoFixedLimit = "the database sets no fixed connection limit and accepts connections on demand"
+// FactReason is why a fact is unknown.
+type FactReason string
+
+// The reasons a fact can be unknown.
+const (
+	// FactReasonNoCgroup: the container sets no such limit, or the
+	// process's cgroup files cannot be read.
+	FactReasonNoCgroup FactReason = "no_cgroup"
+	// FactReasonNoProc: the machine's own figure cannot be read from /proc
+	// on this system.
+	FactReasonNoProc FactReason = "no_proc"
+	// FactReasonNoDatabase: the engine runs without a database.
+	FactReasonNoDatabase FactReason = "no_database"
+	// FactReasonMissingGrant: the database account lacks the grant the read
+	// needs, which Fact.Grant names.
+	FactReasonMissingGrant FactReason = "missing_grant"
+	// FactReasonUnreadable: the database did not answer the read.
+	FactReasonUnreadable FactReason = "unreadable"
+	// FactReasonNotOverSQL: the database does not report the value to a
+	// client.
+	FactReasonNotOverSQL FactReason = "not_over_sql"
+	// FactReasonNoFixedLimit: the database sets no connection limit and
+	// grows on demand, which a caller sizing a pool treats differently from
+	// a limit it failed to read.
+	FactReasonNoFixedLimit FactReason = "no_fixed_limit"
+	// FactReasonNoRoster: no transport that keeps a roster of the replicas
+	// is running.
+	FactReasonNoRoster FactReason = "no_roster"
+	// FactReasonNotChosenYet: the engine has not chosen the backend the fact
+	// describes yet.
+	FactReasonNotChosenYet FactReason = "not_chosen_yet"
+)
 
 // RuntimeFacts is what a choice of settings depends on.
 type RuntimeFacts struct {
