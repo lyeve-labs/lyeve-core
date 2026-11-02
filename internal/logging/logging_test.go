@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/stretchr/testify/assert"
@@ -199,4 +200,35 @@ func TestLevelMap_Level_NoOverrides(t *testing.T) {
 	lm := logging.NewLevelMap(slog.LevelInfo)
 	assert.Equal(t, slog.LevelInfo, lm.Level("", ""))
 	assert.Equal(t, slog.LevelInfo, lm.Level("any-tenant", "any-plugin"))
+}
+
+// A line logged while a request is served names who made it by id and the
+// route serving it, never the caller's address.
+func TestEnrichAttrs_NamesTheActorAndTheRoute(t *testing.T) {
+	rctx := chi.NewRouteContext()
+	rctx.RoutePatterns = []string{"/api/admin/users/{id}"}
+	base := context.WithValue(context.Background(), chi.RouteCtxKey, rctx)
+
+	for _, tc := range []struct {
+		name   string
+		claims *core.AuthClaims
+		want   string
+	}{
+		{"session", &core.AuthClaims{UserID: "u-1", Email: "ann@example.com"}, "u-1"},
+		{"api key", &core.AuthClaims{UserID: "u-2", Email: "apikey:ci", IsAPIKey: true, APIKeyID: "k-1"}, "k-1"},
+		{"admin token", &core.AuthClaims{UserID: "u-3", Email: "ann@example.com", AdminTokenID: "t-1"}, "u-3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.WithValue(base, core.ClaimsKey, tc.claims)
+			got := map[string]string{}
+			for _, a := range logging.EnrichAttrs(ctx) {
+				got[a.Key] = a.Value.String()
+				assert.NotContains(t, a.Value.String(), "@", "attribute %q carries an address", a.Key)
+			}
+			assert.Equal(t, tc.want, got["actor"])
+			assert.Equal(t, "/api/admin/users/{id}", got["route"])
+		})
+	}
+
+	assert.Empty(t, logging.EnrichAttrs(context.Background()), "an anonymous line outside a request carries nothing")
 }

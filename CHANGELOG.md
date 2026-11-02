@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- An access log line names who made the request in an `actor` field, the account id for a session or an admin token and the key id for an API key, and the route that served it in a `route` field. A request served by a route that takes an identifier in its path, such as `/api/admin/email/suppressions/{email}`, is logged by its route alone without the path, so an address in the path stays out of the log. Lines a handler logs while serving a request carry the actor and the route too. The access line no longer writes `trace_id` and `span_id` itself, so they appear only while tracing is on, instead of as zeros on every line.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security
