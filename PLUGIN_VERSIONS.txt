@@ -63,6 +63,7 @@ lyeve-plugin-saml = 396a808ba161ff363dc7c9bd3fe8a4de2d40dd48
 lyeve-plugin-schema = de2154df0ccabd09fa06905e600306693c27f6ea
 lyeve-plugin-scim = d08fa4015d2703e7d745bd4c2f563dfc483866f6
 lyeve-plugin-search = 97ebb1abbf5df88d1286996cf066bad9f8681319
+lyeve-plugin-site-builder = 101f2374377e06eff660419991b4b88fa7ce3e02
 lyeve-plugin-storage = 2149655ddbc7d6672f257f3d2b3a7743e8e4e013
 lyeve-plugin-synthetic-monitoring = 3b321138b85e2ef2faee3623a50703358996c515
 lyeve-plugin-telemetry = 61b4e2e0a6579a4948df2e41ed597deb86b37c8c
