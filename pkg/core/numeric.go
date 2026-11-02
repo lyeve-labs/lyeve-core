@@ -122,7 +122,10 @@ func parseInteger(s string) (int64, error) {
 // string or json.Number is read as a plain decimal (a sign, digits, an
 // optional point and digits). Exponent forms, NaN, infinities and the empty
 // string are ErrNumericForm. A float64 is read as the shortest text that
-// round-trips it, so 19.9 is 19.90 at scale 2. Trailing fractional zeros
+// round-trips it, so 19.9 is 19.90 at scale 2. A float64 whose shortest text
+// has more than 15 significant digits is ErrNumericForm, because a float64
+// holds only 15 decimal digits for certain and the rest may be its rounding
+// of what its writer sent. Trailing fractional zeros
 // beyond the scale change no value and are dropped. Any other digit past what
 // the field holds is ErrDecimalPrecision, never rounded.
 func DecimalValue(v any, precision, scale int) (string, error) {
@@ -137,12 +140,12 @@ func DecimalValue(v any, precision, scale int) (string, error) {
 	case json.Number:
 		text = string(n)
 	case float64:
-		if math.IsNaN(n) || math.IsInf(n, 0) {
+		if !exactFloat(n, 64) {
 			return "", fmt.Errorf("%w: %v", ErrNumericForm, n)
 		}
 		text = strconv.FormatFloat(n, 'f', -1, 64)
 	case float32:
-		if math.IsNaN(float64(n)) || math.IsInf(float64(n), 0) {
+		if !exactFloat(float64(n), 32) {
 			return "", fmt.Errorf("%w: %v", ErrNumericForm, n)
 		}
 		text = strconv.FormatFloat(float64(n), 'f', -1, 32)
@@ -177,6 +180,26 @@ func DecimalValue(v any, precision, scale int) (string, error) {
 		}
 	}
 	return string(out), nil
+}
+
+// maxFloatDigits is the number of significant decimal digits every float64
+// holds exactly.
+const maxFloatDigits = 15
+
+// exactFloat reports whether f is finite and its shortest text at the given
+// bit size has no more than maxFloatDigits significant digits.
+func exactFloat(f float64, bitSize int) bool {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return false
+	}
+	mantissa, _, _ := strings.Cut(strconv.FormatFloat(f, 'e', -1, bitSize), "e")
+	digits := 0
+	for i := 0; i < len(mantissa); i++ {
+		if isDigit(mantissa[i]) {
+			digits++
+		}
+	}
+	return digits <= maxFloatDigits
 }
 
 // splitDecimal reads a plain decimal into its sign, its integer digits with

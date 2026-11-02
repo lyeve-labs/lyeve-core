@@ -81,6 +81,11 @@ func TestDecimalValue_AnswersTheCanonicalText(t *testing.T) {
 		{"-9999999999999999999999999999.9999999999", 38, 10, "-9999999999999999999999999999.9999999999", nil},
 		{"1.005", 10, 2, "", ErrDecimalPrecision},
 		{1.005, 10, 2, "", ErrDecimalPrecision},
+		{1234567890123.45, 38, 2, "1234567890123.45", nil},
+		// A float64 with more than 15 significant digits may not be the
+		// number its writer meant, so it is refused rather than printed.
+		{12345678901234567.0, 38, 2, "", ErrNumericForm},
+		{0.1234567890123456, 38, 20, "", ErrNumericForm},
 		{"100000000.00", 10, 2, "", ErrDecimalPrecision},
 		{"1e3", 10, 2, "", ErrNumericForm},
 		{"NaN", 10, 2, "", ErrNumericForm},
