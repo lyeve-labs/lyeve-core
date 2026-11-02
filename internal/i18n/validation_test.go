@@ -53,3 +53,40 @@ func TestLocalizeValidation_LeavesTheEnginesParametersAlone(t *testing.T) {
 	assert.Equal(t, map[string]any{"max": "5"}, params)
 	assert.Equal(t, "rating", got[0].Params["field"])
 }
+
+// The schema engine refuses a decimal with more digits than its field holds
+// under the precision code, and the catalog words it from the field's
+// precision and scale in the caller's locale. A scale of 0 or 1 reads as
+// French grammar asks.
+func TestLocalizeValidation_PrecisionIsRenderedInTheLocale(t *testing.T) {
+	tests := []struct {
+		name   string
+		locale Locale
+		scale  int
+		want   string
+	}{
+		{"en", LocaleEN, 2, "The field price holds at most 5 digits, 2 of them after the decimal point."},
+		{"fr", LocaleFR, 2, "Le champ price accepte au plus 5 chiffres, dont 2 après la virgule."},
+		{"fr scale 0", LocaleFR, 0, "Le champ price accepte au plus 5 chiffres, dont 0 après la virgule."},
+		{"fr scale 1", LocaleFR, 1, "Le champ price accepte au plus 5 chiffres, dont 1 après la virgule."},
+		{"fr-CA", Locale("fr-CA"), 2, "Le champ price accepte au plus 5 chiffres, dont 2 après la virgule."},
+		{"ja", Locale("ja"), 2, "The field price holds at most 5 digits, 2 of them after the decimal point."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := []core.SchemaValidationError{{
+				Field:   "price",
+				Code:    "SCHEMA_VALIDATION_PRECISION",
+				Rule:    "precision",
+				Value:   "123456.7",
+				Message: "the schema engine's own sentence",
+				Params:  map[string]any{"field": "price", "precision": 5, "scale": tt.scale},
+			}}
+			got := LocalizeValidation(tt.locale, errs)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.want, got[0].Message)
+			assert.Equal(t, "SCHEMA_VALIDATION_PRECISION", got[0].Code)
+			assert.Equal(t, "precision", got[0].Rule)
+		})
+	}
+}

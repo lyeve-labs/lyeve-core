@@ -119,6 +119,7 @@ const (
 	CodeSchemaValidationRange        Code = "SCHEMA_VALIDATION_RANGE"
 	CodeSchemaValidationCustom       Code = "SCHEMA_VALIDATION_CUSTOM"
 	CodeSchemaValidationCrossField   Code = "SCHEMA_VALIDATION_CROSS_FIELD"
+	CodeSchemaValidationPrecision    Code = "SCHEMA_VALIDATION_PRECISION"
 )
 
 // defaultParams returns default template parameters for a code.
