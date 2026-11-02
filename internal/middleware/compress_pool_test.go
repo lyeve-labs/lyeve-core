@@ -24,7 +24,7 @@ func TestCompress_PooledWriterReleasesTheResponse(t *testing.T) {
 				_, _ = w.Write([]byte(`{"ok":true}`))
 			}))
 
-			collected := serveTracked(h, enc)
+			collected := serveTracked(t, h, enc)
 			runtime.GC()
 			select {
 			case <-collected:
@@ -35,7 +35,8 @@ func TestCompress_PooledWriterReleasesTheResponse(t *testing.T) {
 	}
 }
 
-func serveTracked(h http.Handler, enc string) <-chan struct{} {
+func serveTracked(t *testing.T, h http.Handler, enc string) <-chan struct{} {
+	t.Helper()
 	collected := make(chan struct{})
 	w := &finalizedWriter{httptest.NewRecorder()}
 	runtime.SetFinalizer(w, func(*finalizedWriter) { close(collected) })
@@ -43,7 +44,7 @@ func serveTracked(h http.Handler, enc string) <-chan struct{} {
 	req.Header.Set("Accept-Encoding", enc)
 	h.ServeHTTP(w, req)
 	if w.Header().Get("Content-Encoding") != enc {
-		panic("response was not compressed with " + enc)
+		t.Fatalf("response was not compressed with %s", enc)
 	}
 	return collected
 }
