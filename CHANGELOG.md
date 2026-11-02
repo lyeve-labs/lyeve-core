@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A filtered export of the in-process log ring no longer holds up the rest of the engine. The ring is copied under its lock and filtered after the lock is released. Before, every log call in the process waited while an export filtered the whole ring, which took about 2 ms for a keyword search of a full ring, so an admin polling the export slowed every request. In a benchmark of log calls during back-to-back keyword exports, the 99th percentile wait fell from about 4.5 ms to 4 us.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security
