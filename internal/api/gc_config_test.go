@@ -58,7 +58,7 @@ func TestAdminRouter_GCConfigRefusesTurningTheCollectorOffWithoutAMemoryLimit(t 
 }
 
 func TestAdminRouter_GCConfigTurnsTheCollectorOffUnderAMemoryLimit(t *testing.T) {
-	const limit = 1 << 40
+	const limit = 256 << 20
 	setGC(t, 100, limit)
 
 	rec := gcConfigRequest(t, http.MethodPost, `{"gogc": -1}`)
@@ -67,6 +67,23 @@ func TestAdminRouter_GCConfigTurnsTheCollectorOffUnderAMemoryLimit(t *testing.T)
 	var got map[string]int64
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	assert.Equal(t, map[string]int64{"previous_gogc": 100, "current_gogc": -1, "memory_limit": limit}, got)
+}
+
+// A limit at or above the machine's memory bounds nothing, because the
+// kernel's OOM kill comes first, so it does not let the collector go off. A
+// percentage past the ceiling is refused the same way, and the ceiling itself
+// is allowed.
+func TestAdminRouter_GCConfigTreatsALimitAboveTheMachineAsNone(t *testing.T) {
+	setGC(t, 100, 1<<62)
+
+	for _, body := range []string{`{"gogc": -1}`, `{"gogc": 2000000000}`} {
+		rec := gcConfigRequest(t, http.MethodPost, body)
+
+		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, "%s: %s", body, rec.Body.String())
+		assert.Equal(t, int64(100), gogcInForce(), "%s: the refused setting was applied", body)
+	}
+	rec := gcConfigRequest(t, http.MethodPost, `{"gogc": 1000}`)
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
 
 // The report reads the settings the runtime holds, which a call since boot

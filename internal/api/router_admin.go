@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -547,12 +548,17 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc is required")
 					return
 				}
-				// The only refusal is a negative percentage without a memory
-				// limit, which turns the collector off with nothing bounding the
-				// heap short of the kernel's OOM kill.
+				// Without a memory limit below the container's or the machine's
+				// memory, a negative percentage turns the collector off and one
+				// above the ceiling lets the heap outgrow the machine, so either
+				// leaves nothing bounding the heap short of the kernel's OOM kill.
 				old, err := runtimetune.SetGCPercent(*input.GOGC)
-				if err != nil {
-					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit")
+				switch {
+				case errors.Is(err, runtimetune.ErrGCPercentNeedsLimit):
+					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, fmt.Sprintf("gogc above %d needs a memory limit below the container's or the machine's memory", core.MaxGCPercent))
+					return
+				case err != nil:
+					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit below the container's or the machine's memory")
 					return
 				}
 				gogc, memLimit := runtimetune.GCSettings()

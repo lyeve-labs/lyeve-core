@@ -466,6 +466,50 @@ func TestSetGCPercent(t *testing.T) {
 	})
 }
 
+// A byte limit above the machine's memory is capped at it, and a limit at
+// or above that memory bounds nothing, so it does not let the collector go
+// off or past the ceiling. Before the cap, a limit of 1<<62 let GOGC -1
+// through with nothing bounding the heap.
+func TestSetGCPercent_ALimitAtTheMachinesMemoryIsNoLimit(t *testing.T) {
+	t.Run("a byte limit above the machine is capped, and the collector stays on", func(t *testing.T) {
+		clean(t)
+		tuner := newTuner(machine("max 100000", "max"))
+		_, err := tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryBytes, Bytes: 1 << 62})
+		require.NoError(t, err)
+		assert.Equal(t, 8*gib, debug.SetMemoryLimit(-1), "capped at the machine's memory")
+
+		_, err = tuner.SetGCPercent(-1)
+		require.ErrorIs(t, err, runtimetune.ErrCollectorOffNeedsLimit)
+		_, err = tuner.SetGCPercent(core.MaxGCPercent + 1)
+		require.ErrorIs(t, err, runtimetune.ErrGCPercentNeedsLimit)
+		gogc, _ := runtimetune.GCSettings()
+		assert.Equal(t, int64(100), gogc)
+	})
+	t.Run("a percentage past the ceiling is refused without a limit", func(t *testing.T) {
+		clean(t)
+		tuner := newTuner(machine("max 100000", "max"))
+		_, err := tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryNone})
+		require.NoError(t, err)
+
+		_, err = tuner.SetGCPercent(2_000_000_000)
+		require.ErrorIs(t, err, runtimetune.ErrGCPercentNeedsLimit)
+		_, err = tuner.SetGCPercent(core.MaxGCPercent)
+		require.NoError(t, err)
+	})
+	t.Run("under a limit below the machine the ceiling does not apply", func(t *testing.T) {
+		clean(t)
+		tuner := newTuner(machine("max 100000", "1073741824"))
+		_, err := tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryAutomatic})
+		require.NoError(t, err)
+
+		_, err = tuner.SetGCPercent(core.MaxGCPercent + 1)
+		require.NoError(t, err)
+		_, err = tuner.SetMemoryLimit(core.MemoryLimit{Mode: core.MemoryBytes, Bytes: 4 * gib})
+		require.ErrorIs(t, err, runtimetune.ErrLimitNeededByGCPercent, "4 GiB is capped at the container's 1 GiB, which bounds nothing")
+		assert.Equal(t, share(gib, 0.85), debug.SetMemoryLimit(-1))
+	})
+}
+
 // fakeReplicas is a relay with a roster or without one.
 type fakeReplicas struct {
 	n        int

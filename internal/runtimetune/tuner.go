@@ -233,16 +233,20 @@ func (t *Tuner) SetMemoryLimit(m core.MemoryLimit) (core.RuntimeSettingsView, er
 		return core.RuntimeSettingsView{}, &core.PinnedError{Variable: variable}
 	}
 	t.mu.Lock()
-	target, base, err := t.memoryTarget(m)
+	physical, physicalBase := t.memoryLimit()
+	target, base, err := memoryTarget(m, physical, physicalBase)
 	if err != nil {
 		t.mu.Unlock()
 		return core.RuntimeSettingsView{}, err
 	}
 	gcMu.Lock()
-	if gogc, _ := GCSettings(); target == math.MaxInt64 && gogc < 0 {
+	if gogc, _ := GCSettings(); noEffectiveLimit(target, physical) && (gogc < 0 || gogc > core.MaxGCPercent) {
 		gcMu.Unlock()
 		t.mu.Unlock()
-		return core.RuntimeSettingsView{}, ErrLimitNeededByCollector
+		if gogc < 0 {
+			return core.RuntimeSettingsView{}, ErrLimitNeededByCollector
+		}
+		return core.RuntimeSettingsView{}, ErrLimitNeededByGCPercent
 	}
 	debug.SetMemoryLimit(target)
 	gcMu.Unlock()
@@ -255,11 +259,13 @@ func (t *Tuner) SetMemoryLimit(m core.MemoryLimit) (core.RuntimeSettingsView, er
 }
 
 // memoryTarget returns the soft limit m sets, with math.MaxInt64 for none,
-// and where the limit it is a share of came from.
-func (t *Tuner) memoryTarget(m core.MemoryLimit) (int64, string, error) {
+// and where the limit it is a share of came from. limit is the container's
+// or the machine's memory, named by base, or 0 when neither could be read.
+// A byte count above limit is capped at it, since the kernel's OOM kill
+// comes first.
+func memoryTarget(m core.MemoryLimit, limit int64, base string) (int64, string, error) {
 	switch m.Mode {
 	case core.MemoryAutomatic:
-		limit, base := t.memoryLimit()
 		if limit == 0 {
 			// No limit to take a share of, as at a start that found none.
 			return math.MaxInt64, base, nil
@@ -269,7 +275,6 @@ func (t *Tuner) memoryTarget(m core.MemoryLimit) (int64, string, error) {
 		if m.Ratio < core.MinMemoryRatio || m.Ratio > core.MaxMemoryRatio {
 			return 0, "", fmt.Errorf("the memory share must be between %.2f and %.2f", core.MinMemoryRatio, core.MaxMemoryRatio)
 		}
-		limit, base := t.memoryLimit()
 		if limit == 0 {
 			return 0, "", errors.New("no container or machine memory limit could be read, so a share of it cannot be set")
 		}
@@ -277,6 +282,9 @@ func (t *Tuner) memoryTarget(m core.MemoryLimit) (int64, string, error) {
 	case core.MemoryBytes:
 		if m.Bytes < core.MinMemoryBytes {
 			return 0, "", fmt.Errorf("the memory limit must be at least %d bytes", core.MinMemoryBytes)
+		}
+		if limit > 0 && m.Bytes > limit {
+			return limit, core.SourceSet, nil
 		}
 		return m.Bytes, core.SourceSet, nil
 	case core.MemoryNone:
@@ -293,7 +301,8 @@ func (t *Tuner) SetGCPercent(percent int) (core.RuntimeSettingsView, error) {
 		return core.RuntimeSettingsView{}, &core.PinnedError{Variable: "GOGC"}
 	}
 	t.mu.Lock()
-	if _, err := SetGCPercent(percent); err != nil {
+	physical, _ := t.memoryLimit()
+	if _, err := setGCPercent(percent, physical); err != nil {
 		t.mu.Unlock()
 		return core.RuntimeSettingsView{}, err
 	}

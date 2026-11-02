@@ -36,11 +36,15 @@ type RuntimeTuning interface {
 	// CPUs the process may use. 0 returns it to automatic, where it follows
 	// the CPU limit while the process runs.
 	SetCPULimit(threads int) (RuntimeSettingsView, error)
-	// SetMemoryLimit sets Go's soft memory limit by m's mode. Setting none
-	// is refused while the garbage collector is off.
+	// SetMemoryLimit sets Go's soft memory limit by m's mode. A byte count
+	// above the container's or the machine's memory is capped at it. A limit
+	// at or above that memory counts as none, and none is refused while the
+	// garbage collector is off or above MaxGCPercent.
 	SetMemoryLimit(m MemoryLimit) (RuntimeSettingsView, error)
 	// SetGCPercent sets the garbage collector's target. A negative percent
-	// turns the collector off and is refused without a memory limit in force.
+	// turns the collector off, and a percent above MaxGCPercent lets the heap
+	// grow past what the machine holds. Both are refused unless a memory
+	// limit below the container's or the machine's memory is in force.
 	SetGCPercent(percent int) (RuntimeSettingsView, error)
 	// SetDatabaseMaxConns sizes the primary pool's open and idle connections,
 	// from 1 to MaxDatabaseConns. 0 returns it to the size it started with.
@@ -58,6 +62,12 @@ type RuntimeTuningProvider interface {
 
 // MaxDatabaseConns bounds SetDatabaseMaxConns.
 const MaxDatabaseConns = 10000
+
+// MaxGCPercent bounds SetGCPercent while no memory limit below the
+// container's or the machine's memory is in force. Above it the heap may grow
+// to eleven times the live heap between collections, with nothing short of
+// the kernel's OOM kill to stop it.
+const MaxGCPercent = 1000
 
 // The sources a Setting or a Fact names.
 const (
@@ -100,7 +110,8 @@ const (
 	// MemoryRatio is a share of the same limit, from MinMemoryRatio to
 	// MaxMemoryRatio, and follows it too.
 	MemoryRatio = "ratio"
-	// MemoryBytes is a fixed byte count, at least MinMemoryBytes.
+	// MemoryBytes is a fixed byte count, at least MinMemoryBytes and at most
+	// the container's or the machine's memory.
 	MemoryBytes = "bytes"
 	// MemoryNone sets no soft limit.
 	MemoryNone = "none"
