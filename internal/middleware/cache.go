@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
@@ -153,7 +154,7 @@ func (p CachePolicy) buildCacheControl() string {
 // that depend on these interfaces still work.
 type etagWriter struct {
 	http.ResponseWriter
-	buf        bytes.Buffer
+	buf        *bytes.Buffer
 	statusCode int
 	written    bool
 }
@@ -250,7 +251,9 @@ const privateCacheControl = "private, no-store"
 func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ew := &etagWriter{ResponseWriter: w}
+			buf := jsonpool.GetBuffer()
+			defer jsonpool.Buffer(buf)
+			ew := &etagWriter{ResponseWriter: w, buf: buf}
 
 			next.ServeHTTP(ew, r)
 

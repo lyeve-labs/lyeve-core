@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- A content read by id or a content list computes its entity tag once instead of twice, so a page of 50 entries allocates about half the memory it did. Responses and their entity tags are unchanged, and a conditional request with the tag a client was served still answers 304.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security

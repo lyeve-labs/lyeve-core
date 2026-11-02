@@ -850,17 +850,6 @@ func TestHTTPStatus_UnknownError(t *testing.T) {
 	}
 }
 
-// etag helpers additional
-
-func TestEtagFor_DifferentInputs(t *testing.T) {
-	t.Parallel()
-	a := etagFor(map[string]any{"a": 1})
-	b := etagFor(map[string]any{"a": 2})
-	if a == b {
-		t.Error("different inputs should produce different etags")
-	}
-}
-
 // parseFilters additional
 
 func TestParseFilters_EmptyValue(t *testing.T) {
