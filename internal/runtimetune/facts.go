@@ -3,10 +3,12 @@ package runtimetune
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strconv"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/config"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -74,20 +76,18 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 	}
 	switch dialect {
 	case "postgres", "postgresql":
-		return postgresConnLimit(ctx, sqlDB),
+		return connLimit(ctx, sqlDB, dialect),
 			// Without the grant the view hides other accounts' backend type,
 			// so only the caller's own sessions would count.
 			intFact(ctx, sqlDB, `SELECT CASE WHEN pg_has_role('pg_read_all_stats', 'USAGE')
 				THEN (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend') ELSE -1 END`, reasonNoStatsGrant),
 			unknown(reasonCoresNotOverSQL)
 	case "mysql":
-		// One more session stays open to an account holding
-		// CONNECTION_ADMIN, which an ordinary pool cannot use.
-		return intFact(ctx, sqlDB, `SELECT @@max_connections`, ""),
+		return connLimit(ctx, sqlDB, dialect),
 			intFact(ctx, sqlDB, `SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'`, ""),
 			unknown(reasonCoresNotOverSQL)
 	case "mssql":
-		return mssqlConnLimit(ctx, sqlDB),
+		return connLimit(ctx, sqlDB, dialect),
 			// Without the permission the view lists only the caller's own
 			// session, which would read as one connection open.
 			intFact(ctx, sqlDB, `SELECT CASE WHEN HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
@@ -101,50 +101,15 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 	}
 }
 
-// postgresConnLimit is max_connections less the slots PostgreSQL keeps for
-// superusers and, from version 16, for roles granted pg_use_reserved_connections.
-func postgresConnLimit(ctx context.Context, sqlDB *sql.DB) core.Fact {
-	rows, err := sqlDB.QueryContext(ctx, `SELECT name, setting FROM pg_settings
-		WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')`)
-	if err != nil {
-		return unknown(reasonUnreadable)
-	}
-	defer rows.Close()
-	limit := -1
-	reserved := 0
-	for rows.Next() {
-		var name, setting string
-		if err := rows.Scan(&name, &setting); err != nil {
-			return unknown(reasonUnreadable)
-		}
-		n, err := strconv.Atoi(setting)
-		if err != nil {
-			return unknown(reasonUnreadable)
-		}
-		if name == "max_connections" {
-			limit = n
-		} else {
-			reserved += n
-		}
-	}
-	if rows.Err() != nil || limit-reserved <= 0 {
-		return unknown(reasonUnreadable)
-	}
-	return known(limit-reserved, core.SourceDatabase)
-}
-
-// mssqlConnLimit reads the user connections option. Its default, 0, lets SQL
-// Server open connections on demand up to its maximum, which is no fixed
-// limit to size a pool against.
-func mssqlConnLimit(ctx context.Context, sqlDB *sql.DB) core.Fact {
-	var n int
-	err := sqlDB.QueryRowContext(ctx,
-		`SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'user connections'`).Scan(&n)
+// connLimit reads the connections the server accepts from ordinary accounts,
+// by the read the engine's crowding check uses.
+func connLimit(ctx context.Context, sqlDB *sql.DB, dialect string) core.Fact {
+	n, err := db.ServerConnLimit(ctx, sqlDB, dialect)
 	switch {
-	case err != nil || n < 0:
-		return unknown(reasonUnreadable)
-	case n == 0:
+	case errors.Is(err, db.ErrNoFixedConnLimit):
 		return unknown(core.FactReasonNoFixedLimit)
+	case err != nil:
+		return unknown(reasonUnreadable)
 	default:
 		return known(n, core.SourceDatabase)
 	}

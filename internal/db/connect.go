@@ -177,31 +177,99 @@ func PoolCrowdingWarning(ctx context.Context, db *sql.DB, engine string, maxConn
 // poolCrowding reads the server's connection limit and reports whether a
 // pool of maxConns crowds it.
 func poolCrowding(ctx context.Context, db *sql.DB, engine string, maxConns int32) (serverMax int, crowded bool) {
-	q := serverMaxConnQuery(engine)
-	if q == "" || maxConns <= 0 {
+	if maxConns <= 0 {
 		return 0, false
 	}
-	if err := db.QueryRowContext(ctx, q).Scan(&serverMax); err != nil {
+	serverMax, err := ServerConnLimit(ctx, db, engine)
+	if err != nil {
 		return 0, false
 	}
 	return serverMax, poolCrowdsServer(maxConns, serverMax)
 }
 
-// serverMaxConnQuery returns the statement reading the server's connection
-// limit, or "" for an engine that exposes none.
+// ErrNoFixedConnLimit is the answer of a server that sets no fixed connection
+// limit and accepts connections on demand.
+var ErrNoFixedConnLimit = errors.New("the database sets no fixed connection limit")
+
+// errNoConnLimitRead is the answer for an engine with no limit to read.
+var errNoConnLimitRead = errors.New("the database has no connection limit to read")
+
+// ServerConnLimit returns the number of connections the server accepts from
+// ordinary accounts, or ErrNoFixedConnLimit when it sets none.
 //
-// Each returns a single integer-valued row: PostgreSQL 16 reports 100, MySQL
-// 8.0 reports 151, SQL Server reports 32767 for its dynamic default.
-func serverMaxConnQuery(engine string) string {
+// PostgreSQL keeps some of max_connections for superusers and, from version
+// 16, for roles granted pg_use_reserved_connections, so those are left out.
+// SQL Server's @@MAX_CONNECTIONS is the most it could ever accept, 32767,
+// whatever the user connections option says, so the option is read instead.
+func ServerConnLimit(ctx context.Context, db *sql.DB, engine string) (int, error) {
 	switch engine {
 	case "postgres", "postgresql":
-		return "SELECT setting FROM pg_settings WHERE name = 'max_connections'"
+		return postgresConnLimit(ctx, db)
 	case "mysql":
-		return "SELECT @@max_connections"
+		// One more session stays open to an account holding
+		// CONNECTION_ADMIN, which an ordinary pool cannot use.
+		var n int
+		if err := db.QueryRowContext(ctx, "SELECT @@max_connections").Scan(&n); err != nil {
+			return 0, fmt.Errorf("read max_connections: %w", err)
+		}
+		return n, nil
 	case "mssql":
-		return "SELECT @@MAX_CONNECTIONS"
+		return mssqlConnLimit(ctx, db)
 	default:
-		return ""
+		return 0, errNoConnLimitRead
+	}
+}
+
+// postgresConnLimit is max_connections less the reserved slots.
+func postgresConnLimit(ctx context.Context, db *sql.DB) (int, error) {
+	rows, err := db.QueryContext(ctx, `SELECT name, setting FROM pg_settings
+		WHERE name IN ('max_connections', 'superuser_reserved_connections', 'reserved_connections')`)
+	if err != nil {
+		return 0, fmt.Errorf("read connection settings: %w", err)
+	}
+	defer rows.Close()
+	limit := -1
+	reserved := 0
+	for rows.Next() {
+		var name, setting string
+		if err := rows.Scan(&name, &setting); err != nil {
+			return 0, fmt.Errorf("scan connection setting: %w", err)
+		}
+		var n int
+		if _, err := fmt.Sscan(setting, &n); err != nil {
+			return 0, fmt.Errorf("parse %s: %w", name, err)
+		}
+		if name == "max_connections" {
+			limit = n
+		} else {
+			reserved += n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("read connection settings: %w", err)
+	}
+	if limit-reserved <= 0 {
+		return 0, fmt.Errorf("max_connections %d leaves no slot past %d reserved", limit, reserved)
+	}
+	return limit - reserved, nil
+}
+
+// mssqlConnLimit reads the user connections option. Its default, 0, lets SQL
+// Server open connections on demand up to its maximum, which is no fixed
+// limit to size a pool against.
+func mssqlConnLimit(ctx context.Context, db *sql.DB) (int, error) {
+	var n int
+	if err := db.QueryRowContext(ctx,
+		`SELECT CAST(value_in_use AS INT) FROM sys.configurations WHERE name = 'user connections'`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("read user connections: %w", err)
+	}
+	switch {
+	case n < 0:
+		return 0, fmt.Errorf("user connections reads %d", n)
+	case n == 0:
+		return 0, ErrNoFixedConnLimit
+	default:
+		return n, nil
 	}
 }
 

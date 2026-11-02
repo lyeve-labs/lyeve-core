@@ -145,8 +145,7 @@ func TestSetDatabaseMaxConns_WarnsWhenThePoolCrowdsTheServer(t *testing.T) {
 		view, err = tuner.SetDatabaseMaxConns(core.MaxDatabaseConns)
 		require.NoError(t, err)
 		if host.Dialect() == "mssql" {
-			// SQL Server reports 32767 for its dynamic limit, a third of which
-			// is above the bound.
+			// SQL Server's default sets no fixed limit to crowd.
 			assert.Empty(t, view.Warning)
 		} else {
 			assert.Contains(t, view.Warning, "more than a third")
@@ -317,4 +316,30 @@ func TestRuntimeFacts_BoundedWhenTheRosterHangs(t *testing.T) {
 
 	f := runtimeFacts(t, tuner, 10*time.Second)
 	assert.False(t, f.Replicas.Known)
+}
+
+// The crowding check reads the limit the facts report, which on PostgreSQL
+// leaves out the reserved slots. A pool between a third of that limit and a
+// third of max_connections crowds the server.
+func TestSetDatabaseMaxConns_CrowdingLeavesOutReservedSlots(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		if host.Dialect() != "postgres" {
+			t.Skip("only PostgreSQL keeps slots an ordinary account cannot use")
+		}
+		clean(t)
+		tuner, sqlDB := poolTuner(t, host)
+		var maxConns, reserved int
+		require.NoError(t, sqlDB.QueryRow(`SELECT
+			(SELECT setting::int FROM pg_settings WHERE name = 'max_connections'),
+			(SELECT COALESCE(sum(setting::int), 0) FROM pg_settings
+				WHERE name IN ('superuser_reserved_connections', 'reserved_connections'))`).Scan(&maxConns, &reserved))
+		size := int(float64(maxConns-reserved)*0.34) + 1
+		if float64(size) > float64(maxConns)*0.34 {
+			t.Skipf("%d reserved of %d leaves no pool size between the two thirds", reserved, maxConns)
+		}
+
+		view, err := tuner.SetDatabaseMaxConns(size)
+		require.NoError(t, err)
+		assert.Contains(t, view.Warning, fmt.Sprintf("of the %d the database accepts", maxConns-reserved))
+	})
 }
