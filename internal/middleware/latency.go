@@ -1,4 +1,4 @@
-// Package middleware LatencyTracker records request durations per endpoint (method+path) using
+// Package middleware LatencyTracker records request durations per endpoint (method and route pattern) using
 // a bounded in-memory reservoir for p50/p95/p99 percentile calculation.
 // Cheap: single sync.Map lookup and append on the hot path, no extra
 // allocations beyond the duration value.
@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // EndpointLatency holds per-endpoint latency statistics with a ring-buffer
@@ -160,9 +162,21 @@ func (t *LatencyTracker) Middleware() func(http.Handler) http.Handler {
 			start := time.Now()
 			next.ServeHTTP(w, r)
 			dur := time.Since(start).Microseconds()
-			t.record(r.Method, r.URL.Path, uint64(dur))
+			t.record(StandardMethod(r.Method), routePattern(r), uint64(dur))
 		})
 	}
+}
+
+// routePattern names the route that served r, or "unmatched". The tracker
+// keeps what it is keyed by, so a key taken from the request path would let
+// random paths churn it and keep each request line alive.
+func routePattern(r *http.Request) string {
+	if rctx := chi.RouteContext(r.Context()); rctx != nil {
+		if p := rctx.RoutePattern(); p != "" {
+			return p
+		}
+	}
+	return "unmatched"
 }
 
 // record stores a latency for the given method and path.

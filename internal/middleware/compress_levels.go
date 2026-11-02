@@ -144,10 +144,14 @@ func CompressWithLevelFunc(lf LevelFunc) func(http.Handler) http.Handler {
 				case "gzip":
 					gw := cw.writer.(*gzip.Writer)
 					_ = gw.Close() // err suppressed: best-effort writer cleanup
+					// A pooled writer still pointing at this response would keep it
+					// and its request reachable until the next Get.
+					gw.Reset(io.Discard)
 					gzipWriterPoolForLevel(cw.gzLevel).Put(gw)
 				case "br":
 					bw := cw.writer.(*brotli.Writer)
 					_ = bw.Close() // err suppressed: best-effort writer cleanup
+					bw.Reset(io.Discard)
 					brotliWriterPoolForLevel(cw.brLevel).Put(bw)
 				}
 			}

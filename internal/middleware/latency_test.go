@@ -7,14 +7,55 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	mw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// routed mounts the tracker the way the routers do, on a chi mux, with h on
+// every path these tests request. The tracker keys by the matched pattern, so
+// each path is its own route here.
+func routed(tracker *mw.LatencyTracker, h http.Handler) http.Handler {
+	r := chi.NewRouter()
+	r.Use(tracker.Middleware())
+	for _, p := range []string{
+		"/a", "/b", "/c", "/d", "/e", "/test", "/perf",
+		"/api/v1/content/posts", "/api/v1/content/users", "/api/v1/schemas",
+	} {
+		r.Handle(p, h)
+	}
+	return r
+}
+
+// A client chooses the path and the method, so the tracker keys by the route
+// that matched and a standard method name, and keeps nothing it was sent.
+func TestLatencyTracker_KeysByRoutePattern(t *testing.T) {
+	tracker := mw.NewLatencyTracker(10, 100)
+	r := chi.NewRouter()
+	r.Use(tracker.Middleware())
+	r.Get("/items/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	for _, target := range []string{"/items/1", "/items/2", "/nope/1", "/nope/2"} {
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, target, nil))
+	}
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("BREW", "/nope/3", nil))
+
+	got := map[string]uint64{}
+	for _, s := range tracker.All() {
+		got[s.Method+" "+s.Path] = s.Count
+	}
+	assert.Equal(t, map[string]uint64{
+		"GET /items/{id}": 2,
+		"GET unmatched":   2,
+		"OTHER unmatched": 1,
+	}, got)
+}
+
 func TestLatencyTracker_RecordAndRetrieve(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
-	handler := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(1 * time.Millisecond)
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -41,7 +82,7 @@ func TestLatencyTracker_MultipleEndpoints(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
 
 	makeHandler := func() http.Handler {
-		return tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 	}
@@ -69,7 +110,7 @@ func TestLatencyTracker_Eviction(t *testing.T) {
 	tracker := mw.NewLatencyTracker(2, 100)
 
 	makeHandler := func() http.Handler {
-		return tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 	}
@@ -99,7 +140,7 @@ func TestLatencyTracker_DifferentMethods(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
 
 	makeHandler := func() http.Handler {
-		return tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}))
 	}
@@ -125,7 +166,7 @@ func TestLatencyTracker_DifferentMethods(t *testing.T) {
 func TestLatencyTracker_Stats(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
 
-	h := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -150,7 +191,7 @@ func TestLatencyTracker_PercentileAccuracy(t *testing.T) {
 		5 * time.Millisecond,
 		10 * time.Millisecond,
 	} {
-		h := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(dur)
 			w.WriteHeader(http.StatusOK)
 		}))
@@ -181,7 +222,7 @@ func TestLatencyTracker_ZeroConfig(t *testing.T) {
 func TestLatencyTracker_ConcurrentSafety(t *testing.T) {
 	tracker := mw.NewLatencyTracker(50, 100)
 
-	h := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -212,7 +253,7 @@ func TestLatencyTracker_ConcurrentSafety(t *testing.T) {
 func TestLatencyTracker_JSONSerialization(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
 
-	h := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -230,7 +271,7 @@ func TestLatencyTracker_JSONSerialization(t *testing.T) {
 func TestLatencyTracker_SlowestLimit(t *testing.T) {
 	tracker := mw.NewLatencyTracker(10, 100)
 
-	h := tracker.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := routed(tracker, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

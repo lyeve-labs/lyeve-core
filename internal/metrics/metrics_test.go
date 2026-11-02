@@ -274,3 +274,32 @@ func TestRaceConcurrentRecordRequest(t *testing.T) {
 
 	wg.Wait()
 }
+
+// A client picks the method, and every distinct label value is a series kept
+// until restart, so anything outside the standard methods shares one label.
+func TestRecordRequest_NonstandardMethodCountsAsOther(t *testing.T) {
+	ResetForTesting()
+	Init()
+
+	for _, m := range []string{"BREW", "PROPFIND", "get", http.MethodPatch} {
+		RecordRequest(httptest.NewRequest(m, "/api/v1/health", nil), 200, 0.001)
+	}
+
+	rr := httptest.NewRecorder()
+	Handler().ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rr.Body.String()
+	for _, want := range []string{
+		`lyeve_requests_total{code="2xx",method="OTHER",plugin="core",tenant="-"} 3`,
+		`lyeve_requests_total{code="2xx",method="PATCH",plugin="core",tenant="-"} 1`,
+		`lyeve_request_duration_seconds_count{method="OTHER",plugin="core",tenant="-"} 3`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %s", want)
+		}
+	}
+	for _, unwanted := range []string{`method="BREW"`, `method="PROPFIND"`, `method="get"`} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("found %s", unwanted)
+		}
+	}
+}

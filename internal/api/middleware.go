@@ -17,6 +17,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/internal/logstream"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -63,6 +64,11 @@ func accessLogExempt(path string) bool {
 	return accessLogExemptPaths[path]
 }
 
+// maxLoggedPathBytes caps the path on an access log line. Nothing caps the
+// request URI before this middleware runs, and every ring that keeps the line
+// keeps the path with it.
+const maxLoggedPathBytes = 256
+
 func structuredLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if accessLogExempt(r.URL.Path) {
@@ -105,7 +111,7 @@ func structuredLogger(next http.Handler) http.Handler {
 
 		slog.InfoContext(logCtx, "request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", logstream.Clip(r.URL.Path, maxLoggedPathBytes),
 			"status", ww.Status(),
 			"bytes", ww.BytesWritten(),
 			"duration_ms", dur.Milliseconds(),
