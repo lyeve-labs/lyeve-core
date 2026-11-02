@@ -25,9 +25,9 @@ var valueTypesTable = map[string]string{
 		tenant_id VARCHAR(64) NOT NULL DEFAULT '',
 		title TEXT, price NUMERIC, active BOOLEAN, archived BOOLEAN, missing BOOLEAN,
 		born DATE, seen_at TIMESTAMPTZ, naive_at TIMESTAMPTZ, never_at TIMESTAMPTZ, meta JSONB, ref UUID,
-		int_max BIGINT, int_min BIGINT, int_odd BIGINT,
+		int_max BIGINT, int_min BIGINT, int_odd BIGINT, int_none BIGINT,
 		dec_price NUMERIC(10,2), dec_half NUMERIC(10,2), dec_neg_half NUMERIC(10,2), dec_zero NUMERIC(10,2), dec_top NUMERIC(10,2),
-		dec_wide NUMERIC(38,10), dec_wide_neg NUMERIC(38,10))`,
+		dec_wide NUMERIC(38,10), dec_wide_neg NUMERIC(38,10), dec_none NUMERIC(10,2))`,
 	"mysql": "CREATE TABLE `_value_types` (" +
 		"id CHAR(36) PRIMARY KEY DEFAULT (UUID()), " +
 		"created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), " +
@@ -35,9 +35,9 @@ var valueTypesTable = map[string]string{
 		"tenant_id VARCHAR(64) NOT NULL DEFAULT '', " +
 		"title LONGTEXT, price DECIMAL(38,10), active TINYINT(1), archived TINYINT(1), missing TINYINT(1), " +
 		"born DATE, seen_at DATETIME(6), naive_at DATETIME(6), never_at DATETIME(6), meta JSON, ref CHAR(36), " +
-		"int_max BIGINT, int_min BIGINT, int_odd BIGINT, " +
+		"int_max BIGINT, int_min BIGINT, int_odd BIGINT, int_none BIGINT, " +
 		"dec_price DECIMAL(10,2), dec_half DECIMAL(10,2), dec_neg_half DECIMAL(10,2), dec_zero DECIMAL(10,2), dec_top DECIMAL(10,2), " +
-		"dec_wide DECIMAL(38,10), dec_wide_neg DECIMAL(38,10))",
+		"dec_wide DECIMAL(38,10), dec_wide_neg DECIMAL(38,10), dec_none DECIMAL(10,2))",
 	"mssql": `CREATE TABLE [_value_types] (
 		id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
 		created_at DATETIME2(7) NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -45,9 +45,9 @@ var valueTypesTable = map[string]string{
 		tenant_id NVARCHAR(64) NOT NULL DEFAULT '',
 		title NVARCHAR(MAX), price NUMERIC(38,10), active BIT, archived BIT, missing BIT,
 		born DATE, seen_at DATETIME2(7), naive_at DATETIME2(7), never_at DATETIME2(7), meta NVARCHAR(MAX), ref UNIQUEIDENTIFIER,
-		int_max BIGINT, int_min BIGINT, int_odd BIGINT,
+		int_max BIGINT, int_min BIGINT, int_odd BIGINT, int_none BIGINT,
 		dec_price NUMERIC(10,2), dec_half NUMERIC(10,2), dec_neg_half NUMERIC(10,2), dec_zero NUMERIC(10,2), dec_top NUMERIC(10,2),
-		dec_wide NUMERIC(38,10), dec_wide_neg NUMERIC(38,10))`,
+		dec_wide NUMERIC(38,10), dec_wide_neg NUMERIC(38,10), dec_none NUMERIC(10,2))`,
 }
 
 // The content API answers with the same JSON whichever database holds the
@@ -62,9 +62,9 @@ func TestContentStore_ReadsTheSameJSONOnEveryDialect(t *testing.T) {
 		t.Skip("skipping integration test in short mode")
 	}
 	const want = `{"active":true,"archived":false,"born":"2026-10-01",` +
-		`"dec_half":"0.50","dec_neg_half":"-0.50","dec_price":"19.90","dec_top":"99999999.99",` +
+		`"dec_half":"0.50","dec_neg_half":"-0.50","dec_none":null,"dec_price":"19.90","dec_top":"99999999.99",` +
 		`"dec_wide":"9999999999999999999999999999.9999999999","dec_wide_neg":"-9999999999999999999999999999.9999999999","dec_zero":"0.00",` +
-		`"int_max":9223372036854775807,"int_min":-9223372036854775808,"int_odd":9007199254740993,` +
+		`"int_max":9223372036854775807,"int_min":-9223372036854775808,"int_none":null,"int_odd":9007199254740993,` +
 		`"meta":{"n":1,"tags":["a"]},` +
 		`"missing":null,"naive_at":"2026-10-01T09:30:00+00:00","never_at":null,"price":19.9,"ref":"6f1c2b9e-4d3a-4c55-9e1f-2a7b8c9d0e1f",` +
 		`"seen_at":"2026-10-01T09:30:00.25+00:00","title":"Widget"}`
@@ -114,6 +114,9 @@ func TestContentStore_ReadsTheSameJSONOnEveryDialect(t *testing.T) {
 					{Name: "dec_top", FieldType: "decimal", Precision: &ten, Scale: &two},
 					{Name: "dec_wide", FieldType: "decimal", Precision: &widest, Scale: &ten},
 					{Name: "dec_wide_neg", FieldType: "decimal", Precision: &widest, Scale: &ten},
+					// Never written, so each dialect has to read its NULL as null.
+					{Name: "int_none", FieldType: "integer"},
+					{Name: "dec_none", FieldType: "decimal", Precision: &ten, Scale: &two},
 				},
 			}
 			if err := reg.Upsert(ctx, sc); err != nil {
