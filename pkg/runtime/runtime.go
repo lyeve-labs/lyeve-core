@@ -35,6 +35,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	"github.com/lyeve-labs/lyeve-core/internal/panicreport"
 	"github.com/lyeve-labs/lyeve-core/internal/provider"
+	"github.com/lyeve-labs/lyeve-core/internal/runtimetune"
 	"github.com/lyeve-labs/lyeve-core/internal/storage"
 	"github.com/lyeve-labs/lyeve-core/internal/tracing"
 
@@ -176,10 +177,12 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// GOMAXPROCS: Go's default follows the cgroup's CPU limit while the
 	// process runs, and a call here would stop that, so the engine makes one
-	// only for an explicit CPU_QUOTA.
-	if n := schedulerProcs(os.Getenv("GOMAXPROCS"), cfg.CPUQuota); n > 0 {
+	// only for an explicit CPU_QUOTA, or for a limit of one core or less,
+	// where Go's default of two serves no better. The runtime follower keeps
+	// the second rule applied as the limit changes.
+	if n := schedulerProcs(os.Getenv("GOMAXPROCS"), cfg.CPUQuota, config.CgroupCPULimit(os.DirFS("/")), goruntime.NumCPU()); n > 0 {
 		goruntime.GOMAXPROCS(n)
-		slog.Info("sized the scheduler to CPU_QUOTA", "gomaxprocs", n)
+		slog.Info("sized the scheduler", "gomaxprocs", n, "cpu_quota", cfg.CPUQuota)
 	}
 
 	// Goroutine Concurrency Engine
@@ -509,6 +512,17 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		setter.WithClusterBus(replicas.Bus())
 	}
 	replicas.wireQueryCache(hostBase)
+
+	// Runtime settings: the role a plugin tunes the scheduler, the soft
+	// memory limit, the collector and the pool through, before any plugin
+	// starts, and the follower that keeps the first two on the cgroup's
+	// limits while the process runs.
+	tuner := wireRuntimeTuning(hostBase, tracker, runtimetune.Options{
+		DB:       rawDB,
+		Dialect:  pool.Engine(),
+		Config:   cfg,
+		Replicas: replicas.bus,
+	})
 
 	// Capabilities and HasFeature answer from the license the manager loaded.
 	if setter, ok := hostBase.(interface{ WithLicensing(licensing.Manager) }); ok {
@@ -895,6 +909,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	if d, ok := refreshBackend.(interface{ IsDistributed() bool }); ok && !d.IsDistributed() {
 		refreshBackendDistributed = false
 	}
+	tuner.SetSharedCache(refreshBackend != nil && refreshBackendDistributed)
 	// Wrap the selected backend so Flush is a no-op for the refresh-token
 	// store: if the plugin only exposes CacheBackend(), this still stops an
 	// admin cache flush from wiping all refresh tokens.
@@ -1688,11 +1703,15 @@ func attachSessionPools(ctx context.Context, host core.Host, engine, dsn string)
 
 // schedulerProcs returns the thread count to pass to runtime.GOMAXPROCS, or 0
 // to leave the scheduler alone. GOMAXPROCS in the environment is read by the
-// runtime itself and wins. CPU_QUOTA comes next. Without either, Go's default
-// applies.
-func schedulerProcs(gomaxprocsEnv string, cpuQuota int) int {
-	if gomaxprocsEnv != "" || cpuQuota <= 0 {
+// runtime itself and wins. CPU_QUOTA comes next. Without either, a CPU limit
+// of one core or less on a machine with two or more CPUs gives one thread,
+// and anything else leaves Go's default.
+func schedulerProcs(gomaxprocsEnv string, cpuQuota int, cpuLimit float64, hostCPUs int) int {
+	if gomaxprocsEnv != "" {
 		return 0
 	}
-	return cpuQuota
+	if cpuQuota > 0 {
+		return cpuQuota
+	}
+	return runtimetune.EngineProcs(cpuLimit, hostCPUs)
 }
