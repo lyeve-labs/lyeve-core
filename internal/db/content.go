@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -585,10 +586,12 @@ func (s *ContentStore) listPlanFor(tenantID, schemaName string, sc *domain.Schem
 
 // typedFilters answers filters with each value parsed by the type of the
 // field it names, in a new map: an int64 for an integer field and the
-// canonical text for a decimal field. Bound as text, MySQL compares a BIGINT
-// or a DECIMAL column with a string as a double, so 9007199254740993 would
-// match 9007199254740992 too. A value its field cannot hold is
-// domain.ErrBadRequest. Every other value is kept as the caller sent it.
+// canonical text for a decimal or number field. Bound as the text the caller
+// sent, MySQL compares a BIGINT or a DECIMAL column with a string as a
+// double, so 9007199254740993 would match 9007199254740992 too, and "abc"
+// would match 0.
+// A value its field cannot hold is domain.ErrBadRequest. Every other value is
+// kept as the caller sent it.
 func typedFilters(sc *domain.Schema, filters map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(filters))
 	for col, val := range filters {
@@ -626,8 +629,84 @@ func filterValue(f domain.SchemaField, val any) (any, error) {
 			return nil, fmt.Errorf("%w: filter %q: %w", domain.ErrBadRequest, f.Name, err)
 		}
 		return text, nil
+	case "number":
+		n, err := numberFilter(val)
+		if err != nil {
+			return nil, fmt.Errorf("%w: filter %q: %w", domain.ErrBadRequest, f.Name, err)
+		}
+		return n, nil
 	}
 	return val, nil
+}
+
+// maxNumberFilter is 10^28. A number column holds less on MySQL and SQL
+// Server, DECIMAL(38,10) and NUMERIC(38,10), so no stored value equals a
+// filter past it, and casting one to the column's type overflows.
+const maxNumberFilter = 1e28
+
+// numberFilter answers the text a number filter is bound as, one text per
+// value: 10 and 10.0 are both 10. strconv.ParseFloat is the guard, and NaN,
+// an infinity and a magnitude of 10^28 or more are core.ErrNumericForm. A
+// plain decimal keeps every digit it was sent with, because a row written
+// from that text holds them all and a float64 would round them away. Only an
+// exponent is read through the float64.
+func numberFilter(val any) (string, error) {
+	var text string
+	switch v := val.(type) {
+	case string:
+		text = v
+	case json.Number:
+		text = string(v)
+	case float64:
+		text = strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		text = strconv.FormatFloat(float64(v), 'f', -1, 64)
+	default:
+		n, err := core.IntegerValue(val)
+		if err != nil {
+			return "", err
+		}
+		return strconv.FormatInt(n, 10), nil
+	}
+	f, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsNaN(f) || math.IsInf(f, 0) || math.Abs(f) >= maxNumberFilter {
+		return "", fmt.Errorf("%w: %q", core.ErrNumericForm, text)
+	}
+	if plain, ok := plainDecimal(text); ok {
+		return plain, nil
+	}
+	if f == 0 {
+		f = 0 // -0 is 0
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64), nil
+}
+
+// plainDecimal answers s in canonical form when it is a plain decimal, an
+// optional sign, digits and an optional fraction: no leading integer zeros,
+// no trailing fractional zeros, and no sign on zero.
+func plainDecimal(s string) (string, bool) {
+	neg := false
+	if s != "" && (s[0] == '-' || s[0] == '+') {
+		neg = s[0] == '-'
+		s = s[1:]
+	}
+	intPart, frac, _ := strings.Cut(s, ".")
+	if intPart+frac == "" || strings.Trim(intPart+frac, "0123456789") != "" {
+		return "", false
+	}
+	intPart = strings.TrimLeft(intPart, "0")
+	frac = strings.TrimRight(frac, "0")
+	if intPart == "" {
+		intPart = "0"
+	}
+	out := intPart
+	if frac != "" {
+		out += "." + frac
+	}
+	if neg && out != "0" {
+		out = "-" + out
+	}
+	return out, true
 }
 
 // filterField answers the field of sc whose column is col.
@@ -645,10 +724,31 @@ func filterField(sc *domain.Schema, col string) (domain.SchemaField, bool) {
 // comparison is exact on every dialect. typedFilters has already refused a
 // precision or scale out of bounds, so the numbers written into the cast are
 // the checked ones.
+//
+// A number is bound as the text numberFilter answers and, on MySQL and SQL
+// Server, cast to the column's DECIMAL(38,10) or NUMERIC(38,10). The
+// comparison is then decimal against decimal, and the parameter rounds to
+// ten places as a written value does. A parameter the server reads as a
+// float compares in float instead, so two stored decimals that round to one
+// double both match. The cast is not about the index: SQL Server seeks the
+// column with or without it. PostgreSQL types the parameter from the NUMERIC
+// column it is compared with.
 func filterParam(engine string, sc *domain.Schema, col string, n int) string {
 	ph := fmt.Sprintf("$%d", n)
 	f, ok := filterField(sc, col)
-	if !ok || f.FieldType != "decimal" {
+	if !ok {
+		return ph
+	}
+	if f.FieldType == "number" {
+		switch engine {
+		case "mysql":
+			return "CAST(" + ph + " AS DECIMAL(38,10))"
+		case "mssql":
+			return "CAST(" + ph + " AS NUMERIC(38,10))"
+		}
+		return ph
+	}
+	if f.FieldType != "decimal" {
 		return ph
 	}
 	p, scale := core.DecimalSpec(f)

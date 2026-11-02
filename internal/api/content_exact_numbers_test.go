@@ -237,3 +237,56 @@ func TestContentAPI_RestoreGivesEachNumberItsFieldType(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), `"amount":"19.90"`)
 	})
 }
+
+// A filter on a number field is read as a number before any query. Bound as
+// the text the caller sent, "abc" reached the database: PostgreSQL and SQL
+// Server answered with a driver error, and MySQL compared it as a double, so
+// it matched an entry holding 0. 10 and 10.0 are one value and one cached
+// page.
+func TestContentAPI_FiltersNumberFieldsByValue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"ledgers"}, func(t *testing.T, fx schemaContentFixture) {
+		store := fx.content.store
+		for _, rate := range []float64{0, 10, 2.5} {
+			_, err := store.Insert(fx.ctx, "ledgers", map[string]any{"rate": rate})
+			require.NoError(t, err)
+		}
+		list := func(query string) *httptest.ResponseRecorder {
+			return fx.send(t, fx.ctx, http.MethodGet, "/api/v1/content/ledgers?"+query,
+				map[string]string{"schema": "ledgers"}, nil, fx.content.List)
+		}
+		count := func(query string) int {
+			t.Helper()
+			rr := list(query)
+			require.Equal(t, http.StatusOK, rr.Code, "%s: %s", query, rr.Body.String())
+			var out []json.RawMessage
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out), rr.Body.String())
+			return len(out)
+		}
+
+		assert.Equal(t, 1, count("filters[rate]=10"))
+		hits := store.ListCacheHits.Load()
+		assert.Equal(t, 1, count("filters[rate]=10.0"))
+		assert.Equal(t, hits+1, store.ListCacheHits.Load(), "10 and 10.0 are one cached page")
+		assert.Equal(t, 1, count("filters[rate]=2.5"))
+
+		// A plain decimal is written as its text, so the row holds every digit
+		// and a filter by that text finds it. Read as a float64, it ends at
+		// 123456789.12345679 and matches nothing.
+		createdID(t, fx.create(t, "ledgers", map[string]any{"rate": "123456789.123456789"}))
+		assert.Equal(t, 1, count("filters[rate]=123456789.123456789"))
+
+		// Two stored values that round to one float64 stay two values.
+		for _, rate := range []string{"1234567890123456.0000000001", "1234567890123456.0000000002"} {
+			createdID(t, fx.create(t, "ledgers", map[string]any{"rate": rate}))
+		}
+		assert.Equal(t, 1, count("filters[rate]=1234567890123456.0000000001"))
+
+		for _, q := range []string{"filters[rate]=abc", "filters[rate]=", "filters[rate]=NaN", "filters[rate]=1e28"} {
+			rr := list(q)
+			assert.Equal(t, http.StatusBadRequest, rr.Code, "%s: %s", q, rr.Body.String())
+		}
+	})
+}
