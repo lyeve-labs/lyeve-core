@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Without a shared cache, the engine no longer keeps every used second-factor challenge and every failed sign-in window in memory for as long as it runs. Once one of these maps holds 4,096 entries, the next new entry clears those that have expired. Sign-in, second-factor checks and lockouts behave as before.
+
 ## [0.58.0] - 2026-11-04
 
 ### Security

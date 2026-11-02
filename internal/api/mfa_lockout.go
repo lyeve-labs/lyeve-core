@@ -30,6 +30,16 @@ const DefaultMFAChallengeMaxAttempts = 5
 // per-key lazy prune cannot reclaim them on its own.
 const maxTrackedChallenges = 4096
 
+// maxTrackedJTIs and maxTrackedMFAUsers are the sizes at which the used
+// challenge ids and the per-user failure windows are first swept. A used id
+// is read again only when someone replays it, and a window only when its
+// user tries again, so without a sweep both maps keep every entry they ever
+// held.
+const (
+	maxTrackedJTIs     = 4096
+	maxTrackedMFAUsers = 4096
+)
+
 // Types
 
 // InMemoryMFALockout provides per-user and per-challenge MFA attempt tracking.
@@ -54,6 +64,11 @@ type InMemoryMFALockout struct {
 	// verified. Entries are pruned after the challenge token TTL (5 min).
 	// This prevents replay of a valid challenge within its expiry window.
 	usedJTIs map[string]time.Time
+
+	// jtiSweepAt and userSweepAt are the sizes that trigger the next sweep of
+	// usedJTIs and entries (see nextSweep).
+	jtiSweepAt  int
+	userSweepAt int
 }
 
 // mfaLockoutUserState tracks failures and the last reset time for a single user.
@@ -87,6 +102,8 @@ func NewInMemoryMFALockout(maxAttempts int, window time.Duration) *InMemoryMFALo
 		entries:              make(map[uuid.UUID]*mfaLockoutUserState),
 		challengeEntries:     make(map[string]*challengeEntryState),
 		usedJTIs:             make(map[string]time.Time),
+		jtiSweepAt:           maxTrackedJTIs,
+		userSweepAt:          maxTrackedMFAUsers,
 	}
 }
 
@@ -121,6 +138,14 @@ func (l *InMemoryMFALockout) ReserveMFAAttempt(userID uuid.UUID) (Reservation, b
 
 	state, ok := l.entries[userID]
 	if !ok || time.Since(state.createdAt) > l.window {
+		if !ok && len(l.entries) >= l.userSweepAt {
+			for id, s := range l.entries {
+				if time.Since(s.createdAt) > l.window {
+					delete(l.entries, id)
+				}
+			}
+			l.userSweepAt = nextSweep(len(l.entries), maxTrackedMFAUsers)
+		}
 		state = &mfaLockoutUserState{
 			failures:  new(atomic.Int64),
 			createdAt: time.Now(),
@@ -228,8 +253,17 @@ const challengeTokenTTL = 5 * time.Minute
 func (l *InMemoryMFALockout) MarkJTIUsed(jti string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if seen, ok := l.usedJTIs[jti]; ok && time.Since(seen) <= challengeTokenTTL {
+	seen, ok := l.usedJTIs[jti]
+	if ok && time.Since(seen) <= challengeTokenTTL {
 		return false
+	}
+	if !ok && len(l.usedJTIs) >= l.jtiSweepAt {
+		for id, at := range l.usedJTIs {
+			if time.Since(at) > challengeTokenTTL {
+				delete(l.usedJTIs, id)
+			}
+		}
+		l.jtiSweepAt = nextSweep(len(l.usedJTIs), maxTrackedJTIs)
 	}
 	l.usedJTIs[jti] = time.Now()
 	return true
@@ -254,6 +288,14 @@ func (l *InMemoryMFALockout) IsJTIUsed(jti string) bool {
 }
 
 // Helpers
+
+// nextSweep returns the size at which a map holding live entries after a
+// sweep is swept again. While every entry is still in force, sweeping at a
+// fixed size would scan the whole map on each insert, so the trigger doubles
+// with what survived and the sweeps cost a constant per insert.
+func nextSweep(live, floor int) int {
+	return max(floor, 2*live)
+}
 
 // sha256Hex returns the lowercase hex-encoded SHA-256 digest of s.
 func sha256Hex(s string) string {
