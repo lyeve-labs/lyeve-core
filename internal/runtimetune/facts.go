@@ -17,6 +17,7 @@ const (
 	reasonNoDatabase      = "this engine runs without a database"
 	reasonUnreadable      = "the database did not answer the read"
 	reasonNoServerState   = "the database account lacks the VIEW SERVER STATE permission"
+	reasonNoStatsGrant    = "the database account is not a member of pg_read_all_stats"
 	reasonCoresNotOverSQL = "this database does not report its CPU count to a client"
 	reasonNoRoster        = "no transport that keeps a roster of the replicas is running"
 	reasonNotChosenYet    = "the engine has not chosen its cache backend yet"
@@ -64,7 +65,10 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 	switch dialect {
 	case "postgres", "postgresql":
 		return postgresConnLimit(ctx, sqlDB),
-			intFact(ctx, sqlDB, `SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'`, reasonUnreadable),
+			// Without the grant the view hides other accounts' backend type,
+			// so only the caller's own sessions would count.
+			intFact(ctx, sqlDB, `SELECT CASE WHEN pg_has_role('pg_read_all_stats', 'USAGE')
+				THEN (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend') ELSE -1 END`, reasonNoStatsGrant),
 			unknown(reasonCoresNotOverSQL)
 	case "mysql":
 		// One more session stays open to an account holding

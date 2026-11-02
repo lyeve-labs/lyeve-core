@@ -3,6 +3,8 @@ package runtimetune_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/internal/runtimetune"
+	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugintest"
 )
@@ -173,6 +176,75 @@ func TestRuntimeFacts_Database(t *testing.T) {
 			assert.Greater(t, f.DatabaseConnLimit.Value, 1)
 			assert.False(t, f.DatabaseCores.Known)
 			assert.NotEmpty(t, f.DatabaseCores.Reason)
+		}
+	})
+}
+
+// asAccount opens a pool on the database at dsn as a new account that holds
+// no server-wide grant, and drops the account when the test ends. admin runs
+// the statements that create and drop it.
+func asAccount(t *testing.T, admin *sql.DB, dsn, driver, account string, create, drop []string) *sql.DB {
+	t.Helper()
+	ctx := context.Background()
+	for _, stmt := range create {
+		_, err := admin.ExecContext(ctx, stmt)
+		require.NoError(t, err, stmt)
+	}
+	u, err := url.Parse(dsn)
+	require.NoError(t, err)
+	u.User = url.UserPassword(account, factsPassword)
+	sqlDB, err := sql.Open(driver, u.String())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_ = sqlDB.Close()
+		for _, stmt := range drop {
+			_, _ = admin.ExecContext(ctx, stmt) // best effort: the test database is dropped after
+		}
+	})
+	return sqlDB
+}
+
+// factsPassword is the password of the account asAccount creates.
+const factsPassword = "Facts-Reader-9x"
+
+// factsAccount names an account no other test on the shared server uses,
+// since accounts belong to the server rather than to one database.
+func factsAccount() string {
+	return fmt.Sprintf("runtime_facts_%d", time.Now().UnixNano())
+}
+
+// An account that cannot see other accounts' sessions would count only its
+// own, so the count reads as unknown with the grant it needs, never as a
+// small number that looks known.
+func TestRuntimeFacts_SessionsUnknownWithoutTheGrant(t *testing.T) {
+	t.Run("postgres", func(t *testing.T) {
+		pool, dsn := testdb.PostgresWithDSN(t)
+		account := factsAccount()
+		sqlDB := asAccount(t, pool.SQLDB(), dsn, "pgx", account,
+			[]string{"CREATE ROLE " + account + " LOGIN PASSWORD '" + factsPassword + "'"},
+			[]string{"DROP ROLE IF EXISTS " + account})
+		tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), DB: sqlDB, Dialect: "postgres", Resolver: config.NewResolver(nil)})
+
+		f := tuner.RuntimeFacts(context.Background())
+		assert.False(t, f.DatabaseConnsOpen.Known, "connections open read as %v", f.DatabaseConnsOpen.Value)
+		assert.Contains(t, f.DatabaseConnsOpen.Reason, "pg_read_all_stats")
+		assert.True(t, f.DatabaseConnLimit.Known, "connection limit: %s", f.DatabaseConnLimit.Reason)
+	})
+	t.Run("mssql", func(t *testing.T) {
+		pool, dsn := testdb.MSSQLWithDSN(t)
+		account := factsAccount()
+		sqlDB := asAccount(t, pool.SQLDB(), dsn, "sqlserver", account,
+			[]string{
+				"CREATE LOGIN " + account + " WITH PASSWORD = '" + factsPassword + "', CHECK_POLICY = OFF",
+				"CREATE USER " + account + " FOR LOGIN " + account,
+			},
+			[]string{"DROP USER IF EXISTS " + account, "DROP LOGIN " + account})
+		tuner := runtimetune.New(runtimetune.Options{Root: machine("max 100000", "max"), DB: sqlDB, Dialect: "mssql", Resolver: config.NewResolver(nil)})
+
+		f := tuner.RuntimeFacts(context.Background())
+		for name, fact := range map[string]core.Fact{"connections open": f.DatabaseConnsOpen, "cores": f.DatabaseCores} {
+			assert.False(t, fact.Known, "%s read as %v", name, fact.Value)
+			assert.Contains(t, fact.Reason, "VIEW SERVER STATE", name)
 		}
 	})
 }
