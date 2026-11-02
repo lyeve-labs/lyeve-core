@@ -317,6 +317,11 @@ type Config struct {
 	// the machine's memory applies when neither sets one.
 	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (default: the cgroup's limit, then the machine's memory)
 
+	// CPUQuota is the thread count the engine gives the scheduler when
+	// GOMAXPROCS is not set. 0 leaves Go's default, which follows the
+	// cgroup's CPU limit while the process runs.
+	CPUQuota int // CPU_QUOTA (default 0)
+
 	// DBConcurrency enables parallel warmup/stop for plugins.
 	DBWarmupParallelism   int // DB_WARMUP_PARALLELISM (default 4)
 	PluginStopParallelism int // PLUGIN_STOP_PARALLELISM (default 8)

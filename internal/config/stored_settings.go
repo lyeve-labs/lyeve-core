@@ -55,6 +55,7 @@ var bootFields = map[string]bool{
 	"BackpressureTenantQuotaPct":        true,
 	"BackpressurePoolPressureThreshold": true,
 	"MemoryLimitBytes":                  true,
+	"CPUQuota":                          true,
 }
 
 // ApplyStoredSettings reads the engine's settings again now that the stored
