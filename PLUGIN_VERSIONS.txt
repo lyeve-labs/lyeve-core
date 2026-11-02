@@ -17,7 +17,7 @@
 #
 # Generated 2026-11-05T17:25:54Z from origin default branches.
 
-lyeve-libs = 98f10d4fc4fd8115a6eb9eed0a22fdfa3aee5458
+lyeve-libs = 8615b36499c381dc918d93d28749359549fdf460
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = d72c27ece0d0db7c843037c98a8e0437aa0f6683
 lyeve-plugin-analytics = 67d8c9fd07a63d77adb641407665b310a672a541
@@ -60,9 +60,10 @@ lyeve-plugin-recommendations = 2de0f15a368b73a7e630ab59f80a4bd43b757ee4
 lyeve-plugin-request-capture = 77cbe6561a6066d277fe3e7402236f49d22a61f6
 lyeve-plugin-review = 5ecaa17582b0e3621ba97583b93458d3639a6a52
 lyeve-plugin-saml = 3153a83077d0f1c65431fc658f8f1246e65940fe
-lyeve-plugin-schema = d71d8ad78fc6a257db916d471e1c53833556f19d
+lyeve-plugin-schema = a54d25b30a988641eb6b357a52ce09ce84ac5e8d
 lyeve-plugin-scim = d08fa4015d2703e7d745bd4c2f563dfc483866f6
 lyeve-plugin-search = 83c85289fd744f9dd1400cf1358fb548b42f5f92
+lyeve-plugin-site-builder = 101f2374377e06eff660419991b4b88fa7ce3e02
 lyeve-plugin-storage = fa7a4e75c9ee451740f759123f37467480bc50aa
 lyeve-plugin-synthetic-monitoring = 231a83fd7f4a37e890f873a874754bd258c822e9
 lyeve-plugin-telemetry = 155ffe51f0762fa169cfc7c81bbb7d86e6ac2a51
