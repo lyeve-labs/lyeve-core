@@ -5,6 +5,7 @@ import (
 	"testing/fstest"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The engine sets its soft memory limit from the cgroup's. In a container the
@@ -112,4 +113,85 @@ func TestCgroupMemoryLimit(t *testing.T) {
 			assert.Equal(t, tt.want, cgroupMemoryLimit(tt.files))
 		})
 	}
+}
+
+// MEMORY_LIMIT_BYTES overrides the machine. Without it the cgroup's limit
+// applies, and without that the machine's own memory, so a VM with no
+// container limit still gets a soft limit.
+func TestMemoryLimit_Order(t *testing.T) {
+	t.Parallel()
+
+	const mib = 1 << 20
+	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+	limited := fstest.MapFS{
+		"proc/self/cgroup":         file("0::/\n"),
+		"sys/fs/cgroup/memory.max": file("536870912\n"),
+		"proc/meminfo":             file("MemTotal:        2097152 kB\n"),
+	}
+	unlimited := fstest.MapFS{
+		"proc/self/cgroup":         file("0::/\n"),
+		"sys/fs/cgroup/memory.max": file("max\n"),
+		"proc/meminfo":             file("MemTotal:        2097152 kB\n"),
+	}
+
+	tests := []struct {
+		name     string
+		override string
+		files    fstest.MapFS
+		want     int64
+	}{
+		{name: "the variable wins over the cgroup", override: "268435456", files: limited, want: 256 * mib},
+		{name: "the variable wins over the machine", override: "268435456", files: unlimited, want: 256 * mib},
+		{name: "the cgroup wins over the machine", files: limited, want: 512 * mib},
+		{name: "a machine with no cgroup limit uses its memory", files: unlimited, want: 2048 * mib},
+		{name: "zero is the same as unset", override: "0", files: limited, want: 512 * mib},
+		{name: "nothing readable reports nothing", files: fstest.MapFS{}, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := memoryLimit(tt.override, tt.files)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestMemoryLimit_RefusesABadOverride(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{"1g", "-1"} {
+		_, err := memoryLimit(v, fstest.MapFS{})
+		assert.Error(t, err, v)
+	}
+}
+
+// /proc/meminfo gives MemTotal in kibibytes.
+func TestMachineMemory(t *testing.T) {
+	t.Parallel()
+
+	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+	tests := []struct {
+		name    string
+		meminfo string
+		want    int64
+	}{
+		{
+			name:    "a real meminfo",
+			meminfo: "MemTotal:       65843264 kB\nMemFree:         1234567 kB\nMemAvailable:   40000000 kB\n",
+			want:    65843264 * 1024,
+		},
+		{name: "MemTotal after other lines", meminfo: "MemFree: 1 kB\nMemTotal: 1024 kB\n", want: 1 << 20},
+		{name: "no MemTotal line", meminfo: "MemFree: 1 kB\n", want: 0},
+		{name: "a unit other than kB", meminfo: "MemTotal: 1024 MB\n", want: 0},
+		{name: "a value that is not a number", meminfo: "MemTotal: lots kB\n", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, tt.want, machineMemory(fstest.MapFS{"proc/meminfo": file(tt.meminfo)}))
+		})
+	}
+	assert.Equal(t, int64(0), machineMemory(fstest.MapFS{}), "a missing meminfo")
 }
