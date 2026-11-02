@@ -15,7 +15,7 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-11-02T08:03:48Z from origin default branches.
+# Generated 2026-11-02T09:00:16Z from origin default branches.
 
 lyeve-libs = 5136604c3135adc3851f27221d46615bb43a815d
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
@@ -39,7 +39,7 @@ lyeve-plugin-events = f6c537e72181adb8270573b670dc44a5fbec486f
 lyeve-plugin-flow = 4da3d7f248aa588a8ce689182fd25d8d87bf2dca
 lyeve-plugin-goroutine-engine = 9c0e96ec9303beef3466f21ce56b998c9a5d5561
 lyeve-plugin-graphql = 1b2af70ac4b711c9ea7aa5f47aba4b25219b89de
-lyeve-plugin-grpc = e835213a0d62c9779115d1d9de431cfe193d6819
+lyeve-plugin-grpc = 668e3af271ecdb7a77fe0e6b0996c1e66c7bd9ee
 lyeve-plugin-idempotency = 7c33e9ff98ca5966825d586aface61fd3d4d5b16
 lyeve-plugin-localization = 36344dd731ae115dd4a9d7669271fc9ed9b47d3c
 lyeve-plugin-logging = 95ce4add6135f6f4bea7f16e2b49b21f8fa8ac91
