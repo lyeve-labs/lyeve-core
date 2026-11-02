@@ -54,11 +54,19 @@ func decodeContentBody(r io.Reader, sc *domain.Schema, v any) error {
 // undeclared keys too, which is what they held before. A number it cannot
 // convert to its field's type is left as it came, for the content rules to
 // refuse by the field's name. A number no float64 holds, such as 1e400, is
-// errNumberRange, which the float decode refused as invalid JSON.
+// errNumberRange, which the float decode refused as invalid JSON. A body
+// decoded as floats holds no json.Number, so a schema without an exact field
+// is not walked.
 func coerceNumbers(sc *domain.Schema, data map[string]any) error {
 	if !hasExactNumbers(sc) {
 		return nil
 	}
+	return coerceEveryNumber(sc, data)
+}
+
+// coerceEveryNumber is coerceNumbers for data that was not decoded here, such
+// as a revision a store kept, which may hold a json.Number on any schema.
+func coerceEveryNumber(sc *domain.Schema, data map[string]any) error {
 	for k, v := range data {
 		switch exactFieldType(sc, k) {
 		case "integer":

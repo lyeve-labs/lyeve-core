@@ -195,3 +195,45 @@ func TestContentAPI_ANumberPastFloatRangeIsInvalidJSON(t *testing.T) {
 		}
 	})
 }
+
+// A revision restore writes data a revision store decoded, not a request
+// body, so its numbers reach the handler as json.Number once the store keeps
+// them exact. The restore gives each the type a write gives it: a float64 for
+// a number field and inside a json field, an int64 for an integer field and
+// the canonical text for a decimal field. The before_update subscribers read
+// those types, and the row stores the exact values.
+func TestContentAPI_RestoreGivesEachNumberItsFieldType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"ledgers"}, func(t *testing.T, fx schemaContentFixture) {
+		created, err := fx.content.store.Insert(fx.ctx, "ledgers", map[string]any{"ref_no": int64(1), "amount": "1.00"})
+		require.NoError(t, err)
+		revs := &memRevisions{}
+		revs.rows = append(revs.rows, core.RecordRevision{
+			ID: uuid.New(), SchemaName: "ledgers", RecordID: created.ID,
+			Data: map[string]any{
+				"ref_no": json.Number("9007199254740993"),
+				"amount": json.Number("19.9"),
+				"rate":   json.Number("0.25"),
+				"meta":   map[string]any{"n": json.Number("1")},
+			},
+		})
+		h := *fx.content
+		h.revisions = &revisionProvider{s: revs}
+		var seen map[string]any
+		h.hooks.Register("ledgers", hooks.BeforeUpdate, func(_ context.Context, e hooks.Event) error {
+			seen = e.Data
+			return nil
+		})
+
+		rr := fx.restoreRevision(t, &h, "ledgers", created.ID.String(), revs.rows[0].ID.String())
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Equal(t, int64(9007199254740993), seen["ref_no"])
+		assert.Equal(t, "19.90", seen["amount"])
+		assert.Equal(t, 0.25, seen["rate"])
+		assert.Equal(t, map[string]any{"n": 1.0}, seen["meta"])
+		assert.Contains(t, rr.Body.String(), `"ref_no":9007199254740993`)
+		assert.Contains(t, rr.Body.String(), `"amount":"19.90"`)
+	})
+}

@@ -90,6 +90,7 @@ var contentDefaultSchemas = map[string][]string{
 		"fields": [
 			{"name": "ref_no", "field_type": "integer"},
 			{"name": "amount", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "rate", "field_type": "number"},
 			{"name": "meta", "field_type": "json"}
 		]
 	}`},

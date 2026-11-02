@@ -205,6 +205,10 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if err := coerceEveryNumber(sc, restored); err != nil {
+		httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "the revision holds a number out of range")
+		return
+	}
 	if !h.validatePatch(w, r, sc, restored, existing.Data) {
 		return
 	}
