@@ -33,7 +33,8 @@ func colIndex(cols []string, want string) int {
 // default, or a field relying on one would store NULL.
 func TestBuildInsert_AppliesTheDeclaredDefault(t *testing.T) {
 	d := dialect.Must("postgres")
-	cols, args := buildInsert(schemaWithDefault(), map[string]any{"title": "hello"}, d)
+	cols, args, err := buildInsert(schemaWithDefault(), map[string]any{"title": "hello"}, d)
+	require.NoError(t, err)
 
 	i := colIndex(cols, `"status"`)
 	require.GreaterOrEqual(t, i, 0, "a field with a default has to be written: %v", cols)
@@ -51,8 +52,9 @@ func TestBuildInsert_AppliesTheDeclaredDefault(t *testing.T) {
 // key, it does not override what the caller sent.
 func TestBuildInsert_ASuppliedValueWinsOverTheDefault(t *testing.T) {
 	d := dialect.Must("postgres")
-	cols, args := buildInsert(schemaWithDefault(),
+	cols, args, err := buildInsert(schemaWithDefault(),
 		map[string]any{"title": "hello", "status": "published", "views": float64(0)}, d)
+	require.NoError(t, err)
 
 	i := colIndex(cols, `"status"`)
 	require.GreaterOrEqual(t, i, 0)
@@ -66,7 +68,8 @@ func TestBuildInsert_ASuppliedValueWinsOverTheDefault(t *testing.T) {
 // An empty string is a value, not an absence.
 func TestBuildInsert_AnEmptyStringIsNotAnAbsentKey(t *testing.T) {
 	d := dialect.Must("postgres")
-	cols, args := buildInsert(schemaWithDefault(), map[string]any{"status": ""}, d)
+	cols, args, err := buildInsert(schemaWithDefault(), map[string]any{"status": ""}, d)
+	require.NoError(t, err)
 
 	i := colIndex(cols, `"status"`)
 	require.GreaterOrEqual(t, i, 0)

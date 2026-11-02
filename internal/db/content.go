@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -222,7 +223,10 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 func (s *ContentStore) insertRow(ctx context.Context, sc *domain.Schema, schemaName, table string, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
-	cols, args := buildInsert(sc, data, d)
+	cols, args, err := buildInsert(sc, data, d)
+	if err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 	cols = append([]string{d.QuoteIdentifier(TenantColumnName)}, cols...)
 	args = append([]any{tenantID}, args...)
 
@@ -292,7 +296,10 @@ func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id u
 func (s *ContentStore) insertRowWithID(ctx context.Context, sc *domain.Schema, schemaName, table string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
 	d := dialect.Must(s.pool.Engine())
 	tenantID := tenant.ID(ctx)
-	cols, args := buildInsert(sc, data, d)
+	cols, args, err := buildInsert(sc, data, d)
+	if err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 	cols = append([]string{"id", d.QuoteIdentifier(TenantColumnName)}, cols...)
 	args = append([]any{id, tenantID}, args...)
 	ph := placeholders(len(args))
@@ -648,7 +655,10 @@ func (s *ContentStore) updateOnce(ctx context.Context, schemaName string, id uui
 	if _, _, err := contentStatus(sc, data); err != nil {
 		return nil, fmt.Errorf("content update: %w", err)
 	}
-	sets, args := buildUpdate(sc, data, dialect.Must(s.pool.Engine()))
+	sets, args, err := buildUpdate(sc, data, dialect.Must(s.pool.Engine()))
+	if err != nil {
+		return nil, fmt.Errorf("content update: %w", err)
+	}
 	if len(sets) == 0 {
 		return s.GetByID(ctx, schemaName, id)
 	}
@@ -1006,7 +1016,10 @@ func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items 
 	err = s.inTransactionChecked(ctx, values, func(ctx context.Context) error {
 		results = make([]*domain.Content, 0, len(items))
 		for _, data := range items {
-			cols, args := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
+			cols, args, err := buildInsert(sc, data, dialect.Must(s.pool.Engine()))
+			if err != nil {
+				return fmt.Errorf("bulk insert row: %w", err)
+			}
 			cols = append([]string{tenantCol}, cols...)
 			args = append([]any{tenantID}, args...)
 			if isPG {
@@ -1169,6 +1182,13 @@ func normalizeContentData(engine string, sc *domain.Schema, data map[string]any)
 			}
 		case "datetime":
 			data[col] = normalizeContentTime(v)
+		case "integer":
+			// Read as text, so a value past 2^53 reaches here unrounded.
+			if str, isStr := v.(string); isStr {
+				if n, err := strconv.ParseInt(str, 10, 64); err == nil {
+					data[col] = n
+				}
+			}
 		case "json":
 			if str, isStr := v.(string); isStr && engine == "mssql" {
 				var decoded any
@@ -1236,6 +1256,12 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 	d := dialect.Must(engine)
 	qi := d.QuoteIdentifier
 	cols := make([]string, 0, len(sc.Fields)+3)
+	// asText marks the integer and decimal columns, read as the database's
+	// text. to_jsonb and FOR JSON write a BIGINT as a JSON number, which the
+	// decode rounds past 2^53, and MySQL's JSON_OBJECT writes a DECIMAL with
+	// no fixed scale. The text of a decimal with a declared scale is the same
+	// on all three.
+	var asText []bool
 	for _, f := range sc.Fields {
 		if f.System {
 			continue
@@ -1246,7 +1272,29 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 			(f.RelationType == domain.RelHasOne || f.RelationType == domain.RelHasMany || f.RelationType == domain.RelManyToMany) {
 			continue
 		}
+		if f.FieldType == "integer" || f.FieldType == "decimal" {
+			if asText == nil {
+				asText = make([]bool, len(cols), len(sc.Fields))
+			}
+			asText = append(asText, true)
+		} else if asText != nil {
+			asText = append(asText, false)
+		}
 		cols = append(cols, fieldColumn(f))
+	}
+	// ref is the column as the projection reads it.
+	ref := func(i int, col string) string {
+		if i >= len(asText) || !asText[i] {
+			return alias + "." + qi(col)
+		}
+		switch engine {
+		case "postgres":
+			return "CAST(" + alias + "." + qi(col) + " AS TEXT)"
+		case "mssql":
+			return "CONVERT(NVARCHAR(40), " + alias + "." + qi(col) + ")"
+		default:
+			return "CAST(" + alias + "." + qi(col) + " AS CHAR)"
+		}
 	}
 	// Include optional system-managed columns.
 	if sc.WithSoftDelete {
@@ -1269,7 +1317,7 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 		}
 		sel := make([]string, len(cols))
 		for i, col := range cols {
-			sel[i] = alias + "." + qi(col) + " AS " + qi(col)
+			sel[i] = ref(i, col) + " AS " + qi(col)
 		}
 		return "(SELECT to_jsonb(d.*) FROM (SELECT " + strings.Join(sel, ", ") + ") d) AS data"
 	}
@@ -1284,7 +1332,7 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 		}
 		sel := make([]string, len(cols))
 		for i, col := range cols {
-			sel[i] = alias + "." + qi(col) + " AS " + qi(col)
+			sel[i] = ref(i, col) + " AS " + qi(col)
 		}
 		return "(SELECT " + strings.Join(sel, ", ") +
 			" FOR JSON PATH, WITHOUT_ARRAY_WRAPPER, INCLUDE_NULL_VALUES) AS data"
@@ -1295,8 +1343,8 @@ func dataColumnExpr(engine string, sc *domain.Schema, alias string) string {
 		return "JSON_OBJECT() AS data"
 	}
 	parts := make([]string, 0, len(cols)*2)
-	for _, col := range cols {
-		parts = append(parts, fmt.Sprintf("'%s'", col), alias+"."+qi(col))
+	for i, col := range cols {
+		parts = append(parts, fmt.Sprintf("'%s'", col), ref(i, col))
 	}
 	return "JSON_OBJECT(" + strings.Join(parts, ", ") + ") AS data"
 }
@@ -1358,8 +1406,9 @@ func contentStatus(sc *domain.Schema, data map[string]any) (string, bool, error)
 // from user input), so no SQL injection surface exists here.
 // For belongs_to relation fields the physical column is {name}_id. Data is
 // keyed by either the logical name or the FK column name (both accepted).
-// Column names are quoted via d.QuoteIdentifier for dialect safety.
-func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (cols []string, args []any) {
+// Column names are quoted via d.QuoteIdentifier for dialect safety. A value
+// bindContentValue refuses is domain.ErrValidation naming its field.
+func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (cols []string, args []any, err error) {
 	qi := d.QuoteIdentifier
 	for _, f := range sc.Fields {
 		if f.System || isVirtualRelationField(f) {
@@ -1388,8 +1437,12 @@ func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (col
 			}
 			v = f.Default
 		}
+		bound, err := bindContentValue(f, v)
+		if err != nil {
+			return nil, nil, err
+		}
 		cols = append(cols, qi(col))
-		args = append(args, bindContentValue(f, v))
+		args = append(args, bound)
 	}
 	// _status is a system column, so the field loop never sees it. Without
 	// this the column takes its default of published, and a write that asked
@@ -1398,12 +1451,13 @@ func buildInsert(sc *domain.Schema, data map[string]any, d dialect.Dialect) (col
 		cols = append(cols, qi("_status"))
 		args = append(args, status)
 	}
-	return
+	return cols, args, nil
 }
 
 // buildUpdate returns SET clauses and argument values for an UPDATE.
-// Column names are quoted via d.QuoteIdentifier for dialect safety.
-func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (sets []string, args []any) {
+// Column names are quoted via d.QuoteIdentifier for dialect safety. A value
+// bindContentValue refuses is domain.ErrValidation naming its field.
+func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (sets []string, args []any, err error) {
 	qi := d.QuoteIdentifier
 	i := 1
 	for _, f := range sc.Fields {
@@ -1416,8 +1470,12 @@ func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (set
 			v, ok = data[f.Name]
 		}
 		if ok {
+			bound, err := bindContentValue(f, v)
+			if err != nil {
+				return nil, nil, err
+			}
 			sets = append(sets, fmt.Sprintf("%s = $%d", qi(col), i))
-			args = append(args, bindContentValue(f, v))
+			args = append(args, bound)
 			i++
 		}
 	}
@@ -1425,7 +1483,7 @@ func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (set
 		sets = append(sets, fmt.Sprintf("%s = $%d", qi("_status"), i))
 		args = append(args, status)
 	}
-	return
+	return sets, args, nil
 }
 
 // bindContentValue prepares a user-supplied field value for binding.
@@ -1441,7 +1499,30 @@ func buildUpdate(sc *domain.Schema, data map[string]any, d dialect.Dialect) (set
 // something the caller built deliberately, and pgx binds it to a Postgres
 // array. Encoding it as JSON would break that. Text and raw bytes pass through
 // as JSON already, or as an encoding the caller chose.
-func bindContentValue(f domain.SchemaField, v any) any {
+//
+// An integer is bound as an int64 and a decimal as its canonical text, which
+// each database converts into the column exactly, whichever producer wrote it.
+// A value that is not exact for its field is refused with domain.ErrValidation
+// rather than handed to the database: PostgreSQL and SQL Server round extra
+// fractional digits and MySQL rounds them with only a note.
+func bindContentValue(f domain.SchemaField, v any) (any, error) {
+	if v != nil {
+		switch f.FieldType {
+		case "integer":
+			n, err := core.IntegerValue(v)
+			if err != nil {
+				return nil, fmt.Errorf("%w: field %q: %w", domain.ErrValidation, f.Name, err)
+			}
+			return n, nil
+		case "decimal":
+			p, sc := core.DecimalSpec(f)
+			text, err := core.DecimalValue(v, p, sc)
+			if err != nil {
+				return nil, fmt.Errorf("%w: field %q: %w", domain.ErrValidation, f.Name, err)
+			}
+			return text, nil
+		}
+	}
 	// A datetime is bound as a time in UTC rather than as the caller's text.
 	// MySQL refuses an RFC 3339 value with a Z or an offset in a DATETIME
 	// column, and neither MySQL's DATETIME nor SQL Server's DATETIME2 keeps
@@ -1451,20 +1532,20 @@ func bindContentValue(f domain.SchemaField, v any) any {
 	// wall clock, so one value would have meant three instants.
 	if str, ok := v.(string); ok && f.FieldType == "datetime" {
 		if t, ok := parseContentTime(str); ok {
-			return t
+			return t, nil
 		}
-		return v
+		return v, nil
 	}
 	switch v.(type) {
 	case map[string]any, []any:
 	default:
-		return v
+		return v, nil
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		return v
+		return v, nil
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // fieldColumn returns the physical DB column name for a schema field.

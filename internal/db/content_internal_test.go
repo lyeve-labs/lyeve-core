@@ -184,7 +184,7 @@ func TestBuildInsert_QuotesReservedWords(t *testing.T) {
 	data := map[string]any{"order": 1, "group": "a", "title": "hello"}
 
 	t.Run("mysql", func(t *testing.T) {
-		cols, _ := buildInsert(sc, data, dialect.Must("mysql"))
+		cols, _, _ := buildInsert(sc, data, dialect.Must("mysql"))
 		if got, want := len(cols), 3; got != want {
 			t.Fatalf("expected %d cols, got %d", want, got)
 		}
@@ -200,7 +200,7 @@ func TestBuildInsert_QuotesReservedWords(t *testing.T) {
 	})
 
 	t.Run("mssql", func(t *testing.T) {
-		cols, _ := buildInsert(sc, data, dialect.Must("mssql"))
+		cols, _, _ := buildInsert(sc, data, dialect.Must("mssql"))
 		if cols[0] != "[order]" {
 			t.Errorf("'order' not bracket-quoted: %q", cols[0])
 		}
@@ -210,7 +210,7 @@ func TestBuildInsert_QuotesReservedWords(t *testing.T) {
 	})
 
 	t.Run("postgres", func(t *testing.T) {
-		cols, _ := buildInsert(sc, data, dialect.Must("postgres"))
+		cols, _, _ := buildInsert(sc, data, dialect.Must("postgres"))
 		if cols[0] != `"order"` {
 			t.Errorf("'order' not double-quoted: %q", cols[0])
 		}
@@ -227,7 +227,7 @@ func TestBuildUpdate_QuotesReservedWords(t *testing.T) {
 	data := map[string]any{"key": "val", "select": 42}
 
 	t.Run("mysql", func(t *testing.T) {
-		sets, _ := buildUpdate(sc, data, dialect.Must("mysql"))
+		sets, _, _ := buildUpdate(sc, data, dialect.Must("mysql"))
 		if got, want := len(sets), 2; got != want {
 			t.Fatalf("expected %d SET clauses, got %d", want, got)
 		}
@@ -240,7 +240,7 @@ func TestBuildUpdate_QuotesReservedWords(t *testing.T) {
 	})
 
 	t.Run("mssql", func(t *testing.T) {
-		sets, _ := buildUpdate(sc, data, dialect.Must("mssql"))
+		sets, _, _ := buildUpdate(sc, data, dialect.Must("mssql"))
 		if !strings.Contains(sets[0], "[key]") {
 			t.Errorf("'key' not bracket-quoted: %q", sets[0])
 		}
@@ -250,7 +250,7 @@ func TestBuildUpdate_QuotesReservedWords(t *testing.T) {
 	})
 
 	t.Run("postgres", func(t *testing.T) {
-		sets, _ := buildUpdate(sc, data, dialect.Must("postgres"))
+		sets, _, _ := buildUpdate(sc, data, dialect.Must("postgres"))
 		if !strings.Contains(sets[0], `"key"`) {
 			t.Errorf("'key' not double-quoted: %q", sets[0])
 		}
@@ -264,7 +264,7 @@ func TestBuildInsert_PostgresReservedWordIsOneColumn(t *testing.T) {
 			{Name: "order", FieldType: "number"},
 		},
 	}
-	cols, _ := buildInsert(sc, map[string]any{"order": 1}, dialect.Must("postgres"))
+	cols, _, _ := buildInsert(sc, map[string]any{"order": 1}, dialect.Must("postgres"))
 	if len(cols) != 1 {
 		t.Fatalf("expected 1 col, got %d", len(cols))
 	}

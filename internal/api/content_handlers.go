@@ -165,10 +165,12 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &input); err != nil {
+	sc := h.numberSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &input); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	coerceNumbers(sc, input.Data)
 
 	data, ok := h.prepareCreate(w, r, schemaName, input.Data)
 	if !ok {
@@ -222,11 +224,13 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &input); err != nil {
+	sc := h.numberSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &input); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 	input.Data = withoutStatus(input.Data)
+	coerceNumbers(sc, input.Data)
 
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
@@ -321,7 +325,8 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Items []map[string]any `json:"items"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &body); err != nil {
+	sc := h.numberSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &body); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -335,6 +340,7 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, item := range body.Items {
+		coerceNumbers(sc, item)
 		data, ok := h.prepareCreate(w, r, schemaName, item)
 		if !ok {
 			return

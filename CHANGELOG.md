@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The same plugin can list an entry's past revisions, newest first and a page at a time, with who wrote each, when, the note it carries and the kind of write, and learn whether saves record a revision now.
 - An entry that plugin reads carries the entry's metadata beside its fields, so a plugin that compares a save with the stored entry can compare a value kept in the metadata too.
 - A schema field can declare a precision and a scale, and a plugin can read a value as an exact whole number or decimal, check it against a field's precision and scale, and compare two decimals by value, by the same rules the engine applies when it stores one.
+- Content fields of the integer and decimal types are stored and read exactly on PostgreSQL, MySQL and SQL Server, once the installed schema engine declares those types. An integer is a 64-bit whole number and reads as a JSON number with every digit, including values past 2^53 that a float would round. A decimal reads as a string with exactly its declared number of fractional digits, printed the same on every database. A value with more digits than its field holds is refused as a validation error rather than rounded, whichever writer sends it, and nothing is stored. Every other field type reads and writes as before.
 
 ### Fixed
 
