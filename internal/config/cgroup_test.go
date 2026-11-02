@@ -195,3 +195,98 @@ func TestMachineMemory(t *testing.T) {
 	}
 	assert.Equal(t, int64(0), machineMemory(fstest.MapFS{}), "a missing meminfo")
 }
+
+// Whether the CPU limit is one core or less decides the scheduler's size, so
+// it is read as a fraction, at the process's own path, on either cgroup
+// version, and a file that says nothing usable reads as no limit.
+func TestCgroupCPULimit(t *testing.T) {
+	t.Parallel()
+
+	file := func(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
+
+	tests := []struct {
+		name  string
+		files fstest.MapFS
+		want  float64
+	}{
+		{
+			name: "a v2 container reads the file at the root",
+			files: fstest.MapFS{
+				"proc/self/cgroup":      file("0::/\n"),
+				"sys/fs/cgroup/cpu.max": file("150000 100000\n"),
+			},
+			want: 1.5,
+		},
+		{
+			name: "a half core stays a fraction",
+			files: fstest.MapFS{
+				"proc/self/cgroup":      file("0::/\n"),
+				"sys/fs/cgroup/cpu.max": file("50000 100000\n"),
+			},
+			want: 0.5,
+		},
+		{
+			name: "max is no limit",
+			files: fstest.MapFS{
+				"proc/self/cgroup":      file("0::/\n"),
+				"sys/fs/cgroup/cpu.max": file("max 100000\n"),
+			},
+			want: 0,
+		},
+		{
+			name: "a systemd unit on a v2 host reads its own path, and a smaller parent wins",
+			files: fstest.MapFS{
+				"proc/self/cgroup":                                 file("0::/lyeve.slice/lyeve.service\n"),
+				"sys/fs/cgroup/lyeve.slice/cpu.max":                file("100000 100000\n"),
+				"sys/fs/cgroup/lyeve.slice/lyeve.service/cpu.max":  file("200000 100000\n"),
+				"sys/fs/cgroup/lyeve.slice/lyeve.service/cpu.stat": file("usage_usec 1\n"),
+			},
+			want: 1,
+		},
+		{
+			name: "a v1 host reads the quota and the period at its own path",
+			files: fstest.MapFS{
+				"proc/self/cgroup": file("4:memory:/system.slice/lyeve.service\n3:cpu,cpuacct:/system.slice/lyeve.service\n"),
+				"sys/fs/cgroup/cpu/system.slice/lyeve.service/cpu.cfs_quota_us":  file("200000\n"),
+				"sys/fs/cgroup/cpu/system.slice/lyeve.service/cpu.cfs_period_us": file("100000\n"),
+			},
+			want: 2,
+		},
+		{
+			name: "a v1 quota of -1 is no limit",
+			files: fstest.MapFS{
+				"proc/self/cgroup":                    file("3:cpu,cpuacct:/\n"),
+				"sys/fs/cgroup/cpu/cpu.cfs_quota_us":  file("-1\n"),
+				"sys/fs/cgroup/cpu/cpu.cfs_period_us": file("100000\n"),
+			},
+			want: 0,
+		},
+		{
+			name: "a malformed cpu.max is no limit",
+			files: fstest.MapFS{
+				"proc/self/cgroup":      file("0::/\n"),
+				"sys/fs/cgroup/cpu.max": file("lots\n"),
+			},
+			want: 0,
+		},
+		{
+			name: "a zero period is no limit",
+			files: fstest.MapFS{
+				"proc/self/cgroup":      file("0::/\n"),
+				"sys/fs/cgroup/cpu.max": file("100000 0\n"),
+			},
+			want: 0,
+		},
+		{
+			name:  "no /proc/self/cgroup is no limit",
+			files: fstest.MapFS{"sys/fs/cgroup/cpu.max": file("100000 100000\n")},
+			want:  0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			assert.InDelta(t, tt.want, cgroupCPULimit(tt.files), 1e-9)
+		})
+	}
+}
