@@ -248,3 +248,27 @@ func TestRuntimeFacts_SessionsUnknownWithoutTheGrant(t *testing.T) {
 		}
 	})
 }
+
+// reasonUnreadable is the reason a fact gives when its read failed.
+const reasonUnreadable = "the database did not answer the read"
+
+// A read that fails, here on a canceled context, reads as a failed read,
+// never as a missing grant that would send the operator after a permission.
+func TestRuntimeFacts_FailedReadIsNotAMissingGrant(t *testing.T) {
+	plugintest.ForEachDialect(t, func(t *testing.T, host core.Host) {
+		clean(t)
+		tuner, _ := poolTuner(t, host)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		f := tuner.RuntimeFacts(ctx)
+		facts := map[string]core.Fact{"connection limit": f.DatabaseConnLimit, "connections open": f.DatabaseConnsOpen}
+		if host.Dialect() == "mssql" {
+			facts["cores"] = f.DatabaseCores
+		}
+		for name, fact := range facts {
+			assert.False(t, fact.Known, name)
+			assert.Equal(t, reasonUnreadable, fact.Reason, name)
+		}
+	})
+}

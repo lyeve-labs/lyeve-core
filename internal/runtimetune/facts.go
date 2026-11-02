@@ -73,8 +73,8 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 	case "mysql":
 		// One more session stays open to an account holding
 		// CONNECTION_ADMIN, which an ordinary pool cannot use.
-		return intFact(ctx, sqlDB, `SELECT @@max_connections`, reasonUnreadable),
-			intFact(ctx, sqlDB, `SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'`, reasonUnreadable),
+		return intFact(ctx, sqlDB, `SELECT @@max_connections`, ""),
+			intFact(ctx, sqlDB, `SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Threads_connected'`, ""),
 			unknown(reasonCoresNotOverSQL)
 	case "mssql":
 		return mssqlConnLimit(ctx, sqlDB),
@@ -82,7 +82,10 @@ func databaseFacts(ctx context.Context, sqlDB *sql.DB, dialect string) (limit, o
 			// session, which would read as one connection open.
 			intFact(ctx, sqlDB, `SELECT CASE WHEN HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
 				THEN (SELECT count(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) ELSE -1 END`, reasonNoServerState),
-			intFact(ctx, sqlDB, `SELECT cpu_count FROM sys.dm_os_sys_info`, reasonNoServerState)
+			// The view refuses the account outright without the permission,
+			// even inside a CASE, so the check runs as a branch.
+			intFact(ctx, sqlDB, `IF HAS_PERMS_BY_NAME(NULL, NULL, 'VIEW SERVER STATE') = 1
+				SELECT cpu_count FROM sys.dm_os_sys_info ELSE SELECT -1`, reasonNoServerState)
 	default:
 		return unknown(reasonUnreadable), unknown(reasonUnreadable), unknown(reasonUnreadable)
 	}
@@ -137,16 +140,22 @@ func mssqlConnLimit(ctx context.Context, sqlDB *sql.DB) core.Fact {
 	}
 }
 
-// intFact reads one integer, as an int, or reports reason when the read
-// fails. Some servers answer these as text, so the value is scanned as one.
-func intFact(ctx context.Context, sqlDB *sql.DB, query, reason string) core.Fact {
+// intFact reads one integer, as an int. A query that checks the account's
+// grant answers -1 without it, which reports denied. Any other failure
+// reports a read the database did not answer, so a timeout never reads as a
+// missing grant. Some servers answer these as text, so the value is scanned
+// as one.
+func intFact(ctx context.Context, sqlDB *sql.DB, query, denied string) core.Fact {
 	var s string
 	if err := sqlDB.QueryRowContext(ctx, query).Scan(&s); err != nil {
-		return unknown(reason)
+		return unknown(reasonUnreadable)
 	}
 	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return unknown(reason)
+	switch {
+	case err == nil && n == -1 && denied != "":
+		return unknown(denied)
+	case err != nil || n < 0:
+		return unknown(reasonUnreadable)
 	}
 	return known(n, core.SourceDatabase)
 }
