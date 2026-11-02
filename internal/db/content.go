@@ -1052,6 +1052,9 @@ func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items 
 	if err != nil {
 		return nil, err
 	}
+	// The new ids are in no item cache, so the flush is for the lists, which
+	// would otherwise serve the rows from before the batch until they expire.
+	s.invalidateSchema(ctx, schemaName, uuid.Nil)
 	return results, nil
 }
 
