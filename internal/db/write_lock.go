@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -45,28 +44,16 @@ func writeTx(ctx context.Context) *sql.Tx {
 	return tx
 }
 
-type afterCommitKey struct{}
-
-// afterCommitHooks holds what runs once a serialized write's transaction has
-// committed.
-type afterCommitHooks struct {
-	mu  sync.Mutex
-	fns []func(context.Context)
-}
-
 // afterCommit runs fn once the transaction a serialized write holds on ctx
 // commits, and not at all when it rolls back. Outside one it runs fn now.
 // fn gets the context the write was started with, which carries no
 // transaction, so it may query the pool.
 func afterCommit(ctx context.Context, fn func(context.Context)) {
-	hooks, _ := ctx.Value(afterCommitKey{}).(*afterCommitHooks)
-	if hooks == nil || writeTx(ctx) == nil {
+	if writeTx(ctx) == nil {
 		fn(ctx)
 		return
 	}
-	hooks.mu.Lock()
-	hooks.fns = append(hooks.fns, fn)
-	hooks.mu.Unlock()
+	core.AfterCommit(ctx, fn)
 }
 
 // SerializeWrite runs fn inside a transaction that holds an exclusive lock
@@ -156,8 +143,19 @@ func runWriteTx(ctx context.Context, pool DB, key string, fn func(context.Contex
 	}
 	committed := false
 	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+		if committed {
+			return
+		}
+		_ = tx.Rollback()
+		if engine == "mssql" && ctx.Err() != nil {
+			// The SQL Server driver answers a rollback whose context has
+			// ended without waiting for the server, and keeps the
+			// connection (go-mssqldb issue 390). A request written on it
+			// while the server still rolls back makes the server end the
+			// session, so the next write would fail with "Read: EOF".
+			// Raw waits for the rollback, and ErrBadConn closes the
+			// connection instead of pooling it.
+			_ = conn.Raw(func(any) error { return driver.ErrBadConn })
 		}
 	}()
 
@@ -173,20 +171,15 @@ func runWriteTx(ctx context.Context, pool DB, key string, fn func(context.Contex
 		}
 	}
 
-	hooks := &afterCommitHooks{}
-	if err := fn(core.WithinTransaction(context.WithValue(context.WithValue(ctx, writeTxKey{}, tx), afterCommitKey{}, hooks))); err != nil {
+	txCtx, runCommitted := core.WithCommitHooks(context.WithValue(ctx, writeTxKey{}, tx))
+	if err := fn(core.WithinTransaction(txCtx)); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("%s: commit: %w", label, err)
 	}
 	committed = true
-	hooks.mu.Lock()
-	fns := hooks.fns
-	hooks.mu.Unlock()
-	for _, after := range fns {
-		after(ctx)
-	}
+	runCommitted(ctx)
 	return nil
 }
 

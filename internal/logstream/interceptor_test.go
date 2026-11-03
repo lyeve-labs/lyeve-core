@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/lyeve-labs/lyeve-core/internal/logstream"
 	"github.com/stretchr/testify/assert"
@@ -146,4 +147,34 @@ func TestSlogToStreamLevel(t *testing.T) {
 	assert.Equal(t, logstream.LevelInfo, entries[1].Level)
 	assert.Equal(t, logstream.LevelWarn, entries[2].Level)
 	assert.Equal(t, logstream.LevelError, entries[3].Level)
+}
+
+// A ring entry outlives the request that logged it, so it must neither share
+// the caller's backing array nor grow with whatever the caller passed.
+func TestInterceptor_CapsAndClonesStoredValues(t *testing.T) {
+	b := logstream.NewBuffer(10)
+	intercepted := logstream.NewInterceptor(slog.NewTextHandler(&strings.Builder{}, nil), b)
+
+	line := "GET /items?q=" + strings.Repeat("a", 4<<10)
+	short := line[4:10]
+	long := line[4:]
+	message := strings.Repeat("m", 2*logstream.MaxMessageBytes)
+	slog.New(intercepted).Info(message, "path", short, "query", long, "tenant_id", line[5:10])
+
+	entries := b.Snapshot(nil, 0)
+	require.Len(t, entries, 1)
+	e := entries[0]
+	assert.Equal(t, "/items", e.Attrs["path"])
+	assert.Len(t, e.Attrs["query"], logstream.MaxValueBytes)
+	assert.Len(t, e.Message, logstream.MaxMessageBytes)
+	assert.Equal(t, "items", e.TenantID)
+	assert.NotSame(t, unsafe.StringData(short), unsafe.StringData(e.Attrs["path"]))
+	assert.NotSame(t, unsafe.StringData(long), unsafe.StringData(e.Attrs["query"]))
+	assert.NotSame(t, unsafe.StringData(line[5:10]), unsafe.StringData(e.TenantID))
+}
+
+func TestClip_KeepsWholeRunes(t *testing.T) {
+	assert.Equal(t, "ab", logstream.Clip("abc", 2))
+	assert.Equal(t, "a", logstream.Clip("aé", 2))
+	assert.Equal(t, "short", logstream.Clip("short", 10))
 }

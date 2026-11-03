@@ -1234,7 +1234,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// Router option builder
 	// Closure so both the initial construction and the hot-reload callback
 	// reuse the same option list.
-	setupToken := firstRunSetupToken(ctx, cfg, db.NewUserStore(pool), logger)
+	setupToken := firstRunSetupToken(ctx, cfg, db.NewUserStore(pool), logger, os.Stderr)
 
 	adminBaseOpts := func(routes []plugin.PluginRoutes) []api.RouterOption {
 		opts := []api.RouterOption{

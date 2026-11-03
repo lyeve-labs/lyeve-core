@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/lyeve-labs/lyeve-core/internal/api"
@@ -22,7 +24,7 @@ import (
 // process exits only when it is stopped. The engine cannot restart its own
 // container, so the operator sets the values and restarts it.
 func runSetupMode(ctx context.Context, req *config.SetupRequiredError, logger *slog.Logger) error {
-	token, err := setupModeToken(req, logger)
+	token, err := setupModeToken(req, logger, os.Stderr)
 	if err != nil {
 		return err
 	}
@@ -53,10 +55,10 @@ func runSetupMode(ctx context.Context, req *config.SetupRequiredError, logger *s
 	return serveUntilDone(ctx, "setup mode", servers, logger)
 }
 
-// setupModeToken is LYEVE_SETUP_TOKEN when set, else a token printed once.
-// Setup mode has no database, so no account can exist and a token is always
-// needed.
-func setupModeToken(req *config.SetupRequiredError, logger *slog.Logger) (*api.SetupToken, error) {
+// setupModeToken is LYEVE_SETUP_TOKEN when set, else a token written once to
+// the console, never to the log. Setup mode has no database, so no account
+// can exist and a token is always needed.
+func setupModeToken(req *config.SetupRequiredError, logger *slog.Logger, console io.Writer) (*api.SetupToken, error) {
 	if req.SetupToken != "" {
 		return api.NewSetupTokenFromEnv(req.SetupToken), nil
 	}
@@ -64,10 +66,7 @@ func setupModeToken(req *config.SetupRequiredError, logger *slog.Logger) (*api.S
 	if err != nil {
 		return nil, fmt.Errorf("setup mode: %w", err)
 	}
-	logger.Warn("setup: no account exists yet. Enter this setup token on the admin's first-run page. "+
-		"It works until the first super admin is created. With more than one replica, set LYEVE_SETUP_TOKEN instead, "+
-		"since each replica prints its own.",
-		"setup_token", plain, "instance_id", req.InstanceID)
+	announceSetupToken(logger, console, plain, req.InstanceID)
 	return tok, nil
 }
 

@@ -165,12 +165,21 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &input); err != nil {
+	sc, scErr := h.writeSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &input); err != nil {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
+		return
+	}
+	if err := coerceNumbers(sc, input.Data); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 
-	data, ok := h.prepareCreate(w, r, schemaName, input.Data)
+	data, ok := h.prepareCreate(w, r, sc, input.Data)
 	if !ok {
 		return
 	}
@@ -222,11 +231,20 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Data map[string]any `json:"data"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &input); err != nil {
+	sc, scErr := h.writeSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &input); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
+		return
+	}
 	input.Data = withoutStatus(input.Data)
+	if err := coerceNumbers(sc, input.Data); err != nil {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+		return
+	}
 
 	existing, err := h.store.GetByID(r.Context(), schemaName, id)
 	if err != nil {
@@ -234,7 +252,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.validatePatch(w, r, schemaName, input.Data, existing.Data) {
+	if !h.validatePatch(w, r, sc, input.Data, existing.Data) {
 		return
 	}
 
@@ -321,7 +339,8 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Items []map[string]any `json:"items"`
 	}
-	if err := jsonpool.DecodeJSON(r.Body, &body); err != nil {
+	sc, scErr := h.writeSchema(r, schemaName)
+	if err := decodeContentBody(r.Body, sc, &body); err != nil {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
 		return
 	}
@@ -333,9 +352,19 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "bulk insert limited to 500 items per request")
 		return
 	}
+	if scErr != nil {
+		storeError(w, r, scErr, "failed to load schema for validation")
+		return
+	}
 
+	for _, item := range body.Items {
+		if err := coerceNumbers(sc, item); err != nil {
+			httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid JSON")
+			return
+		}
+	}
 	for i, item := range body.Items {
-		data, ok := h.prepareCreate(w, r, schemaName, item)
+		data, ok := h.prepareCreate(w, r, sc, item)
 		if !ok {
 			return
 		}

@@ -54,11 +54,16 @@ func registerSysUserEraser(host core.Host) {
 
 // keySubjectRefs keys the reference every log line names a data subject by.
 // The references have to agree on every replica and across restarts for the
-// lines about one person to correlate, so the key comes from ENCRYPTION_KEY,
-// or the JWT_SECRET it falls back to: every replica shares it, and stored
-// ciphertext depends on it, so the install keeps it. A stateless engine may
-// hold neither, and its references then stay keyed to the process. Lives here
-// for the same reason as the registration above.
+// lines about one person to correlate, so the key comes from ENCRYPTION_KEY:
+// every replica shares it, and stored ciphertext depends on it, so the install
+// keeps it. The configuration refuses to load when ENCRYPTION_KEY is unset and
+// would fall back to JWT_SECRET, so the key never comes from a JWT secret and
+// rotating one leaves it as it is. A stateless engine holds neither, and its
+// references then stay keyed to the process. It has no audit log either, so no
+// audit entry is ever digested under that key. The same key digests the
+// subject of every audit entry, and the engine offers no way to rotate
+// ENCRYPTION_KEY, so an entry written under one is not found by a lookup
+// under another. Lives here for the same reason as the registration above.
 //
 // The key comes from the stretched key-encryption key, never from the secret
 // itself. One logged reference and one known address test a guessed secret,
@@ -109,8 +114,9 @@ func logSubjectEraserRoster(ctx context.Context, logger *slog.Logger) {
 // can erase several. Replaces email with a per-row sentinel, clears
 // password_hash, provider_email and provider_seen_at, empties roles, and
 // bumps token_version so every previously issued JWT is rejected immediately.
-// Skips rows already marked anonymized, so a second erasure is a no-op. It
-// returns the number of rows erased.
+// Clears erasure_pending_at, which EndSessions set, so the account is no
+// longer held by a pending erasure. Skips rows already marked anonymized, so
+// a second erasure is a no-op. It returns the number of rows erased.
 func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (int64, error) {
 	if strings.TrimSpace(identifier) == "" {
 		return 0, nil
@@ -193,7 +199,8 @@ func (e *sysUserEraser) EraseSubject(ctx context.Context, identifier string) (in
 	     sessions_revoked_at = %s,
 	     anonymized = %s,
 	     provider_email = NULL,
-	     provider_seen_at = NULL
+	     provider_seen_at = NULL,
+	     erasure_pending_at = NULL
 	 WHERE anonymized = %s AND id IN `, erasedEmail, emptyRoles, utcFn, utcFn, boolTrue, boolFalse)
 
 	n, err := execByIDs(ctx, q, update, ids)
@@ -294,12 +301,16 @@ func (e *sysUserEraser) EndSessions(ctx context.Context, identifier string) erro
 	if err != nil {
 		return err
 	}
+	// erasure_pending_at keeps the lock: while it is set, the engine's enable
+	// and a directory's reactivation leave the account disabled. A retry
+	// keeps the time the first run set.
 	update := fmt.Sprintf(`UPDATE sys_users
 	 SET disabled = %s,
 	     token_version = token_version + 1,
 	     sessions_revoked_at = %s,
+	     erasure_pending_at = COALESCE(erasure_pending_at, %s),
 	     updated_at = %s
-	 WHERE anonymized = %s AND id IN `, boolTrue, utcFn, utcFn, boolFalse)
+	 WHERE anonymized = %s AND id IN `, boolTrue, utcFn, utcFn, utcFn, boolFalse)
 	if _, err := execByIDs(ctx, q, update, ids); err != nil {
 		return fmt.Errorf("sys_users sign-out: %w", err)
 	}

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/internal/i18n"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
@@ -288,5 +290,36 @@ func TestContentHandler_Revisions_RestoreRefusesAnotherRecordsRevision(t *testin
 		}
 		require.NoError(t, json.Unmarshal(fx.get(t, "notes", target).Body.Bytes(), &out))
 		assert.Equal(t, "target", out.Data["body"], "a refused restore writes nothing")
+	})
+}
+
+// A restore is an update of every field the revision holds, so a
+// before_update subscriber that refuses an update refuses the restore, and
+// nothing is written.
+func TestContentHandler_RestoreRevision_AsksBeforeUpdate(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"notes"}, func(t *testing.T, fx schemaContentFixture) {
+		id := createdID(t, fx.create(t, "notes", map[string]any{
+			"title": "First", "body": "first",
+		}))
+		revs := &memRevisions{}
+		h := *fx.content
+		h.revisions = &revisionProvider{s: revs}
+		wired := fx
+		wired.content = &h
+		require.Equal(t, http.StatusOK, wired.update(t, "notes", id, map[string]any{"body": "second"}).Code)
+		require.Len(t, revs.rows, 1)
+
+		var asked []hooks.Event
+		h.hooks.Register("notes", hooks.BeforeUpdate, func(_ context.Context, e hooks.Event) error {
+			asked = append(asked, e)
+			return errors.New("not here")
+		})
+		rr := fx.restoreRevision(t, &h, "notes", id, revs.rows[0].ID.String())
+		assert.Equal(t, http.StatusUnprocessableEntity, rr.Code, rr.Body.String())
+		require.Len(t, asked, 1, "the restore asked no before_update subscriber")
+		assert.Equal(t, "first", asked[0].Data["body"])
+		assert.Equal(t, "second", asked[0].OldData["body"])
+		assert.Equal(t, "second", dataOf(t, fx.get(t, "notes", id))["body"], "a refused restore wrote the revision back")
+		assert.Len(t, revs.rows, 1, "a refused restore recorded the state it did not replace")
 	})
 }

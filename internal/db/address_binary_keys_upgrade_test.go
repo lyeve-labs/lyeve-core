@@ -37,7 +37,7 @@ func rollBackTo(t *testing.T, pool db.DB, version int) {
 	if tree == "postgres" {
 		tree = "psql"
 	}
-	for v := 12; v > version; v-- {
+	for v := 13; v > version; v-- {
 		found, err := filepath.Glob(filepath.Join("..", "..", "migrations", tree, fmt.Sprintf("%03d_*.down.sql", v)))
 		require.NoError(t, err)
 		require.Len(t, found, 1)
@@ -86,7 +86,7 @@ func TestMigrate_UpgradeRewritesDecomposedAddressesBeforeBinaryKeys(t *testing.T
 
 				n, err := db.Migrate(dsn, filepath.Join("..", "..", "migrations"), nil)
 				require.NoError(t, err)
-				require.Equal(t, 12-from, n)
+				require.Equal(t, 13-from, n)
 
 				users := db.NewUserStore(pool)
 				got, err := users.GetByEmail(ctx, composed)
@@ -100,7 +100,7 @@ func TestMigrate_UpgradeRewritesDecomposedAddressesBeforeBinaryKeys(t *testing.T
 }
 
 // Two boots of one database at once both succeed, and the database ends at
-// version 12, clean, with the one account rewritten.
+// the latest version, clean, with the one account rewritten.
 func TestMigrate_ConcurrentBootsRewriteBeforeBinaryKeys(t *testing.T) {
 	for _, d := range binaryKeyDialects {
 		t.Run(d.name, func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestMigrate_ConcurrentBootsRewriteBeforeBinaryKeys(t *testing.T) {
 			var version int64
 			var dirty bool
 			require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT version, dirty FROM `+db.MigrationsTable).Scan(&version, &dirty))
-			assert.Equal(t, int64(12), version)
+			assert.Equal(t, int64(13), version)
 			assert.False(t, dirty)
 
 			got, err := db.NewUserStore(pool).GetByEmail(ctx, composed)
@@ -157,7 +157,7 @@ func TestMigrate_PostgresSkipsTheRewriteBeforeBinaryKeys(t *testing.T) {
 
 	n, err := db.Migrate(dsn, filepath.Join("..", "..", "migrations"), nil)
 	require.NoError(t, err)
-	require.Equal(t, 1, n)
+	require.Equal(t, 2, n)
 
 	row, err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM sys_users WHERE email = $1`, norm.NFD.String(composed))
 	require.NoError(t, err)
@@ -181,4 +181,23 @@ func TestAddressRewriteOptions_MySQLCarriesTheRewriteLimit(t *testing.T) {
 	var ms int64
 	require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT @@SESSION.max_execution_time`).Scan(&ms))
 	assert.Equal(t, (24 * time.Hour).Milliseconds(), ms)
+}
+
+// A SQL Server session opened for the rewrite waits up to 24 hours for a lock,
+// on a reused connection as on a new one.
+func TestAddressRewriteOptions_MSSQLCarriesTheRewriteLimit(t *testing.T) {
+	if !testdb.ShouldTest("mssql") {
+		t.Skip("CI_DIALECT != mssql")
+	}
+	ctx := context.Background()
+	_, dsn := testdb.MSSQLWithDSN(t)
+	pool, err := db.ConnectWithOptions(ctx, dsn, db.AddressRewriteOptions)
+	require.NoError(t, err)
+	defer func() { _ = pool.Close() }()
+
+	for i := range 2 {
+		var ms int64
+		require.NoError(t, pool.SQLDB().QueryRowContext(ctx, `SELECT @@LOCK_TIMEOUT`).Scan(&ms))
+		assert.Equal(t, (24 * time.Hour).Milliseconds(), ms, "query %d", i)
+	}
 }

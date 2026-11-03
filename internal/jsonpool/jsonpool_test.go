@@ -119,3 +119,16 @@ func TestPrewarmJSON_Idempotent(t *testing.T) {
 		PrewarmJSON()
 	})
 }
+
+func TestDecodeJSONNumbers_KeepsTheLiteralAndRefusesWhatUnmarshalRefuses(t *testing.T) {
+	var out map[string]any
+	require.NoError(t, DecodeJSONNumbers(strings.NewReader(`{"n":9007199254740993,"f":19.90} `), &out))
+	assert.Equal(t, json.Number("9007199254740993"), out["n"])
+	assert.Equal(t, json.Number("19.90"), out["f"])
+
+	for _, body := range []string{"", "{bad", `{"n":1} {"n":2}`, `{"n":1} x`} {
+		var m map[string]any
+		assert.Error(t, DecodeJSONNumbers(strings.NewReader(body), &m), "%q", body)
+		assert.Error(t, DecodeJSON(strings.NewReader(body), &m), "%q", body)
+	}
+}

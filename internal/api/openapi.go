@@ -188,8 +188,8 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"post": {
 			Tags:        []string{"Admin / Auth"},
 			Summary:     "Initial admin setup (first-run only)",
-			Description: "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine logs at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
-			RequestBody: jsonBody(map[string]any{"email": "admin@example.com", "password": "changeme", "setup_token": "from-the-engine-log"}),
+			Description: "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+			RequestBody: jsonBody(map[string]any{"email": "admin@example.com", "password": "changeme", "setup_token": "from-the-engine-stderr"}),
 			Responses:   map[string]any{"201": ok200, "400": err400, "401": err401, "409": map[string]any{"description": "Setup already complete"}},
 		},
 	}
@@ -416,6 +416,17 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			"207": openAPIResponse{Description: "Partly erased: either the account was not erased, failed names the owners left, and repeating the request finishes it, or some rows were kept because they cannot be told apart from another account's data", Content: eraseBody},
 			"400": err400, "401": err401, "403": err403, "422": notASubject422,
 			"503": map[string]any{"description": "Legal hold status is unavailable or the subject could not be signed out, so nothing was erased. Repeat the request"},
+		}}, super...),
+	}
+
+	paths["/api/admin/gdpr/subject-digests"] = openAPIPath{
+		"post": requiringRoles(&openAPIOperation{Tags: []string{"Admin / GDPR"}, Summary: "Values the audit log names a data subject by, to filter entries by resource id", Security: bothAuth, RequestBody: jsonBody(map[string]any{"identifier": "user@example.com"}), Responses: map[string]any{
+			"200": openAPIResponse{Description: "Every digest an entry about the subject can carry, the current form first", Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{
+				"type":       "object",
+				"required":   []string{"digests"},
+				"properties": map[string]any{"digests": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+			}}}},
+			"400": err400, "401": err401, "403": err403, "422": notASubject422,
 		}}, super...),
 	}
 

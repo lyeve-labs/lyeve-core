@@ -413,17 +413,17 @@ func publishedOnly(mask func(map[string]any) map[string]any) func(map[string]any
 // validatePatch validates the body of a partial update: only the fields it
 // carries, read against the stored entry for cross-field rules. Returns true
 // if the patch is valid, and false if the refusal has been written to w.
-func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, schemaName string, patch, current map[string]any) bool {
-	s, ok := h.schemaForValidation(w, r, schemaName)
-	if !ok {
-		return false
-	}
+//
+// A patch that passes has its integer and decimal values rewritten in the form
+// the store binds, so the hooks after it read that form.
+func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s *domain.Schema, patch, current map[string]any) bool {
 	errs, err := h.contentRules().ValidatePatch(r.Context(), s, patch, current)
 	if err != nil {
 		rulesUnavailable(w, r, err)
 		return false
 	}
 	if len(errs) == 0 {
+		exactValues(s, patch)
 		return true
 	}
 	respondValidation(w, r, errs)
@@ -435,11 +435,9 @@ func (h *ContentHandler) validatePatch(w http.ResponseWriter, r *http.Request, s
 // omission on a create, which validating first would refuse. The update path does
 // not fill defaults, since an omitted field there is one to leave alone.
 // Returns the data to insert, or false when the refusal has been written.
-func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, schemaName string, data map[string]any) (map[string]any, bool) {
-	s, ok := h.schemaForValidation(w, r, schemaName)
-	if !ok {
-		return nil, false
-	}
+// Its integer and decimal values are in the form the store binds, as
+// validatePatch leaves them.
+func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s *domain.Schema, data map[string]any) (map[string]any, bool) {
 	data, errs, err := h.contentRules().PrepareCreate(r.Context(), s, data)
 	if err != nil {
 		rulesUnavailable(w, r, err)
@@ -449,6 +447,7 @@ func (h *ContentHandler) prepareCreate(w http.ResponseWriter, r *http.Request, s
 		respondValidation(w, r, errs)
 		return nil, false
 	}
+	exactValues(s, data)
 	return data, true
 }
 

@@ -5,6 +5,7 @@ package jsonpool
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"sync"
 
@@ -72,6 +73,27 @@ func DecodeJSON(r io.Reader, v any) error {
 	}
 	return json.Unmarshal(buf.Bytes(), v)
 }
+
+// DecodeJSONNumbers is DecodeJSON with every number decoded into an
+// interface value as a json.Number, which keeps the literal text, instead of
+// a float64, which rounds any integer past 2^53. goccy offers this only on a
+// Decoder, so the body is decoded from the stream, and anything after the
+// first value is refused as Unmarshal refuses it.
+func DecodeJSONNumbers(r io.Reader, v any) error {
+	dec := json.NewDecoder(r)
+	dec.UseNumber()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var rest json.RawMessage
+	if err := dec.Decode(&rest); !errors.Is(err, io.EOF) {
+		return errTrailingData
+	}
+	return nil
+}
+
+// errTrailingData is a body that holds more than one JSON value.
+var errTrailingData = errors.New("invalid character after top-level value")
 
 // PrewarmJSON primes the encoder's per-type cache for common CMS types.
 // Call once at startup after config is loaded. Reduces first-request latency

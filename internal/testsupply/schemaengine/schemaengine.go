@@ -205,10 +205,10 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 		// published, not draft. A row written without a status is visible,
 		// and the read path defaults to published, so defaulting the column
 		// the other way makes every insert invisible to the very next list.
-		cols = append(cols,
-			"_status "+boundedText+" NOT NULL DEFAULT 'published'",
-			"published_at "+tsType,
-		)
+		// _status is the only column draft and publish adds. A published_at
+		// here collided with a declared field of that name, which a WordPress
+		// post type carries.
+		cols = append(cols, "_status "+boundedText+" NOT NULL DEFAULT 'published'")
 	}
 
 	var pivots []string
@@ -297,7 +297,7 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 			}
 			continue
 		}
-		colType := e.columnType(f.FieldType, boundedText, unboundedText, tsType)
+		colType := e.columnType(f, boundedText, unboundedText, tsType)
 		if f.Unique && colType == unboundedText {
 			colType = boundedText
 		}
@@ -367,8 +367,8 @@ func (e *Engine) createTableSQL(table, body string) string {
 // write into. The store passes a Go value of the field's own type, so a column
 // that cannot hold it is not a smaller fixture, it is a broken one: a boolean
 // written into TEXT fails on insert with "cannot encode true into text format".
-func (e *Engine) columnType(fieldType, boundedText, unboundedText, tsType string) string {
-	switch fieldType {
+func (e *Engine) columnType(f core.SchemaField, boundedText, unboundedText, tsType string) string {
+	switch f.FieldType {
 	case "boolean":
 		switch e.host.Dialect() {
 		case "mysql":
@@ -379,7 +379,25 @@ func (e *Engine) columnType(fieldType, boundedText, unboundedText, tsType string
 			return "BOOLEAN"
 		}
 	case "number":
-		return "DOUBLE PRECISION"
+		// The exact column a shipped install creates, not a float. A bare
+		// NUMERIC keeps no fraction on MySQL or SQL Server, so those two name
+		// the precision and scale.
+		switch e.host.Dialect() {
+		case "mysql":
+			return "DECIMAL(38,10)"
+		case "mssql":
+			return "NUMERIC(38,10)"
+		default:
+			return "NUMERIC"
+		}
+	case "integer":
+		return "BIGINT"
+	case "decimal":
+		p, sc := core.DecimalSpec(f)
+		if e.host.Dialect() == "mysql" {
+			return fmt.Sprintf("DECIMAL(%d,%d)", p, sc)
+		}
+		return fmt.Sprintf("NUMERIC(%d,%d)", p, sc)
 	case "date", "datetime":
 		return tsType
 	case "json":

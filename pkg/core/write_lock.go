@@ -1,6 +1,9 @@
 package core
 
-import "context"
+import (
+	"context"
+	"sync"
+)
 
 // WriteSerializer is implemented by a host that can run a write under an
 // exclusive lock every replica of the install honors. It is what keeps a
@@ -68,4 +71,50 @@ func WithinTransaction(ctx context.Context) context.Context {
 func InTransaction(ctx context.Context) bool {
 	in, _ := ctx.Value(inTransactionKey{}).(bool)
 	return in
+}
+
+type afterCommitKey struct{}
+
+// commitHooks holds what runs once a transaction on a context commits.
+type commitHooks struct {
+	mu  sync.Mutex
+	fns []func(context.Context)
+}
+
+// WithCommitHooks marks ctx as carrying a transaction whose commit runs what
+// AfterCommit queues on it. The host calls it for the fn a serialized write
+// runs, and calls run with the context the write started with once the
+// transaction has committed. A rollback never calls run, so nothing queued
+// runs.
+func WithCommitHooks(ctx context.Context) (txCtx context.Context, run func(context.Context)) {
+	hooks := &commitHooks{}
+	run = func(ctx context.Context) {
+		hooks.mu.Lock()
+		fns := hooks.fns
+		hooks.fns = nil
+		hooks.mu.Unlock()
+		for _, fn := range fns {
+			fn(ctx)
+		}
+	}
+	return context.WithValue(ctx, afterCommitKey{}, hooks), run
+}
+
+// AfterCommit runs fn once the transaction ctx carries commits, and never
+// when it rolls back. A ctx that carries no transaction runs fn at once. So a
+// writer that joins a serialized write announces its write, and drops what it
+// cached, only once the write is durable, and a writer outside one behaves
+// as before.
+//
+// fn is handed the context the serialized write started with, which carries
+// no transaction, so it may query on connections of its own.
+func AfterCommit(ctx context.Context, fn func(context.Context)) {
+	hooks, _ := ctx.Value(afterCommitKey{}).(*commitHooks)
+	if hooks == nil {
+		fn(ctx)
+		return
+	}
+	hooks.mu.Lock()
+	hooks.fns = append(hooks.fns, fn)
+	hooks.mu.Unlock()
 }

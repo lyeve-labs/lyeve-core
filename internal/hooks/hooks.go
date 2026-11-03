@@ -70,6 +70,9 @@ type Event struct {
 	ActorID string
 	// ActorKind names the credential ActorID came from.
 	ActorKind string
+	// Plugin is the registered name of the plugin that wrote or published
+	// the event, empty for the engine's own. See core.Event.Plugin.
+	Plugin string
 	// Timestamp is when the event was published. Run stamps it when the
 	// publisher left it zero.
 	Timestamp time.Time
@@ -185,7 +188,17 @@ func (r *Registry) Unregister(token string) {
 			}
 		}
 	}
+	// The slot past the new length is still in the backing array, and a stream's
+	// closure there keeps its buffered records reachable until a later Register
+	// overwrites it.
+	hooks[lastIdx] = nil
 	hooks = hooks[:lastIdx]
+	// A burst of streams on one schema leaves the array at its peak size, so
+	// copy down once most of it is empty. The order is kept, so every index
+	// in byID stays valid.
+	if len(hooks) < cap(hooks)/4 {
+		hooks = append([]Hook(nil), hooks...)
+	}
 	if len(hooks) == 0 {
 		delete(r.hooks, info.key)
 	} else {
@@ -319,6 +332,7 @@ func (r *Registry) Publish(ctx context.Context, event core.Event) error {
 		Source:     event.Source,
 		ActorID:    event.ActorID,
 		ActorKind:  event.ActorKind,
+		Plugin:     event.Plugin,
 		Timestamp:  event.Timestamp,
 		InstanceID: event.InstanceID,
 	})

@@ -132,6 +132,9 @@ func NewStatelessRouter(cfg *config.Config, mode StatelessMode, opts ...RouterOp
 		// X-Tenant-ID is refused rather than handed a tenant nothing else
 		// knows about.
 		r.Use(apimw.TenantHeader(false, onlyDefaultTenant))
+		for _, mw := range o.admission {
+			r.Use(mw)
+		}
 		for _, mw := range o.extra {
 			r.Use(mw)
 		}

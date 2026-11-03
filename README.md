@@ -79,8 +79,9 @@ The admin API answers on `3001`, the content API on `3002`, and `GET /healthz`
 on both for probes. Point `DATABASE_URL` at MySQL or SQL Server instead and
 nothing else changes.
 
-**First run.** On a database with no accounts, the engine logs a one-time
-setup token (`setup: no account exists yet`, field `setup_token`). Open the
+**First run.** On a database with no accounts, the engine writes a one-time
+setup token to standard error as a `setup_token=` line, outside the log, and
+logs `setup: no account exists yet` without it. Open the
 console, enter the token and create the first super admin. The token stops
 working once that account exists.
 

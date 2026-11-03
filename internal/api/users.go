@@ -100,7 +100,7 @@ func (h *UsersHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Email == "" {
-		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, nil)
+		respondErrCode(w, r, http.StatusUnprocessableEntity, i18n.CodeValidationRequired, map[string]any{"field": "email"})
 		return
 	}
 	if err := auth.ValidatePassword(h.passwordPolicy, body.Password); err != nil {
@@ -295,6 +295,10 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
 			return
 		}
+		if errors.Is(err, db.ErrErasurePending) {
+			respondErrCode(w, r, http.StatusConflict, i18n.CodeUserErasurePending, nil)
+			return
+		}
 		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
 	}
@@ -396,6 +400,10 @@ func (h *UsersHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.users.Delete(r.Context(), id); err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
 			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
+			return
+		}
+		if errors.Is(err, db.ErrErasurePending) {
+			respondErrCode(w, r, http.StatusConflict, i18n.CodeUserErasurePending, nil)
 			return
 		}
 		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)

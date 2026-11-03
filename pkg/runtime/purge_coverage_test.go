@@ -1,9 +1,12 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 
@@ -88,4 +91,41 @@ func TestPurgeCoverage_RefusesBootOnATableNobodyCovers(t *testing.T) {
 
 	core.RegisterCoveredTable(probe)
 	require.NoError(t, checkPurgeCoverage(ctx, q, dialect, logger), "declaring the table covered lets the boot go on")
+}
+
+// The refusal is the last thing a container platform shows of a failed boot,
+// so it goes through the engine's JSON logger with the rest of the log, and
+// nothing of it reaches stderr as plain text.
+func TestPurgeCoverage_ReportsThroughTheLogger(t *testing.T) {
+	if !testdb.ShouldTest("postgres") {
+		t.Skip("CI_DIALECT != postgres")
+	}
+	ctx, q, dialect, _ := coverEverything(t)
+
+	probe := "uncovered_" + strings.ReplaceAll(uuid.New().String(), "-", "")[:10]
+	_, err := q.Exec(ctx, `CREATE TABLE `+probe+` (id VARCHAR(36) PRIMARY KEY, tenant_id VARCHAR(255) NOT NULL)`)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = q.Exec(context.Background(), `DROP TABLE `+probe) })
+
+	var logged bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logged, nil))
+
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	stderr := os.Stderr
+	os.Stderr = w
+	err = checkPurgeCoverage(ctx, q, dialect, logger)
+	os.Stderr = stderr
+	require.NoError(t, w.Close())
+	plain, readErr := io.ReadAll(r)
+	require.NoError(t, readErr)
+
+	require.ErrorContains(t, err, probe)
+	require.Empty(t, string(plain), "the report went to stderr outside the JSON log")
+
+	var line map[string]any
+	require.NoError(t, json.Unmarshal(logged.Bytes(), &line), "the logger wrote one JSON line")
+	require.Equal(t, "ERROR", line["level"])
+	require.Contains(t, line["uncovered"], probe)
+	require.Contains(t, line["hint"], "core.TenantPurger", "the line says how a plugin declares its purge path")
 }

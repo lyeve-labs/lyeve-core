@@ -24,6 +24,91 @@ import (
 // caller's mistake and not as an outage the caller would retry. A soft-deleted
 // row under the id is core.ErrConflict, and the row stays deleted.
 func (h *engineHost) UpsertContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.UpsertContentAs(ctx, "", schemaName, id, data)
+}
+
+// UpsertContentAs is UpsertContent on behalf of the plugin named plugin.
+// Implements core.PluginContentWriter.
+//
+// Before it inserts a row, whether the row was missing or the update fell
+// back to an insert, it publishes before_create with the caller's ctx and
+// Plugin set to plugin, and a refusal comes back wrapping
+// core.ErrCreateRefused with nothing written. Before it updates a row the
+// tenant holds, it publishes before_update the same way, and a refusal comes
+// back wrapping core.ErrUpdateRefused. So every writer that reaches the
+// table through the host meets the subscribers a write through the engine's
+// own routes meets. The content plugin's update asks nobody, as
+// asksBeforeEdit says.
+func (h *engineHost) UpsertContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error {
+	if h.contentStore == nil {
+		return fmt.Errorf("content writer not wired")
+	}
+	before := func(ctx context.Context) error {
+		if h.registry == nil {
+			return nil
+		}
+		ev := core.ContentEvent(ctx, core.SourceEngine, core.BeforeCreate, schemaName, id.String(), nil, data)
+		ev.Plugin = plugin
+		if err := h.HookPublisher().Publish(ctx, ev); err != nil {
+			return refusedBy(core.ErrCreateRefused, schemaName, err)
+		}
+		return nil
+	}
+	var beforeUpdate func(context.Context, map[string]any) error
+	if h.asksBeforeEdit(plugin) {
+		beforeUpdate = func(ctx context.Context, old map[string]any) error {
+			return h.askBeforeEdit(ctx, plugin, core.BeforeUpdate, schemaName, id, old, data)
+		}
+	}
+	if err := h.contentStore.UpsertContentChecked(ctx, schemaName, id, data, beforeUpdate, before); err != nil {
+		return contentWriterErr(err, schemaName)
+	}
+	return nil
+}
+
+// asksBeforeEdit reports whether an update or a delete by plugin asks the
+// before_update or before_delete subscribers. The content plugin's writes
+// project an entry whose own update or delete asked them already, and a
+// projection must never be refused once the entry has changed.
+func (h *engineHost) asksBeforeEdit(plugin string) bool {
+	return h.registry != nil && plugin != core.ContentPluginName
+}
+
+// askBeforeEdit publishes before_update or before_delete for the row id with
+// Plugin set to plugin, and answers a refusal wrapping core.ErrUpdateRefused
+// or core.ErrDeleteRefused.
+func (h *engineHost) askBeforeEdit(ctx context.Context, plugin string, action core.EventType, schemaName string, id uuid.UUID, old, data map[string]any) error {
+	ev := core.ContentEvent(ctx, core.SourceEngine, action, schemaName, id.String(), old, data)
+	ev.Plugin = plugin
+	if err := h.HookPublisher().Publish(ctx, ev); err != nil {
+		refused := core.ErrUpdateRefused
+		if action == core.BeforeDelete {
+			refused = core.ErrDeleteRefused
+		}
+		return refusedBy(refused, schemaName, err)
+	}
+	return nil
+}
+
+// refusedBy is a before subscriber's error as the writer answers it: a
+// refusal wrapping refused, or, when the subscriber could not read a store it
+// needs, the core.ErrServiceUnavailable it returned, so the caller answers an
+// outage and not a refusal.
+func refusedBy(refused error, schemaName string, err error) error {
+	if errors.Is(err, core.ErrServiceUnavailable) {
+		return fmt.Errorf("ask the subscribers of %s: %w", schemaName, err)
+	}
+	return fmt.Errorf("%w: %s: %w", refused, schemaName, err)
+}
+
+// ProjectContentAs writes as UpsertContent does and publishes no
+// before_create, for the content plugin alone, which asked the subscribers
+// when it created the entry. Any other plugin is core.ErrCapDenied, and
+// nothing is written. Implements core.PluginContentWriter.
+func (h *engineHost) ProjectContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error {
+	if plugin != core.ContentPluginName {
+		return fmt.Errorf("project content: %w", core.ErrCapDenied)
+	}
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
 	}
@@ -48,8 +133,30 @@ func (h *engineHost) FlushContentCache(ctx context.Context, schemaName string) {
 // soft-deleted row, so a row that is gone matches nothing. That miss reaches
 // the caller as core.ErrNotFound, the answer a read of the row would give.
 func (h *engineHost) UpdateContent(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) error {
+	return h.UpdateContentAs(ctx, "", schemaName, id, data)
+}
+
+// UpdateContentAs is UpdateContent on behalf of the plugin named plugin.
+// Implements core.PluginContentEditor. It reads the row and publishes
+// before_update with the caller's ctx and Plugin set to plugin before it
+// writes, and a refusal comes back wrapping core.ErrUpdateRefused with
+// nothing written. The content plugin's update asks nobody, as
+// asksBeforeEdit says.
+func (h *engineHost) UpdateContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID, data map[string]any) error {
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
+	}
+	if h.asksBeforeEdit(plugin) {
+		existing, err := h.contentStore.GetByID(ctx, schemaName, id)
+		if err != nil {
+			if errors.Is(err, domain.ErrNotFound) {
+				return fmt.Errorf("%w: %s row %s", core.ErrNotFound, schemaName, id)
+			}
+			return contentWriterErr(err, schemaName)
+		}
+		if err := h.askBeforeEdit(ctx, plugin, core.BeforeUpdate, schemaName, id, existing.Data, data); err != nil {
+			return err
+		}
 	}
 	if _, err := h.contentStore.Update(ctx, schemaName, id, data, time.Time{}); err != nil {
 		if errors.Is(err, db.ErrContentConflict) {
@@ -64,8 +171,30 @@ func (h *engineHost) UpdateContent(ctx context.Context, schemaName string, id uu
 // missing row as success: the mirror is a projection, so deleting an
 // already-absent row is not an error. Implements core.ContentWriter.
 func (h *engineHost) DeleteContent(ctx context.Context, schemaName string, id uuid.UUID) error {
+	return h.DeleteContentAs(ctx, "", schemaName, id)
+}
+
+// DeleteContentAs is DeleteContent on behalf of the plugin named plugin.
+// Implements core.PluginContentEditor. It reads the row and publishes
+// before_delete with the caller's ctx and Plugin set to plugin before it
+// deletes, and a refusal comes back wrapping core.ErrDeleteRefused with the
+// row kept. A row that is already gone asks nobody. The content plugin's
+// delete asks nobody, as asksBeforeEdit says.
+func (h *engineHost) DeleteContentAs(ctx context.Context, plugin, schemaName string, id uuid.UUID) error {
 	if h.contentStore == nil {
 		return fmt.Errorf("content writer not wired")
+	}
+	if h.asksBeforeEdit(plugin) {
+		existing, err := h.contentStore.GetByID(ctx, schemaName, id)
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return contentWriterErr(err, schemaName)
+		}
+		if err := h.askBeforeEdit(ctx, plugin, core.BeforeDelete, schemaName, id, existing.Data, nil); err != nil {
+			return err
+		}
 	}
 	if err := h.contentStore.Delete(ctx, schemaName, id); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return err
@@ -175,6 +304,8 @@ func (h *engineHost) ContentPage(ctx context.Context, schemaName string, after u
 
 var (
 	_ core.ContentWriter          = (*engineHost)(nil)
+	_ core.PluginContentWriter    = (*engineHost)(nil)
+	_ core.PluginContentEditor    = (*engineHost)(nil)
 	_ core.ContentUpdater         = (*engineHost)(nil)
 	_ core.ContentStatusProjector = (*engineHost)(nil)
 	_ core.ContentReader          = (*engineHost)(nil)

@@ -1147,6 +1147,73 @@ body (json, newline):
         ]
       }
     },
+    "/api/admin/gdpr/subject-digests": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "identifier": "user@example.com"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "digests": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "digests"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Every digest an entry about the subject can carry, the current form first"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "The identifier is not an email address, an account id or an IP address"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Values the audit log names a data subject by, to filter entries by resource id",
+        "tags": [
+          "Admin / GDPR"
+        ],
+        "x-roles": [
+          "super_admin"
+        ]
+      }
+    },
     "/api/admin/health": {
       "get": {
         "responses": {
@@ -1823,7 +1890,7 @@ body (json, newline):
         ]
       },
       "post": {
-        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine logs at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1831,7 +1898,7 @@ body (json, newline):
                 "example": {
                   "email": "admin@example.com",
                   "password": "changeme",
-                  "setup_token": "from-the-engine-log"
+                  "setup_token": "from-the-engine-stderr"
                 },
                 "type": "object"
               }
@@ -1984,6 +2051,9 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "The account's erasure is not complete, so it is kept"
           }
         },
         "security": [
@@ -2160,6 +2230,9 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "409": {
+            "description": "The account's erasure is not complete, so it stays locked"
           }
         },
         "security": [
@@ -2376,7 +2449,10 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "422": {
-            "description": "Hook validation failed"
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -2430,6 +2506,9 @@ body (json, newline):
           },
           "422": {
             "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -2791,6 +2870,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3074,6 +3159,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3474,7 +3565,10 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "422": {
-            "description": "Hook validation failed"
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3528,6 +3622,9 @@ body (json, newline):
           },
           "422": {
             "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -3889,6 +3986,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [
@@ -4172,6 +4275,12 @@ body (json, newline):
           },
           "404": {
             "description": "Not found"
+          },
+          "422": {
+            "description": "Validation failed"
+          },
+          "503": {
+            "description": "The content rules could not be checked, so nothing was stored"
           }
         },
         "security": [

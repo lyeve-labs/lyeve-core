@@ -95,6 +95,10 @@ type engineHost struct {
 	// plugin's step-up answers as an outage.
 	stepUps atomic.Pointer[stepUpBox]
 
+	// Wired by SetTenantRolesReader (the admin router, beside the step-up
+	// checks). Until then a plugin's read answers as an outage.
+	tenantRoles atomic.Pointer[tenantRolesBox]
+
 	// Wired by RegisterEmailSender (the registering plugin's Start). Nil-safe:
 	// EmailSender() returns nil when no plugin registered one.
 	emailSender core.EmailSender

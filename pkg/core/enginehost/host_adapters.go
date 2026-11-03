@@ -193,6 +193,14 @@ func (c *configAdapter) String(key string) string {
 		// against the same value, not a second read of the setting that a
 		// stored override could make disagree with it.
 		return c.cfg.InstanceRegion
+	case "max_json_body_bytes":
+		// The limits the engine's body guards apply, read once at boot. A
+		// plugin that checks a body ahead of those guards needs the same
+		// value. A read through the resolver would hand it a stored value
+		// the engine has not applied, and would report the setting as live.
+		return strconv.FormatInt(c.cfg.MaxJSONBodyBytes, 10)
+	case "max_body_bytes":
+		return strconv.FormatInt(c.cfg.MaxBodyBytes, 10)
 	case core.ConfigKeyEngineMode:
 		return c.cfg.Mode
 	case "storage_driver":
