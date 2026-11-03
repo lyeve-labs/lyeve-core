@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -507,6 +508,31 @@ func (s *RefreshTokenStore) Unrotate(ctx context.Context, res *RotateResult, ttl
 func (s *RefreshTokenStore) RevokeFamily(ctx context.Context, familyID string) error {
 	unlock := s.locks.lock(familyID)
 	defer unlock()
+	return s.revokeFamilyLocked(ctx, familyID)
+}
+
+// RevokeOwnFamily revokes the family of token, but only when the store holds
+// that token, as the current one or one rotated out of the family, and the
+// family belongs to userID. A family id alone names a family without proving
+// anything, so a caller that knows one cannot end someone else's session. A
+// token that proves nothing is ignored and reports no error.
+func (s *RefreshTokenStore) RevokeOwnFamily(ctx context.Context, token, userID string) error {
+	familyID, hash, err := parseRefreshToken(token)
+	if err != nil {
+		return nil
+	}
+	unlock := s.locks.lock(familyID)
+	defer unlock()
+	rec, err := s.loadFamily(ctx, familyID)
+	if errors.Is(err, ErrTokenInvalid) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if rec.UserID != userID || (rec.CurrentHash != hash && !slices.Contains(rec.UsedHashes, hash)) {
+		return nil
+	}
 	return s.revokeFamilyLocked(ctx, familyID)
 }
 
