@@ -132,33 +132,28 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	// passwords cannot all read a count under the limit and all be checked.
 	// The public rate limiter bounds throughput, not attempts, so this count is
 	// what limits guessing on this endpoint.
-	var reservation Reservation
-	if h.lockoutChecker != nil {
-		var reserved bool
-		var lerr error
-		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
-		if lerr != nil {
-			slog.Warn("lockout check failed in Token, failing closed", "err", lerr, "user_id", user.ID)
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
-		if !reserved {
-			// Answer as the admin path does: 401 with the ordinary invalid
-			// credentials code, and a dummy compare so the timing matches. Only
-			// an account that exists can be locked, so a status of its own, a
-			// code of its own, or a fast answer all tell a caller the address is
-			// real. TestToken_EnumerationTiming_Unit measures exactly that.
-			slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
-				"user_id", user.ID,
-				"failures", reservation.Count,
-				"max_attempts", h.MaxFailedAttempts,
-				"window", h.LockoutWindow,
-				"note", h.lockoutScopeNote())
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
+	lock, reserved, lerr := h.reservePasswordAttempt(r, user.ID)
+	if lerr != nil {
+		slog.Warn("lockout check failed in Token, failing closed", "err", lerr, "user_id", user.ID)
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
+	}
+	if !reserved {
+		// Answer as the admin path does: 401 with the ordinary invalid
+		// credentials code, and a dummy compare so the timing matches. Only
+		// an account that exists can be locked, so a status of its own, a
+		// code of its own, or a fast answer all tell a caller the address is
+		// real. TestToken_EnumerationTiming_Unit measures exactly that.
+		slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
+			"user_id", user.ID,
+			"failures", lock.failures,
+			"max_attempts", lock.limit,
+			"window", h.LockoutWindow,
+			"note", h.lockoutScopeNote())
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
 	}
 
 	if err := auth.VerifyPassword(h.passwordHashAlgo, user.PasswordHash, body.Password); err != nil {
@@ -178,7 +173,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
+	h.releasePasswordAttempt(r.Context(), user.ID, lock)
 
 	if !h.respondIfPasswordSignInRefused(w, r, user) {
 		return

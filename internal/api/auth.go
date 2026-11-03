@@ -188,14 +188,63 @@ func (h *AuthHandler) WithSharedLockoutBackend(backend core.CacheBackend) {
 	h.lockoutShared = true
 }
 
-// releasePasswordAttempt gives back the attempt a correct password reserved,
-// and only that one, so the wrong passwords in the window stay counted. A
-// release that fails is logged and changes no answer.
-func (h *AuthHandler) releasePasswordAttempt(ctx context.Context, userID uuid.UUID, r Reservation) {
+// passwordAttempt is what one password check reserved: an attempt against
+// the account from the requester's network, and one against the account from
+// every network.
+type passwordAttempt struct {
+	networkKey uuid.UUID
+	network    Reservation
+	account    Reservation
+	// failures and limit are the count and the limit that refused the
+	// attempt, for the line that reports a lockout.
+	failures, limit int
+}
+
+// reservePasswordAttempt counts one password attempt before the password is
+// checked, against the account from the requester's network and against the
+// account from every network. Counting per account alone let anyone who knew
+// an address keep its owner out: five wrong passwords from anywhere refused
+// the correct one from everywhere. Wrong passwords now lock out only the
+// network that sent them, at MaxFailedAttempts, and accountAttemptCeiling
+// bounds a guesser who spreads attempts over many networks.
+//
+// It reports false when either count is at its limit. An attempt the
+// ceiling refuses gives back its network attempt, which was never checked.
+func (h *AuthHandler) reservePasswordAttempt(r *http.Request, userID uuid.UUID) (passwordAttempt, bool, error) {
+	a := passwordAttempt{networkKey: networkAttemptKey(userID, requesterNet(clientIP(r)))}
+	if h.lockoutChecker == nil {
+		return a, true, nil
+	}
+	ctx := r.Context()
+	var ok bool
+	var err error
+	a.network, ok, err = h.lockoutChecker.ReserveAttempt(ctx, a.networkKey, h.MaxFailedAttempts)
+	if err != nil || !ok {
+		a.failures, a.limit = a.network.Count, h.MaxFailedAttempts
+		return a, false, err
+	}
+	a.account, ok, err = h.lockoutChecker.ReserveAttempt(ctx, userID, accountAttemptCeiling)
+	if err != nil || !ok {
+		h.releaseReservation(ctx, userID, a.networkKey, a.network)
+		a.failures, a.limit = a.account.Count, accountAttemptCeiling
+		return a, false, err
+	}
+	return a, true, nil
+}
+
+// releasePasswordAttempt gives back the attempts a correct password
+// reserved, and only those, so the wrong passwords in the window stay
+// counted. A release that fails is logged and changes no answer.
+func (h *AuthHandler) releasePasswordAttempt(ctx context.Context, userID uuid.UUID, a passwordAttempt) {
 	if h.lockoutChecker == nil {
 		return
 	}
-	if err := h.lockoutChecker.ReleaseAttempt(ctx, userID, r); err != nil {
+	h.releaseReservation(ctx, userID, a.networkKey, a.network)
+	h.releaseReservation(ctx, userID, userID, a.account)
+}
+
+func (h *AuthHandler) releaseReservation(ctx context.Context, userID, key uuid.UUID, r Reservation) {
+	if err := h.lockoutChecker.ReleaseAttempt(ctx, key, r); err != nil {
 		slog.WarnContext(ctx, "failed to release lockout attempt", "err", err, "user_id", userID)
 	}
 }

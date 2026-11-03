@@ -630,25 +630,20 @@ func (h *AuthHandler) stepUpPassword(r *http.Request, u *domain.User, password s
 	// The attempt is counted before the password is checked, in the same
 	// step that reads the count, so concurrent wrong passwords cannot all be
 	// checked. A correct password gives back its own attempt.
-	var reservation Reservation
-	if h.lockoutChecker != nil {
-		var reserved bool
-		var err error
-		reservation, reserved, err = h.lockoutChecker.ReserveAttempt(ctx, u.ID, h.MaxFailedAttempts)
-		if err != nil {
-			slog.WarnContext(ctx, "step-up lockout check failed, failing closed", "err", err, "user_id", u.ID)
-			return http.StatusServiceUnavailable, "account check unavailable"
-		}
-		if !reserved {
-			slog.WarnContext(ctx, "step-up refused: account is locked out", "user_id", u.ID,
-				"failures", reservation.Count, "max_attempts", h.MaxFailedAttempts, "window", h.LockoutWindow)
-			return http.StatusTooManyRequests, "Too many failed password attempts. Try again later."
-		}
+	lock, reserved, err := h.reservePasswordAttempt(r, u.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "step-up lockout check failed, failing closed", "err", err, "user_id", u.ID)
+		return http.StatusServiceUnavailable, "account check unavailable"
+	}
+	if !reserved {
+		slog.WarnContext(ctx, "step-up refused: account is locked out", "user_id", u.ID,
+			"failures", lock.failures, "max_attempts", lock.limit, "window", h.LockoutWindow)
+		return http.StatusTooManyRequests, "Too many failed password attempts. Try again later."
 	}
 	if err := auth.VerifyPassword(h.passwordHashAlgo, u.PasswordHash, password); err != nil {
 		return http.StatusForbidden, "The password is not valid."
 	}
-	h.releasePasswordAttempt(ctx, u.ID, reservation)
+	h.releasePasswordAttempt(ctx, u.ID, lock)
 	return 0, ""
 }
 

@@ -225,20 +225,26 @@ func TestToken_LockedOut_FailClosedOnCheckError(t *testing.T) {
 
 // LOGIN: Lockout triggers after N failed password attempts
 
+// recordingLockoutChecker counts per key, as the real lockouts do: the
+// handler reserves against the account and against the account from the
+// requester's network.
 type recordingLockoutChecker struct {
-	failures int
+	failures map[uuid.UUID]int
 }
 
 func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
-	if c.failures >= limit {
-		return Reservation{Count: c.failures}, false, nil
+	if c.failures == nil {
+		c.failures = map[uuid.UUID]int{}
 	}
-	c.failures++
-	return Reservation{Count: c.failures}, true, nil
+	if c.failures[userID] >= limit {
+		return Reservation{Count: c.failures[userID]}, false, nil
+	}
+	c.failures[userID]++
+	return Reservation{Count: c.failures[userID]}, true, nil
 }
 
 func (c *recordingLockoutChecker) ReleaseAttempt(ctx context.Context, userID uuid.UUID, _ Reservation) error {
-	c.failures--
+	c.failures[userID]--
 	return nil
 }
 
@@ -289,8 +295,8 @@ func TestLogin_LockoutTriggersAfterNFailures(t *testing.T) {
 		t.Errorf("6th attempt: status = %d, want %d: a lockout must look like any other rejection", rr.Code, http.StatusUnauthorized)
 	}
 
-	if recorder.failures != 5 {
-		t.Errorf("recorded failures = %d, want 5", recorder.failures)
+	if got := recorder.failures[uid]; got != 5 {
+		t.Errorf("recorded failures = %d, want 5", got)
 	}
 }
 

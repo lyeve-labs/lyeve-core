@@ -565,22 +565,27 @@ func TestDeviceLogin_ApprovalNeedsTheAccountPassword(t *testing.T) {
 	assert.Equal(t, "authorization_pending", body["error"], "a refused step-up approves nothing")
 }
 
-func TestDeviceLogin_WrongPasswordsLockTheAccount(t *testing.T) {
+func TestDeviceLogin_WrongPasswordsLockTheirNetwork(t *testing.T) {
 	rg := newTokenRig(t)
 	_, session := rg.user("admin")
 	started := rg.startDevice("203.0.113.41:5000")
-	// The decision routes are limited to a burst of ten per address, so each
-	// attempt comes from its own address: the lockout is what is under test.
+	// Wrong passwords lock the network they came from out of the account.
+	// The decision routes allow a burst of ten per address, so the seven
+	// attempts from one address here reach the lockout.
 	var last *httptest.ResponseRecorder
 	for i := 0; i < 6; i++ {
 		last = rg.do(tokenCall{method: http.MethodPost, path: "/api/admin/auth/device/" + started.UserCode + "/approve",
-			bearer: session, body: map[string]any{"password": "wrong-password"}, remote: "198.51.100." + string(rune('1'+i)) + ":4000"})
+			bearer: session, body: map[string]any{"password": "wrong-password"}, remote: "198.51.100.1:4000"})
 	}
 	assert.Equal(t, http.StatusTooManyRequests, last.Code, last.Body.String())
-	// Locked, the right password is refused too.
+	// Locked, the right password is refused too from that network.
 	rec := rg.do(tokenCall{method: http.MethodPost, path: "/api/admin/auth/device/" + started.UserCode + "/approve",
-		bearer: session, body: map[string]any{"password": tokenTestPassword}, remote: "198.51.100.90:4000"})
+		bearer: session, body: map[string]any{"password": tokenTestPassword}, remote: "198.51.100.1:4001"})
 	assert.Equal(t, http.StatusTooManyRequests, rec.Code)
+	// Another network still approves with the right password.
+	rec = rg.do(tokenCall{method: http.MethodPost, path: "/api/admin/auth/device/" + started.UserCode + "/approve",
+		bearer: session, body: map[string]any{"password": tokenTestPassword}, remote: "198.51.100.90:4000"})
+	assert.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 }
 
 func TestDeviceLogin_CookieApprovalNeedsTheCSRFToken(t *testing.T) {
