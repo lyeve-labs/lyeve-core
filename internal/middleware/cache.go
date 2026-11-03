@@ -266,7 +266,7 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 				ew.Header().Set("ETag", `"`+hex.EncodeToString(hash[:])+`"`)
 			}
 
-			if ew.Header().Get(PrivateResponseHeader) != "" || sessionCookieCredential(r) {
+			if ew.Header().Get(PrivateResponseHeader) != "" || carriesCredential(r) {
 				ew.Header().Del(PrivateResponseHeader)
 				ew.Header().Set("Cache-Control", privateCacheControl)
 			} else if cc := policy.buildCacheControl(); cc != "" {
@@ -299,17 +299,16 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 	}
 }
 
-// sessionCookieCredential reports whether the request may be authenticated
-// by a session cookie: one is present and no bearer token stands in front of
-// it, the order the session middleware reads them in. A response computed
-// for that caller is theirs alone. Vary can name the Authorization and
-// X-API-Key headers a shared cache keys on, but not one cookie among the
-// others a browser sends, so a public response to a cookie session would be
-// served to the next request that carries neither header. A cookie that
-// fails to authenticate only costs the response its shared caching.
-func sessionCookieCredential(r *http.Request) bool {
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") && strings.TrimPrefix(h, "Bearer ") != "" {
-		return false
+// carriesCredential reports whether the request presents a credential: an
+// Authorization header, an API key, or a session cookie. A response computed
+// for any of them may hold what an anonymous reader cannot see, so it is
+// theirs alone. Vary names the two headers, but a shared cache that honors
+// public is not bound to key on them, and Vary cannot name one cookie among
+// the others a browser sends. A credential that fails to authenticate only
+// costs the response its shared caching.
+func carriesCredential(r *http.Request) bool {
+	if r.Header.Get("Authorization") != "" || r.Header.Get("X-API-Key") != "" {
+		return true
 	}
 	for _, name := range []string{security.SessionCookieName, security.SessionCookieNameInsecure} {
 		if c, err := r.Cookie(name); err == nil && c.Value != "" {
