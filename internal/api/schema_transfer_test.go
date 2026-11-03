@@ -1,10 +1,17 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
+	"github.com/lyeve-labs/lyeve-core/pkg/plugintest/mockhost"
 )
 
 func TestConvertUpload_SelectsTheConverter(t *testing.T) {
@@ -117,6 +124,29 @@ func TestSchemaEngineFrom_NilHostIsNotAPanic(t *testing.T) {
 	assert.Nil(t, schemaEngineFrom(nil))
 }
 
-func TestInstanceSource_FallsBackWithoutAHost(t *testing.T) {
-	assert.Equal(t, "lyeve", instanceSource(nil))
+// listOnlyEngine answers the one call an export makes.
+type listOnlyEngine struct{ core.SchemaEngine }
+
+func (listOnlyEngine) List(context.Context) ([]json.RawMessage, error) {
+	return []json.RawMessage{json.RawMessage(`{"name":"article","fields":[{"name":"title","field_type":"text"}]}`)}, nil
+}
+
+type exportHost struct{ core.Host }
+
+func (exportHost) Schema() core.SchemaEngine { return listOnlyEngine{} }
+
+// The instance id is the one the license is bound to, and a tenant admin or a
+// schemas:read token may download an export, so the bundle never carries it.
+func TestSchemaExport_BundleNamesNoInstance(t *testing.T) {
+	mh := mockhost.New(t)
+	mh.Config().Set("instance_id", "host-7f3a-4242")
+	handler := schemaExportHandler(exportHost{mh.Host()})
+
+	for _, format := range []string{"json", "yaml"} {
+		rr := httptest.NewRecorder()
+		handler(rr, httptest.NewRequest(http.MethodGet, "/api/admin/schemas/export?format="+format, nil))
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), "article")
+		assert.NotContains(t, rr.Body.String(), "host-7f3a-4242", format)
+	}
 }
