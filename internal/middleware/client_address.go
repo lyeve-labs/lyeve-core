@@ -16,7 +16,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/reqparse"
 )
 
-// Headers the admin console sets on every request it makes on a browser's
+// Headers the console sets on every request it makes on a browser's
 // behalf. The console is a server, so the engine otherwise sees the console's
 // address on every login it forwards, and every per-address control (the
 // login limiter, lockout scoring, device risk) counts all of its users as one.

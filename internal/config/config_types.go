@@ -261,7 +261,7 @@ type Config struct {
 	// Example: "https://cms.example.com"
 	BaseURL string // LYEVE_BASE_URL
 
-	// ConsoleURL is the public URL of the admin console, the address a person
+	// ConsoleURL is the public URL of the console, the address a person
 	// opens in a browser. Links the engine and its plugins mail to a person
 	// (password reset, magic-link sign-in) point at pages the console serves,
 	// so they are built on this and never on a listen address. The trailing
@@ -275,7 +275,7 @@ type Config struct {
 	// ServiceMonitors can scrape without expiring JWTs.
 	MetricsToken string // METRICS_TOKEN
 
-	// AdminConsoleKey is the shared secret the admin console signs its engine
+	// AdminConsoleKey is the shared secret the console signs its engine
 	// requests with. A signed request carries the browser's address, so
 	// per-address controls count the console's users separately instead of as
 	// the console itself. Unset, the engine ignores the console headers. At
