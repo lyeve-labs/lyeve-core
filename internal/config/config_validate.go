@@ -38,6 +38,9 @@ var weakSecretWords = map[string]bool{
 	"default":  true,
 }
 
+// minMetricsTokenLen is the shortest METRICS_TOKEN the engine boots with.
+const minMetricsTokenLen = 32
+
 // isWeakSecret reports whether a configured secret is a placeholder or a
 // common weak value.
 func isWeakSecret(v string) bool {
@@ -84,6 +87,17 @@ func (c *Config) ValidateCritical() error {
 	}
 	if c.EncryptionKey != "" && c.EncryptionKey == c.JWTSecret {
 		errs = append(errs, "ENCRYPTION_KEY must not equal JWT_SECRET - key hierarchy requires separate values")
+	}
+
+	// The metrics token is a bearer credential that never expires. Unset is
+	// allowed, and the route then needs a super admin.
+	if c.MetricsToken != "" {
+		if isWeakSecret(c.MetricsToken) {
+			errs = append(errs, "METRICS_TOKEN is a placeholder or a common value, set a long random value such as the output of openssl rand -hex 32")
+		}
+		if len(c.MetricsToken) < minMetricsTokenLen {
+			errs = append(errs, fmt.Sprintf("METRICS_TOKEN is %d characters, it must be at least %d", len(c.MetricsToken), minMetricsTokenLen))
+		}
 	}
 
 	// CORS wildcards: fail-closed in all environments
