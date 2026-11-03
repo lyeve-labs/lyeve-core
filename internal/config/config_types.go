@@ -279,13 +279,15 @@ type Config struct {
 	// requests with. A signed request carries the browser's address, so
 	// per-address controls count the console's users separately instead of as
 	// the console itself. Unset, the engine ignores the console headers. At
-	// least 32 characters. The console must hold the same value.
-	AdminConsoleKey string // ADMIN_CONSOLE_KEY
+	// least 32 characters. The console must hold the same value. The old name
+	// ADMIN_CONSOLE_KEY is read for one more minor release.
+	AdminConsoleKey string // LYEVE_CONSOLE_KEY
 
 	// AdminConsoleKeyPrevious is also accepted while a rotation is under way:
 	// set the new key as AdminConsoleKey and the old one here, move the
-	// console to the new key, then unset this. Requires AdminConsoleKey.
-	AdminConsoleKeyPrevious string // ADMIN_CONSOLE_KEY_PREVIOUS
+	// console to the new key, then unset this. Requires AdminConsoleKey. The
+	// old name ADMIN_CONSOLE_KEY_PREVIOUS is read for one more minor release.
+	AdminConsoleKeyPrevious string // LYEVE_CONSOLE_KEY_PREVIOUS
 
 	// AuditHMACKey is the hex-encoded 32-byte HMAC-SHA256 key for audit
 	// hash-chain integrity. Must be a 64-character hex string (32 bytes).
