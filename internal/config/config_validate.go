@@ -67,19 +67,33 @@ func (c *Config) IsProduction() bool {
 func (c *Config) ValidateCritical() error {
 	var errs []string
 
-	// Weak JWT secret
+	// The refusals name a secret's variable and never its value: a long
+	// random secret that contains a refused word is still a secret.
 	if isWeakSecret(c.JWTSecret) {
-		errs = append(errs, fmt.Sprintf("JWT_SECRET %q is too weak - must be a strong, unique key", c.JWTSecret))
+		errs = append(errs, "JWT_SECRET is too weak - must be a strong, unique key")
 	}
 	if len(c.JWTSecret) > 0 && len(c.JWTSecret) < 16 {
 		errs = append(errs, fmt.Sprintf("JWT_SECRET too short (%d chars) - must be at least 16 characters", len(c.JWTSecret)))
+	}
+	// Every JWT_SECRETS entry verifies tokens, so each is held to the same
+	// rules. An entry equal to JWT_SECRET was checked above.
+	for i, s := range c.JWTSecrets {
+		if s == c.JWTSecret {
+			continue
+		}
+		if isWeakSecret(s) {
+			errs = append(errs, fmt.Sprintf("JWT_SECRETS entry %d is too weak - must be a strong, unique key", i+1))
+		}
+		if len(s) < 16 {
+			errs = append(errs, fmt.Sprintf("JWT_SECRETS entry %d too short (%d chars) - must be at least 16 characters", i+1, len(s)))
+		}
 	}
 
 	// Weak encryption key
 	// Empty EncryptionKey falls back to JWTSecret: not a hard error here.
 	if c.EncryptionKey != "" {
 		if isWeakSecret(c.EncryptionKey) {
-			errs = append(errs, fmt.Sprintf("ENCRYPTION_KEY %q is too weak - must be a strong, unique key", c.EncryptionKey))
+			errs = append(errs, "ENCRYPTION_KEY is too weak - must be a strong, unique key")
 		}
 		if len(c.EncryptionKey) < 32 {
 			errs = append(errs, fmt.Sprintf("ENCRYPTION_KEY too short (%d chars) - must be at least 32 chars", len(c.EncryptionKey)))
