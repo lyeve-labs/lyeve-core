@@ -911,7 +911,6 @@ body (json, newline):
           "Admin / System"
         ],
         "x-roles": [
-          "admin",
           "super_admin"
         ]
       }

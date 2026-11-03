@@ -396,7 +396,7 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	set("/api/admin/debug/goroutines", "get", requiringRoles(&openAPIOperation{
 		Tags: goroutineTag, Summary: "Tracked goroutines", Description: "The tracker snapshot: tracked and runtime totals, counts by source name, and by_owner, one row per plugin or the engine with its live count and the age of its oldest goroutine, so a leak names who started it.", Security: both,
 		Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
-	}, admins...))
+	}, super...))
 	set("/robots.txt", "get", &openAPIOperation{
 		Tags: []string{"Admin / System"}, Summary: "Refuses every crawler", Description: "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
 		Responses: map[string]any{"200": openAPIResponse{
