@@ -3,6 +3,7 @@ package config_test
 import (
 	"bytes"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1497,6 +1498,13 @@ func TestLoad_ConsoleKeyNames(t *testing.T) {
 				t.Setenv(k, tt.env[k])
 			}
 
+			// The engine logs one JSON object per line, so the deprecation
+			// goes through slog and never to stderr as plain text.
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
 			orig := os.Stderr
 			r, w, err := os.Pipe()
 			require.NoError(t, err)
@@ -1506,6 +1514,7 @@ func TestLoad_ConsoleKeyNames(t *testing.T) {
 			os.Stderr = orig
 			var stderr bytes.Buffer
 			_, _ = io.Copy(&stderr, r)
+			assert.NotContains(t, stderr.String(), "CONSOLE_KEY")
 
 			if tt.wantErr != nil {
 				require.Error(t, loadErr)
@@ -1517,10 +1526,11 @@ func TestLoad_ConsoleKeyNames(t *testing.T) {
 			require.NoError(t, loadErr)
 			assert.Equal(t, tt.wantKeys, cfg.ConsoleKeys())
 			if tt.wantWarn == nil {
-				assert.NotContains(t, stderr.String(), "CONSOLE_KEY")
+				assert.NotContains(t, logs.String(), "CONSOLE_KEY")
 			}
 			for _, s := range tt.wantWarn {
-				assert.Contains(t, stderr.String(), s)
+				assert.Contains(t, logs.String(), `"level":"WARN"`)
+				assert.Contains(t, logs.String(), s)
 			}
 		})
 	}

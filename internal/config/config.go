@@ -732,8 +732,9 @@ func parseCacheMaxEntries() (int, error) {
 func consoleKeySetting(name, deprecated string) (value, from string, err error) {
 	current, old := lookup(name), lookup(deprecated)
 	if old != "" {
-		// Deprecated: the old name is read for one more minor release.
-		fmt.Fprintf(os.Stderr, "WARNING: %s is deprecated and stops being read after the next minor release. Set %s instead.\n", deprecated, name)
+		// Deprecated: the old name is read for one more minor release. The
+		// engine logs one JSON object per line, so this goes through slog.
+		slog.Warn("deprecated config", "warning", fmt.Sprintf("%s is deprecated and stops being read after the next minor release. Set %s instead.", deprecated, name))
 	}
 	switch {
 	case current != "" && old != "" && current != old:
