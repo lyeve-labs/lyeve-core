@@ -1178,6 +1178,7 @@ var SecretKeys = map[string]bool{
 	// Still verifies console signatures during a rotation, so it is as secret
 	// as the current key. The _key suffix rule does not reach it.
 	"admin_console_key_previous": true,
+	"lyeve_console_key_previous": true,
 }
 
 // OperatorOnlyKeys are settings that only the operator may set, through the

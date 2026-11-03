@@ -503,16 +503,22 @@ func resolveConfig() (*Config, error) {
 		return nil, fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
 	}
 
-	adminConsoleKey := lookup("ADMIN_CONSOLE_KEY")
-	if adminConsoleKey != "" && len(adminConsoleKey) < 32 {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY must be at least 32 characters, got %d", len(adminConsoleKey))
+	adminConsoleKey, keyFrom, err := consoleKeySetting("LYEVE_CONSOLE_KEY", "ADMIN_CONSOLE_KEY")
+	if err != nil {
+		return nil, err
 	}
-	adminConsoleKeyPrevious := lookup("ADMIN_CONSOLE_KEY_PREVIOUS")
+	if adminConsoleKey != "" && len(adminConsoleKey) < 32 {
+		return nil, fmt.Errorf("%s must be at least 32 characters, got %d", keyFrom, len(adminConsoleKey))
+	}
+	adminConsoleKeyPrevious, previousFrom, err := consoleKeySetting("LYEVE_CONSOLE_KEY_PREVIOUS", "ADMIN_CONSOLE_KEY_PREVIOUS")
+	if err != nil {
+		return nil, err
+	}
 	if adminConsoleKeyPrevious != "" && len(adminConsoleKeyPrevious) < 32 {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY_PREVIOUS must be at least 32 characters, got %d", len(adminConsoleKeyPrevious))
+		return nil, fmt.Errorf("%s must be at least 32 characters, got %d", previousFrom, len(adminConsoleKeyPrevious))
 	}
 	if adminConsoleKeyPrevious != "" && adminConsoleKey == "" {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY_PREVIOUS is set without ADMIN_CONSOLE_KEY")
+		return nil, fmt.Errorf("%s is set without %s", previousFrom, strings.TrimSuffix(previousFrom, "_PREVIOUS"))
 	}
 
 	enforceAPIKeyPepper := lookup("ENFORCE_API_KEY_PEPPER") == "true"
@@ -717,6 +723,27 @@ func parseCacheMaxEntries() (int, error) {
 		return 0, fmt.Errorf("CACHE_MAX_ENTRIES must be positive, got %d", n)
 	}
 	return n, nil
+}
+
+// consoleKeySetting reads a console key setting under its current name and
+// its deprecated one, and returns the value with the name it came from. Both
+// names set to different values is refused, because either choice would sign
+// with a key the operator did not mean.
+func consoleKeySetting(name, deprecated string) (value, from string, err error) {
+	current, old := lookup(name), lookup(deprecated)
+	if old != "" {
+		// Deprecated: the old name is read for one more minor release.
+		fmt.Fprintf(os.Stderr, "WARNING: %s is deprecated and stops being read after the next minor release. Set %s instead.\n", deprecated, name)
+	}
+	switch {
+	case current != "" && old != "" && current != old:
+		return "", "", fmt.Errorf("%s and %s are set to different values, so unset %s", name, deprecated, deprecated)
+	case current != "":
+		return current, name, nil
+	case old != "":
+		return old, deprecated, nil
+	}
+	return "", name, nil
 }
 
 func envOr(key, fallback string) string {

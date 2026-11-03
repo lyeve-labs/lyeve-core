@@ -1401,25 +1401,129 @@ func TestLoad_SetupToken(t *testing.T) {
 	})
 }
 
-func TestLoad_ConsoleKeyRotation(t *testing.T) {
-	t.Setenv("DATABASE_URL", "postgres://localhost/cms")
-	t.Setenv("JWT_SECRET", "a-strong-secret-for-the-config-tests")
-	t.Setenv("ENCRYPTION_KEY", "another-strong-key-for-the-config-tests")
-	current, previous := strings.Repeat("n", 32), strings.Repeat("o", 32)
+// The console key is read as LYEVE_CONSOLE_KEY, and the old ADMIN_CONSOLE_KEY
+// names still work for one more minor release. Each error names the variable
+// the value came from, and an old name that is read is reported as deprecated.
+func TestLoad_ConsoleKeyNames(t *testing.T) {
+	current, previous, other := strings.Repeat("n", 32), strings.Repeat("o", 32), strings.Repeat("x", 32)
+	tests := []struct {
+		name     string
+		env      map[string]string
+		wantKeys [][]byte
+		wantErr  []string
+		wantWarn []string
+	}{
+		{
+			name:     "new name alone",
+			env:      map[string]string{"LYEVE_CONSOLE_KEY": current},
+			wantKeys: [][]byte{[]byte(current)},
+		},
+		{
+			name:     "old name alone",
+			env:      map[string]string{"ADMIN_CONSOLE_KEY": current},
+			wantKeys: [][]byte{[]byte(current)},
+			wantWarn: []string{"ADMIN_CONSOLE_KEY is deprecated", "LYEVE_CONSOLE_KEY"},
+		},
+		{
+			name:     "both names equal",
+			env:      map[string]string{"LYEVE_CONSOLE_KEY": current, "ADMIN_CONSOLE_KEY": current},
+			wantKeys: [][]byte{[]byte(current)},
+			wantWarn: []string{"ADMIN_CONSOLE_KEY is deprecated"},
+		},
+		{
+			name:    "both names different",
+			env:     map[string]string{"LYEVE_CONSOLE_KEY": current, "ADMIN_CONSOLE_KEY": other},
+			wantErr: []string{"LYEVE_CONSOLE_KEY and ADMIN_CONSOLE_KEY are set to different values"},
+		},
+		{
+			name:     "previous from the new name",
+			env:      map[string]string{"LYEVE_CONSOLE_KEY": current, "LYEVE_CONSOLE_KEY_PREVIOUS": previous},
+			wantKeys: [][]byte{[]byte(current), []byte(previous)},
+		},
+		{
+			name:     "previous from the old name",
+			env:      map[string]string{"LYEVE_CONSOLE_KEY": current, "ADMIN_CONSOLE_KEY_PREVIOUS": previous},
+			wantKeys: [][]byte{[]byte(current), []byte(previous)},
+			wantWarn: []string{"ADMIN_CONSOLE_KEY_PREVIOUS is deprecated", "LYEVE_CONSOLE_KEY_PREVIOUS"},
+		},
+		{
+			name:     "previous under both names equal",
+			env:      map[string]string{"LYEVE_CONSOLE_KEY": current, "LYEVE_CONSOLE_KEY_PREVIOUS": previous, "ADMIN_CONSOLE_KEY_PREVIOUS": previous},
+			wantKeys: [][]byte{[]byte(current), []byte(previous)},
+			wantWarn: []string{"ADMIN_CONSOLE_KEY_PREVIOUS is deprecated"},
+		},
+		{
+			name:    "previous under both names different",
+			env:     map[string]string{"LYEVE_CONSOLE_KEY": current, "LYEVE_CONSOLE_KEY_PREVIOUS": previous, "ADMIN_CONSOLE_KEY_PREVIOUS": other},
+			wantErr: []string{"LYEVE_CONSOLE_KEY_PREVIOUS and ADMIN_CONSOLE_KEY_PREVIOUS are set to different values"},
+		},
+		{
+			name:    "new previous without any current key",
+			env:     map[string]string{"LYEVE_CONSOLE_KEY_PREVIOUS": previous},
+			wantErr: []string{"LYEVE_CONSOLE_KEY_PREVIOUS is set without LYEVE_CONSOLE_KEY"},
+		},
+		{
+			name:    "old previous without any current key",
+			env:     map[string]string{"ADMIN_CONSOLE_KEY_PREVIOUS": previous},
+			wantErr: []string{"ADMIN_CONSOLE_KEY_PREVIOUS is set without ADMIN_CONSOLE_KEY"},
+		},
+		{
+			name:    "short key under the new name",
+			env:     map[string]string{"LYEVE_CONSOLE_KEY": "short"},
+			wantErr: []string{"LYEVE_CONSOLE_KEY must be at least 32 characters"},
+		},
+		{
+			name:    "short key under the old name",
+			env:     map[string]string{"ADMIN_CONSOLE_KEY": "short"},
+			wantErr: []string{"ADMIN_CONSOLE_KEY must be at least 32 characters"},
+		},
+		{
+			name:    "short previous under the new name",
+			env:     map[string]string{"LYEVE_CONSOLE_KEY": current, "LYEVE_CONSOLE_KEY_PREVIOUS": "short"},
+			wantErr: []string{"LYEVE_CONSOLE_KEY_PREVIOUS must be at least 32 characters"},
+		},
+		{
+			name:    "short previous under the old name",
+			env:     map[string]string{"ADMIN_CONSOLE_KEY": current, "ADMIN_CONSOLE_KEY_PREVIOUS": "short"},
+			wantErr: []string{"ADMIN_CONSOLE_KEY_PREVIOUS must be at least 32 characters"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("DATABASE_URL", "postgres://localhost/cms")
+			t.Setenv("JWT_SECRET", "a-strong-secret-for-the-config-tests")
+			t.Setenv("ENCRYPTION_KEY", "another-strong-key-for-the-config-tests")
+			for _, k := range []string{"LYEVE_CONSOLE_KEY", "LYEVE_CONSOLE_KEY_PREVIOUS", "ADMIN_CONSOLE_KEY", "ADMIN_CONSOLE_KEY_PREVIOUS"} {
+				t.Setenv(k, tt.env[k])
+			}
 
-	t.Setenv("ADMIN_CONSOLE_KEY", "")
-	t.Setenv("ADMIN_CONSOLE_KEY_PREVIOUS", previous)
-	_, err := config.Load()
-	require.Error(t, err, "a previous key with no current one is a half-finished rotation")
+			orig := os.Stderr
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			os.Stderr = w
+			cfg, loadErr := config.Load()
+			require.NoError(t, w.Close())
+			os.Stderr = orig
+			var stderr bytes.Buffer
+			_, _ = io.Copy(&stderr, r)
 
-	t.Setenv("ADMIN_CONSOLE_KEY", current)
-	cfg, err := config.Load()
-	require.NoError(t, err)
-	assert.Equal(t, [][]byte{[]byte(current), []byte(previous)}, cfg.ConsoleKeys())
-
-	t.Setenv("ADMIN_CONSOLE_KEY_PREVIOUS", "short")
-	_, err = config.Load()
-	require.Error(t, err)
+			if tt.wantErr != nil {
+				require.Error(t, loadErr)
+				for _, s := range tt.wantErr {
+					assert.Contains(t, loadErr.Error(), s)
+				}
+				return
+			}
+			require.NoError(t, loadErr)
+			assert.Equal(t, tt.wantKeys, cfg.ConsoleKeys())
+			if tt.wantWarn == nil {
+				assert.NotContains(t, stderr.String(), "CONSOLE_KEY")
+			}
+			for _, s := range tt.wantWarn {
+				assert.Contains(t, stderr.String(), s)
+			}
+		})
+	}
 }
 
 func TestLoad_TLSFilesMustBeSetTogether(t *testing.T) {

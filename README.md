@@ -99,7 +99,7 @@ A Kubernetes starting point is in [`deploy/kubernetes.yaml`](deploy/kubernetes.y
 | `RATE_LIMIT_RPS` | in production | Requests per second from one client address, above 0. |
 | `LYEVE_AUDIT_HMAC_KEY` | in production | 64 hex characters (`openssl rand -hex 32`). Makes the audit trail tamper-evident. |
 | `LYEVE_CONSOLE_URL` | recommended | The console's public https URL. Device sign-in and emailed links need it. |
-| `ADMIN_CONSOLE_KEY` | no | A secret shared with the console, so sign-in limits count each person rather than the console. |
+| `LYEVE_CONSOLE_KEY` | no | A secret shared with the console, so sign-in limits count each person rather than the console. The old name `ADMIN_CONSOLE_KEY` still works until the next minor release. |
 | `LYEVE_SETUP_TOKEN` | no | Chooses the first-run token yourself, 16 characters or more. Set it when more than one replica runs. |
 | `LYEVE_LICENSE_KEY` | no | A license key, which enables licensed plugins in the official image. |
 
