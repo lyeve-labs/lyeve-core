@@ -8,7 +8,7 @@ import (
 type requestHostCtxKey struct{}
 
 // WithRequestHost records the host the caller addressed when a hop in front
-// of the engine vouched for it. The admin console is the case: it calls the
+// of the engine vouched for it. The console is the case: it calls the
 // engine at an internal address, so r.Host names that address and not the
 // domain the browser opened. The engine records the console's host only after
 // verifying the console's signature over it.

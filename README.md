@@ -1,9 +1,9 @@
-# lyeve-core
+# LyEve Core
 
-The engine of [LyEve](https://lyeve.com), a headless CMS written in Go. One
-install serves many tenants from PostgreSQL, MySQL or SQL Server, and your
-apps read and write content through a REST API. The admin console is
-[lyeve-admin](https://github.com/lyeve-labs/lyeve-admin).
+LyEve Core is the engine of [LyEve](https://lyeve.com), a headless CMS written
+in Go. One install serves many tenants from PostgreSQL, MySQL or SQL Server,
+and your apps read and write content through a REST API. The browser app your
+team works in is [LyEve Console](https://github.com/lyeve-labs/lyeve-console).
 
 | | |
 |---|---|

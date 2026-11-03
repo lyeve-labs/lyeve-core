@@ -25,7 +25,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
 )
 
-// The license wire is what the admin console and every operator script read
+// The license wire is what the console and every operator script read
 // about the license: the entitlements body, what a renewal answers, the
 // tenant features routes, the plugin status, the security controls and the
 // OpenAPI document. TestLicenseWire_MatchesTheGolden boots the real engine

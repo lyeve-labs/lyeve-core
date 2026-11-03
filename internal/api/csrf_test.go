@@ -555,7 +555,7 @@ func TestCSRF_HostPrefixCookieRequirements(t *testing.T) {
 
 	// The session cookie follows the CSRF cookie's rule. Over TLS it carries
 	// the __Host- prefix, so no other host can plant or replace it, and the
-	// browser holds the same name the admin console writes. Over plain HTTP it
+	// browser holds the same name the console writes. Over plain HTTP it
 	// drops the prefix, which a browser would refuse there. Logout clears the
 	// name it set, or the dead session would stay in the browser.
 	for _, tc := range []struct {
