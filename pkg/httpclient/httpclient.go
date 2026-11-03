@@ -46,7 +46,15 @@ func DoRequest(ctx context.Context, req *http.Request, opts ...Option) (*http.Re
 	client := cfg.client
 	if client == nil {
 		if cfg.skipSSRF {
-			client = &http.Client{Timeout: cfg.timeout}
+			// The caller allowed this target past the address check, often
+			// a private one. A redirect names a target nobody allowed, so it
+			// is returned unfollowed.
+			client = &http.Client{
+				Timeout: cfg.timeout,
+				CheckRedirect: func(*http.Request, []*http.Request) error {
+					return http.ErrUseLastResponse
+				},
+			}
 		} else {
 			client = ssrf.NewSafeHTTPClient(cfg.timeout, 3)
 		}
@@ -122,7 +130,8 @@ func WithTimeout(d time.Duration) Option {
 }
 
 // WithSkipSSRF disables SSRF URL validation. Use only for testing
-// or for calls to clearly safe internal services.
+// or for calls to clearly safe internal services. Without WithClient, a
+// redirect is then returned to the caller rather than followed.
 func WithSkipSSRF(skip bool) Option {
 	return func(c *Config) {
 		c.skipSSRF = skip
