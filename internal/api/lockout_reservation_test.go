@@ -14,15 +14,33 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
 )
 
-// burstSize is how many wrong answers for one account arrive at once. Each
-// comes from its own address, so the per-address rate limit never decides
-// the outcome and only the account lockout can.
+// burstSize is how many wrong answers for one account arrive at once.
 const burstSize = 50
+
+// manyNetworks gives each request of a burst its own network, so neither the
+// per-address rate limit nor the per-network lockout decides the outcome.
+func manyNetworks(i int) string { return fmt.Sprintf("10.9.%d.%d:4000", i/250, i%250+1) }
+
+// oneNetwork gives each request of a burst its own address in one IPv6 /64,
+// which the lockout counts as one network.
+func oneNetwork(i int) string { return fmt.Sprintf("[2001:db8:9::%x]:4000", i+1) }
+
+// burstLimits raises the public limit on the two password routes past a
+// burst, as an operator may, so that a burst from one network reaches the
+// lockout instead of stopping at the rate limit.
+func burstLimits() RouterOption {
+	l := apimw.PublicRateLimitConfig{Rate: 1000, Burst: 1000}
+	return WithPublicRateLimitOverrides(map[string]apimw.PublicRateLimitConfig{
+		"POST:/api/admin/auth/login": l,
+		"POST:/api/v1/auth/token":    l,
+	}, nil)
+}
 
 // lockoutBackends are the two places the engine keeps its lockouts: the
 // process, and the cache backend every replica shares.
@@ -47,12 +65,18 @@ func (b roundTripBackend) Get(ctx context.Context, key string) ([]byte, error) {
 // hands them.
 func newLockoutRig(t *testing.T, backend string, adminOpts ...RouterOption) *tokenRig {
 	t.Helper()
+	return newLockoutRigFor(t, backend, nil, adminOpts...)
+}
+
+// newLockoutRigFor is newLockoutRig with options both routers take.
+func newLockoutRigFor(t *testing.T, backend string, both []RouterOption, adminOpts ...RouterOption) *tokenRig {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("integration test requires Docker (testcontainers)")
 	}
 	pool := testdb.PostgresWithMaxConns(t, burstSize)
 	cfg := testConfig()
-	common := []RouterOption{WithLifetime(testLifetime(t))}
+	common := append([]RouterOption{WithLifetime(testLifetime(t))}, both...)
 	if backend == "shared" {
 		common = append(common, WithLockoutBackend(auth.NewFlushProtectedBackend(roundTripBackend{auth.NewMemoryBackend()})))
 	}
@@ -65,13 +89,13 @@ func newLockoutRig(t *testing.T, backend string, adminOpts ...RouterOption) *tok
 	return &tokenRig{t: t, pool: pool, cfg: cfg, admin: admin, api: apiRouter, users: db.NewUserStore(pool), tokens: tokens}
 }
 
-// burst sends burstSize requests at the same instant and counts the status
-// codes they get.
-func burst(rg *tokenRig, call func(i int) tokenCall) map[int]int {
-	calls := make([]tokenCall, burstSize)
+// burst sends n requests at the same instant, request i from addr(i), and
+// counts the status codes they get.
+func burst(rg *tokenRig, n int, addr func(i int) string, call func(i int) tokenCall) map[int]int {
+	calls := make([]tokenCall, n)
 	for i := range calls {
 		calls[i] = call(i)
-		calls[i].remote = fmt.Sprintf("10.9.%d.%d:4000", i/250, i%250+1)
+		calls[i].remote = addr(i)
 	}
 	var (
 		start sync.WaitGroup
@@ -110,57 +134,73 @@ func adminTokenBody(extra map[string]any) map[string]any {
 
 // Concurrent wrong passwords for one account reach the password check no
 // more often than the lockout allows, on each route that checks a password,
-// whether the count is kept in the process or in the shared backend. Every
-// request still gets the answer that route gives a wrong password or a
-// locked account.
+// whether the count is kept in the process or in the shared backend. From one
+// network the limit is the per-network one. From many it is the account's
+// ceiling, and the burst sends twice the ceiling. Every request still gets
+// the answer that route gives a wrong password or a locked account.
 func TestLockout_ConcurrentWrongPasswordsReachTheCheckAtMostTheLimit(t *testing.T) {
 	routes := []string{"login", "token", "admin token step-up"}
+	scopes := []struct {
+		name  string
+		addr  func(int) string
+		size  int
+		limit int
+	}{
+		{"one network", oneNetwork, burstSize, DefaultMaxFailedAttempts},
+		{"many networks", manyNetworks, 2 * accountAttemptCeiling, accountAttemptCeiling},
+	}
 	for _, backend := range lockoutBackends {
-		for _, route := range routes {
-			t.Run(backend+"/"+route, func(t *testing.T) {
-				rg := newLockoutRig(t, backend)
-				u, session := rg.user("admin")
-				logs := captureStampedLogs(t)
-
-				codes := burst(rg, func(int) tokenCall {
-					creds := map[string]any{"email": u.Email, "password": "wrong-password"}
-					switch route {
-					case "login":
-						return tokenCall{method: http.MethodPost, path: "/api/admin/auth/login", body: creds}
-					case "token":
-						return tokenCall{method: http.MethodPost, path: "/api/v1/auth/token", body: creds, router: rg.api}
-					default:
-						return tokenCall{method: http.MethodPost, path: "/api/admin/admin-tokens", bearer: session,
-							body: adminTokenBody(map[string]any{"password": "wrong-password"})}
-					}
+		for _, scope := range scopes {
+			for _, route := range routes {
+				t.Run(backend+"/"+scope.name+"/"+route, func(t *testing.T) {
+					testPasswordBurst(t, backend, route, scope.addr, scope.size, scope.limit)
 				})
-
-				var reached int
-				switch route {
-				case "login", "token":
-					// Both answers are the same 401 by design, so the line the
-					// handler writes after a password fails is what tells a
-					// checked password from a refused one.
-					msg := "login failed: password did not verify"
-					if route == "token" {
-						msg = "token login failed: password did not verify"
-					}
-					for _, r := range logs(u.ID) {
-						if r.message == msg {
-							reached++
-						}
-					}
-					assert.Equal(t, map[int]int{http.StatusUnauthorized: burstSize}, codes)
-				default:
-					reached = codes[http.StatusForbidden]
-					assert.Equal(t, burstSize, codes[http.StatusForbidden]+codes[http.StatusTooManyRequests], "codes: %v", codes)
-				}
-				assert.Positive(t, reached, "codes: %v", codes)
-				assert.LessOrEqual(t, reached, DefaultMaxFailedAttempts,
-					"%d of %d concurrent wrong passwords were checked against a limit of %d", reached, burstSize, DefaultMaxFailedAttempts)
-			})
+			}
 		}
 	}
+}
+
+func testPasswordBurst(t *testing.T, backend, route string, addr func(int) string, size, limit int) {
+	rg := newLockoutRigFor(t, backend, []RouterOption{burstLimits()})
+	u, session := rg.user("admin")
+	logs := captureStampedLogs(t)
+
+	codes := burst(rg, size, addr, func(int) tokenCall {
+		creds := map[string]any{"email": u.Email, "password": "wrong-password"}
+		switch route {
+		case "login":
+			return tokenCall{method: http.MethodPost, path: "/api/admin/auth/login", body: creds}
+		case "token":
+			return tokenCall{method: http.MethodPost, path: "/api/v1/auth/token", body: creds, router: rg.api}
+		default:
+			return tokenCall{method: http.MethodPost, path: "/api/admin/admin-tokens", bearer: session,
+				body: adminTokenBody(map[string]any{"password": "wrong-password"})}
+		}
+	})
+
+	var reached int
+	switch route {
+	case "login", "token":
+		// Both answers are the same 401 by design, so the line the
+		// handler writes after a password fails is what tells a
+		// checked password from a refused one.
+		msg := "login failed: password did not verify"
+		if route == "token" {
+			msg = "token login failed: password did not verify"
+		}
+		for _, r := range logs(u.ID) {
+			if r.message == msg {
+				reached++
+			}
+		}
+		assert.Equal(t, map[int]int{http.StatusUnauthorized: size}, codes)
+	default:
+		reached = codes[http.StatusForbidden]
+		assert.Equal(t, size, codes[http.StatusForbidden]+codes[http.StatusTooManyRequests], "codes: %v", codes)
+	}
+	assert.Positive(t, reached, "codes: %v", codes)
+	assert.LessOrEqual(t, reached, limit,
+		"%d of %d concurrent wrong passwords were checked against a limit of %d", reached, size, limit)
 }
 
 // wrongTOTPCode returns a six digit code that no step near now accepts for
@@ -215,7 +255,7 @@ func TestMFALockout_ConcurrentWrongCodesReachTheCheckAtMostTheLimit(t *testing.T
 					fresh[i] = challenge()
 				}
 
-				codes := burst(rg, func(i int) tokenCall {
+				codes := burst(rg, burstSize, manyNetworks, func(i int) tokenCall {
 					switch tc.name {
 					case "sign-in, one challenge":
 						return tokenCall{method: http.MethodPost, path: "/api/admin/auth/mfa-verify",

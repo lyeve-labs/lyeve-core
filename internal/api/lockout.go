@@ -137,3 +137,18 @@ func (l *InMemoryLockout) ResetFailedAttempts(userID uuid.UUID) {
 	defer l.mu.Unlock()
 	delete(l.entries, userID)
 }
+
+// networkAttemptKey names the counter of one account's password attempts
+// from one network. It is a name-based UUID in the account's namespace, so
+// the lockouts keep it in the same shape and keyspace as the account's own
+// counter without colliding with it.
+func networkAttemptKey(userID uuid.UUID, network string) uuid.UUID {
+	return uuid.NewSHA1(userID, []byte(network))
+}
+
+// stepUpAttemptKey names the counter of one account's password step-ups. It
+// lives in the account's namespace beside the network counters, and no
+// network is spelled "step-up", so it collides with none of them.
+func stepUpAttemptKey(userID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(userID, []byte("step-up"))
+}
