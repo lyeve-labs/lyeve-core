@@ -318,6 +318,108 @@ func carriesCredential(r *http.Request) bool {
 	return false
 }
 
+// CredentialedPrivate keeps every response to a request that carries a
+// credential out of shared caches, whatever the route set. A credential's
+// tenant wins over the host, so the answer can belong to another tenant than
+// the URL names, and a CDN keyed on host and URL would serve it, or its 404,
+// to that host's visitors. A Cache-Control that a shared cache may honor
+// becomes private and keeps its max-age for the browser, one with no
+// Cache-Control becomes private and unstored, and the CDN-only headers go.
+// A request with no credential passes through untouched.
+func CredentialedPrivate(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !carriesCredential(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		next.ServeHTTP(&privateWriter{ResponseWriter: w}, r)
+	})
+}
+
+// cdnOnlyHeaders are read by a CDN in place of Cache-Control.
+var cdnOnlyHeaders = []string{"CDN-Cache-Control", "Cloudflare-CDN-Cache-Control", "Surrogate-Control"}
+
+// sharedOnlyDirectives grant or tune storage in a shared cache alone.
+var sharedOnlyDirectives = map[string]bool{"public": true, "s-maxage": true, "proxy-revalidate": true}
+
+// privateCacheControlFor rewrites a response's Cache-Control so no shared
+// cache stores it. A bare max-age counts as shared too: a shared cache may
+// store it for a request whose credential is a cookie or a key.
+func privateCacheControlFor(values []string) string {
+	var kept []string
+	seen := false
+	for _, v := range values {
+		for _, d := range strings.Split(v, ",") {
+			d = strings.TrimSpace(d)
+			name := strings.ToLower(strings.TrimSpace(strings.SplitN(d, "=", 2)[0]))
+			seen = seen || name != ""
+			switch {
+			case name == "":
+			case name == "no-store":
+				return strings.Join(values, ", ")
+			case name == "private" || sharedOnlyDirectives[name]:
+			default:
+				kept = append(kept, d)
+			}
+		}
+	}
+	if !seen {
+		return privateCacheControl
+	}
+	return strings.Join(append([]string{"private"}, kept...), ", ")
+}
+
+// privateWriter applies CredentialedPrivate's rewrite when the status line
+// goes out, after every handler and middleware below it set its headers.
+type privateWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (w *privateWriter) WriteHeader(code int) {
+	if !w.done && code >= http.StatusOK {
+		w.done = true
+		h := w.Header()
+		h.Set("Cache-Control", privateCacheControlFor(h.Values("Cache-Control")))
+		for _, name := range cdnOnlyHeaders {
+			h.Del(name)
+		}
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *privateWriter) Write(b []byte) (int, error) {
+	if !w.done {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+// Flush sends the rewritten headers first when nothing was written yet,
+// because a flush commits them as they stand.
+func (w *privateWriter) Flush() {
+	if !w.done {
+		w.WriteHeader(http.StatusOK)
+	}
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack hands the connection over unchanged: a WebSocket made with a
+// token writes its own handshake and carries no cache headers.
+func (w *privateWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("middleware: underlying ResponseWriter does not support hijacking: %w", http.ErrNotSupported)
+}
+
+// Unwrap exposes the underlying ResponseWriter for http.ResponseController.
+func (w *privateWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 // CacheWithPolicy combines CacheHeaders + Conditional in one middleware.
 // CacheHeaders runs first (inner) to compute ETag / Last-Modified from the
 // handler response, then Conditional (outer) checks If-None-Match / If-Modified-Since

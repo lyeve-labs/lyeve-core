@@ -594,6 +594,10 @@ func applyBuiltinMiddleware(r *chi.Mux, cfg *config.Config, bodyOverrides map[st
 		r.Use(mw)
 	}
 
+	// A response to a request that carries a credential is never stored by
+	// a shared cache, on every route, plugin routes included.
+	r.Use(apimw.CredentialedPrivate)
+
 	// Path sanitization: reject null bytes, control characters, and
 	// fullwidth Unicode homoglyphs before any handler sees the URL.
 	r.Use(apimw.PathSanitize())

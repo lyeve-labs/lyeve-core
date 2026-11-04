@@ -58,3 +58,26 @@ func TestCacheWithPolicy_CredentialedReadsAreServedPrivate(t *testing.T) {
 		})
 	}
 }
+
+// A credentialed response keeps what the browser may do with it and loses
+// what only a shared cache reads. One that already forbids storage, or says
+// nothing at all, ends up unstored.
+func TestPrivateCacheControlFor_DropsSharedCacheDirectives(t *testing.T) {
+	for _, tc := range []struct {
+		in   []string
+		want string
+	}{
+		{nil, "private, no-store"},
+		{[]string{"public, max-age=300"}, "private, max-age=300"},
+		{[]string{"Public, S-MaxAge=600, max-age=60, stale-while-revalidate=600"}, "private, max-age=60, stale-while-revalidate=600"},
+		{[]string{"max-age=300, proxy-revalidate"}, "private, max-age=300"},
+		{[]string{"public", "max-age=300"}, "private, max-age=300"},
+		{[]string{"private, max-age=30"}, "private, max-age=30"},
+		{[]string{"public"}, "private"},
+		{[]string{"no-store"}, "no-store"},
+	} {
+		if got := privateCacheControlFor(tc.in); got != tc.want {
+			t.Errorf("privateCacheControlFor(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
