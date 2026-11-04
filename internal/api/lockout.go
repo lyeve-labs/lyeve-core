@@ -48,6 +48,7 @@ type lockoutUserState struct {
 type InMemoryLockout struct {
 	maxAttempts int
 	window      time.Duration
+	now         func() time.Time
 
 	mu      sync.Mutex
 	entries map[uuid.UUID]*lockoutUserState
@@ -66,6 +67,7 @@ func NewInMemoryLockout(maxAttempts int, window time.Duration) *InMemoryLockout 
 	return &InMemoryLockout{
 		maxAttempts: maxAttempts,
 		window:      window,
+		now:         time.Now,
 		entries:     make(map[uuid.UUID]*lockoutUserState),
 	}
 }
@@ -94,7 +96,7 @@ func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, 
 	defer l.mu.Unlock()
 
 	s := l.getOrCreate(userID)
-	now := time.Now().UnixNano()
+	now := l.now().UnixNano()
 
 	// Start a fresh window if the previous one expired. A zero windowStart is
 	// a state that has never recorded anything, which counts as expired.
@@ -119,7 +121,7 @@ func (l *InMemoryLockout) ReleaseAttempt(ctx context.Context, userID uuid.UUID, 
 	defer l.mu.Unlock()
 
 	s, ok := l.entries[userID]
-	if !ok || s.windowStart.Load() != r.window || time.Now().UnixNano()-r.window > int64(l.window) {
+	if !ok || s.windowStart.Load() != r.window || l.now().UnixNano()-r.window > int64(l.window) {
 		return nil
 	}
 	if s.failures.Load() <= 1 {

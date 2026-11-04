@@ -74,8 +74,11 @@ func TestInMemoryLockout_Counts_AboveThreshold(t *testing.T) {
 func TestInMemoryLockout_Counts_WindowExpiry(t *testing.T) {
 	t.Parallel()
 
-	// Use a very short window so we can test expiry.
+	// The clock moves only when the test moves it, so a loaded host cannot
+	// close the window between the reservations and the first count.
+	now := time.Unix(1_700_000_000, 0)
 	l := NewInMemoryLockout(5, 10*time.Millisecond)
+	l.now = func() time.Time { return now }
 	uid := uuid.New()
 
 	for i := 0; i < 5; i++ {
@@ -86,7 +89,7 @@ func TestInMemoryLockout_Counts_WindowExpiry(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5, count, "should see 5 failures inside window")
 
-	time.Sleep(20 * time.Millisecond)
+	now = now.Add(20 * time.Millisecond)
 
 	count, err = lockoutCount(l, uid)
 	require.NoError(t, err)
@@ -150,12 +153,14 @@ func TestInMemoryLockout_PerUserIsolation(t *testing.T) {
 func TestInMemoryLockout_WindowResetOnNewFailure(t *testing.T) {
 	t.Parallel()
 
+	now := time.Unix(1_700_000_000, 0)
 	l := NewInMemoryLockout(5, 10*time.Millisecond)
+	l.now = func() time.Time { return now }
 	uid := uuid.New()
 
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
 
-	time.Sleep(20 * time.Millisecond)
+	now = now.Add(20 * time.Millisecond)
 
 	// The window has closed, so it holds nothing.
 	count, err := lockoutCount(l, uid)
@@ -182,11 +187,13 @@ func TestNewInMemoryLockout_Defaults(t *testing.T) {
 func TestInMemoryLockout_ExpiredEntriesArePruned(t *testing.T) {
 	t.Parallel()
 
+	now := time.Unix(1_700_000_000, 0)
 	l := NewInMemoryLockout(5, 10*time.Millisecond)
+	l.now = func() time.Time { return now }
 	uid := uuid.New()
 
 	_ = reserveErr(l.ReserveAttempt(context.Background(), uid, noLimit))
-	time.Sleep(20 * time.Millisecond)
+	now = now.Add(20 * time.Millisecond)
 
 	count, err := lockoutCount(l, uid)
 	require.NoError(t, err)
@@ -346,7 +353,7 @@ func lockoutCount(lc LockoutChecker, uid uuid.UUID) (int, error) {
 		l.mu.Lock()
 		defer l.mu.Unlock()
 		s, ok := l.entries[uid]
-		if !ok || time.Now().UnixNano()-s.windowStart.Load() > int64(l.window) {
+		if !ok || l.now().UnixNano()-s.windowStart.Load() > int64(l.window) {
 			return 0, nil
 		}
 		return int(s.failures.Load()), nil
