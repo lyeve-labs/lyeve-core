@@ -644,3 +644,22 @@ func TestEtagMatch(t *testing.T) {
 		})
 	}
 }
+
+// s-maxage is what a shared cache reads in place of max-age, so a public
+// policy can keep a short browser lifetime and a longer one at the edge. It
+// is written only on a public response, because a private one is never in a
+// shared cache.
+func TestCachePolicy_SharedMaxAgeIsWritten(t *testing.T) {
+	public := CachePolicy{
+		MaxAge:               60 * time.Second,
+		SharedMaxAge:         300 * time.Second,
+		StaleWhileRevalidate: 60 * time.Second,
+		StaleIfError:         600 * time.Second,
+		Public:               true,
+	}
+	assert.Equal(t, "public, max-age=60, s-maxage=300, stale-while-revalidate=60, stale-if-error=600", public.buildCacheControl())
+
+	private := public
+	private.Public = false
+	assert.Equal(t, "private, max-age=60, stale-while-revalidate=60, stale-if-error=600", private.buildCacheControl())
+}
