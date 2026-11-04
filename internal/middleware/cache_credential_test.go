@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -17,7 +18,8 @@ import (
 // does not help with a cookie, and it is not a promise every cache keeps
 // with a header, so every credentialed response is private and unstored.
 func TestCacheWithPolicy_CredentialedReadsAreServedPrivate(t *testing.T) {
-	serve := CacheWithPolicy(DefaultContentPolicy)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	public := CachePolicy{MaxAge: 60 * time.Second, Public: true}
+	serve := CacheWithPolicy(public)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	session := func(name string) func(*http.Request) {
