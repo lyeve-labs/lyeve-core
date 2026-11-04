@@ -583,14 +583,17 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	return r, nil
 }
 
-// exceptTenantLifecycle lets requests under /api/admin/tenants bypass mw.
-// Archive, restore and delete are how an operator manages the archived state,
-// so gating them on it would strand a tenant with no way back.
+// exceptTenantLifecycle lets a super admin's requests under
+// /api/admin/tenants bypass mw. Archive, restore and delete are how an
+// operator manages the archived state, so gating them on it would strand a
+// tenant with no way back. Those routes answer only a super admin. Plugins
+// also mount routes a tenant's own admin may call under the same prefix, and
+// for that caller they are writes to the archived tenant like any other.
 func exceptTenantLifecycle(mw func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		guarded := mw(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/api/admin/tenants") {
+			if strings.HasPrefix(r.URL.Path, "/api/admin/tenants") && requestClaims(r).HasRole("super_admin") {
 				next.ServeHTTP(w, r)
 				return
 			}
