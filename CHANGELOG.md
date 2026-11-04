@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Public delivery routes serve published content to anyone without a credential, in a form a CDN may cache: `GET /api/v1/delivery/{schema}` lists a content type's published entries and `GET /api/v1/delivery/{schema}/{id}` reads one. A content type is served there only when its definition carries `public_delivery: true`, so nothing changes on upgrade, and a field marked `private: true` is never served there, nor is a relation into a type that is not marked. A related record that is not published reads as null, and one that cannot be read answers 503. The tenant comes from the host alone, and a request that carries a bearer token, an API key or a session is refused with 400. An answer is `public, max-age=60, s-maxage=300, stale-while-revalidate=60, stale-if-error=600` with a strong ETag and no `Vary` on a credential header, and `DELIVERY_MAX_AGE` and `DELIVERY_SHARED_MAX_AGE` set the first two lifetimes in whole seconds from 1 to 86400. Every site may read an answer and send a preflight, whatever `CORS_ORIGINS` names, and credentials are never allowed. The routes take `limit` (1 to 200), `offset` (up to 10000), up to four `filters[field]` with a value in the form of the field's type, `populate` (up to eight paths, each at most two belongs_to relations into marked types) and `depth` (up to 2, following the same relations). Any other parameter, a repeated one or a value out of range answers 400, an id not written in lower case with hyphens answers 404, and `Accept-Language` is not read. Both routes run on the public rate limit. The credentialed content reads are answered `private, no-store`, as before, and their cache policy is now declared private as well.
+
 ## [0.59.0] - 2026-11-09
 
 ### Changed

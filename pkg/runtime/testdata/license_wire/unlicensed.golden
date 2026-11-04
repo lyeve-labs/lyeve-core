@@ -3232,6 +3232,159 @@ body (json, newline):
         ]
       }
     },
+    "/api/v1/delivery/{schema}": {
+      "get": {
+        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "parameters": [
+          {
+            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Records per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "description": "A parameter outside the grammar, or a request that carries a credential"
+          },
+          "404": {
+            "description": "No such record, or a collection that is not marked for public delivery"
+          },
+          "429": {
+            "description": "Too many requests from this address"
+          },
+          "503": {
+            "description": "The collection's definition or a related record could not be read"
+          }
+        },
+        "summary": "List published records",
+        "tags": [
+          "Content API / Delivery"
+        ]
+      }
+    },
+    "/api/v1/delivery/{schema}/{id}": {
+      "get": {
+        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "parameters": [
+          {
+            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id, in lower case with hyphens. Any other spelling answers 404.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "description": "A parameter outside the grammar, or a request that carries a credential"
+          },
+          "404": {
+            "description": "No such record, or a collection that is not marked for public delivery"
+          },
+          "429": {
+            "description": "Too many requests from this address"
+          },
+          "503": {
+            "description": "The collection's definition or a related record could not be read"
+          }
+        },
+        "summary": "Get a published record",
+        "tags": [
+          "Content API / Delivery"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "responses": {
@@ -4345,6 +4498,159 @@ body (json, newline):
           "editor",
           "admin",
           "super_admin"
+        ]
+      }
+    },
+    "/api/v1/delivery/{schema}": {
+      "get": {
+        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "parameters": [
+          {
+            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Records per page.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 25,
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "description": "A parameter outside the grammar, or a request that carries a credential"
+          },
+          "404": {
+            "description": "No such record, or a collection that is not marked for public delivery"
+          },
+          "429": {
+            "description": "Too many requests from this address"
+          },
+          "503": {
+            "description": "The collection's definition or a related record could not be read"
+          }
+        },
+        "summary": "List published records",
+        "tags": [
+          "Content API / Delivery"
+        ]
+      }
+    },
+    "/api/v1/delivery/{schema}/{id}": {
+      "get": {
+        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "parameters": [
+          {
+            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "in": "path",
+            "name": "schema",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Record id, in lower case with hyphens. Any other spelling answers 404.",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "in": "query",
+            "name": "populate",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "in": "query",
+            "name": "depth",
+            "required": false,
+            "schema": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "304": {
+            "description": "Not modified"
+          },
+          "400": {
+            "description": "A parameter outside the grammar, or a request that carries a credential"
+          },
+          "404": {
+            "description": "No such record, or a collection that is not marked for public delivery"
+          },
+          "429": {
+            "description": "Too many requests from this address"
+          },
+          "503": {
+            "description": "The collection's definition or a related record could not be read"
+          }
+        },
+        "summary": "Get a published record",
+        "tags": [
+          "Content API / Delivery"
         ]
       }
     },

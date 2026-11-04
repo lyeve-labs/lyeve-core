@@ -67,6 +67,12 @@ type CachePolicy struct {
 	// Public makes the response cacheable by shared caches (CDN, proxy).
 	// When false, only the browser may cache the response (Cache-Control: private).
 	Public bool
+
+	// RefusesCredentials marks a route that serves no request carrying a
+	// credential, so its answer never varies by one and Vary leaves out
+	// Authorization and X-API-Key. Some shared caches refuse to store a
+	// response that varies on anything but Accept-Encoding.
+	RefusesCredentials bool
 }
 
 // DefaultContentPolicy is the policy the credentialed content reads name. It
@@ -297,7 +303,10 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 			// the middleware before it may each have added their own value
 			// (Origin from CORS, Accept-Language from a localized read), so every
 			// value is merged rather than only the first one Get would return.
-			ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization", "X-API-Key"))
+			// A route that refuses credentials names neither header.
+			if !policy.RefusesCredentials {
+				ew.Header().Set("Vary", mergeVary(ew.Header().Values("Vary"), "Authorization", "X-API-Key"))
+			}
 
 			if ew.statusCode == 0 {
 				ew.statusCode = http.StatusOK

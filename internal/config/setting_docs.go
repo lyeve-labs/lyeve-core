@@ -18,7 +18,7 @@ var settingDocs = map[string]SettingDoc{
 	"CORS_ALLOW_METHODS":         {Description: "Methods the preflight advertises.", Default: "GET, POST, PUT, DELETE, PATCH, OPTIONS"},
 	"CORS_EXPOSE_HEADERS":        {Description: "Response headers a cross-origin script may read. The default names the request id and the rate-limit headers; without them a browser client can neither quote a request id in a bug report nor read the values it needs to back off with. A route that answers with a header of its own adds it to this list.", Default: "request id, correlation id, both rate-limit header families, Retry-After"},
 	"CORS_MAX_AGE":               {Description: "How long a browser may cache the preflight, in seconds.", Default: "3600"},
-	"CORS_ORIGINS":               {Description: "Allowed origins for cross-origin requests, comma-separated.", Default: "http://localhost:5173"},
+	"CORS_ORIGINS":               {Description: "Allowed origins for cross-origin requests, comma-separated. It governs every route except the public delivery routes, which any origin may read and preflight, with no credential.", Default: "http://localhost:5173"},
 	"DATABASE_MAX_CONNECTIONS":   {Description: "Max open connections in the pool.", Default: "25"},
 	"DATABASE_URL":               {Description: "Connection string for PostgreSQL, MySQL, or SQL Server. The engine detects the dialect from the URL scheme. In production a PostgreSQL URL whose sslmode is missing, disable, allow or prefer boots but logs a warning on every start.", Default: "Required"},
 	"DELIVERY_MAX_AGE":           {Description: "How long a browser may keep an answer of the public delivery routes, in whole seconds from 1 to 86400. Read once at boot.", Default: "60"},

@@ -187,11 +187,14 @@ func corsMiddleware(cfg CORSConfig) func(http.Handler) http.Handler {
 			// API endpoints).  This matches the Fetch Standard §3.2.3 invariant
 			// that "*" + credentials is forbidden (enforced above at startup).
 			//
-			// This is acceptable for LyEve's public-facing API (content delivery,
-			// health checks, open endpoints).  If the deployment requires restricting
-			// which origins may read even public responses, configure CORS_ORIGINS
-			// with explicit origin(s) instead of "*".  When AllowCredentials is true,
-			// only explicitly listed origins are reflected back (never "*").
+			// CORS_ORIGINS governs every route this middleware answers. The
+			// public delivery routes are outside it: their preflight is
+			// answered for any origin before this middleware runs, and their
+			// answers name every origin with "*", so a deployment cannot
+			// restrict which sites read them. To restrict which origins may
+			// read the other responses, configure CORS_ORIGINS with explicit
+			// origin(s) instead of "*". When AllowCredentials is true, only
+			// explicitly listed origins are reflected back (never "*").
 			//
 			// Wildcard logic: if "*" is in origins and credentials are not enabled,
 			// set Access-Control-Allow-Origin: * and skip Vary: Origin.
