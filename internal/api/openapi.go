@@ -474,6 +474,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 
 	// The content API, once, as the {schema} family the router registers.
 	documentContentFamily(paths, schemaNames)
+	documentDelivery(paths)
 
 	// Content API: auth
 	paths["/api/v1/auth/token"] = openAPIPath{

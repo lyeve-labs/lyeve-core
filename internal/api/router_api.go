@@ -51,6 +51,9 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	// Placed AFTER APISecurityHeaders so 415 responses carry security headers.
 	r.Use(apimw.RequireJSONContentType(declaredMediaTypes(r, o.declaredRouteSets())))
 	r.Use(apimw.Locale)
+	// A preflight to a public delivery path is answered for any origin before
+	// the CORS answer below, which names only the CORS_ORIGINS sites.
+	r.Use(deliveryPreflight)
 	r.Use(corsMiddleware(CORSConfig{
 		Origins:          cfg.CORSOrigins,
 		AllowCredentials: false,
@@ -207,6 +210,23 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			r.With(tokenGuard).Post("/auth/token", authHandler.Token)
 		}
 
+		// Public delivery: the published entries of the types a tenant
+		// marked, for anyone and in a form a shared cache may keep. Outside
+		// the authenticated group, limited and guarded like a public plugin
+		// route, and the tenant comes from the host alone.
+		delivery := deliveryCachePolicy(cfg.DeliveryMaxAge, cfg.DeliverySharedMaxAge)
+		for pattern, serve := range map[string]http.HandlerFunc{
+			"/delivery/{schema}":      contentHandler.DeliveryList,
+			"/delivery/{schema}/{id}": contentHandler.DeliveryGet,
+		} {
+			chain := []func(http.Handler) http.Handler{deliveryCORS, apimw.ContentLengthLimit(cfg.MaxJSONBodyBytes)}
+			if publicRL != nil {
+				chain = append(chain, publicRL.WrapFunc(http.MethodGet, "/api/v1"+pattern))
+			}
+			chain = append(chain, apimw.RequirePublicTenant(cfg.MultiTenant, o.tenantRoster), refuseCredentials, apimw.CacheWithPolicy(delivery))
+			r.With(chain...).Get(pattern, serve)
+		}
+
 		// Auto-mounted via RoutesPlugin.
 
 		// Operational health probes: any authenticated role.
@@ -246,6 +266,7 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			// Content reads: any authenticated role. A strong ETag answers a
 			// repeated read with 304. A read made with a credential, as every
 			// read here is, is answered private, so no shared cache stores it.
+			// Content a shared cache may keep is served on /delivery above.
 			r.With(apimw.CacheWithPolicy(apimw.DefaultContentPolicy)).Get("/content/{schema}", contentHandler.List)
 			r.With(apimw.CacheWithPolicy(apimw.DefaultContentPolicy)).Get("/content/{schema}/cursor", contentHandler.ListCursor)
 			// Stream: no cache policy (SSE, chunked transfer).

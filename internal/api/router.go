@@ -1290,6 +1290,8 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"GET /api/v1/ready",
 			"GET /api/v1/schemas",
 			"GET /api/v1/schemas/{name}",
+			"GET /api/v1/delivery/{schema}",
+			"GET /api/v1/delivery/{schema}/{id}",
 			"GET /api/v1/content/{schema}",
 			"GET /api/v1/content/{schema}/cursor",
 			"GET /api/v1/content/{schema}/stream",
