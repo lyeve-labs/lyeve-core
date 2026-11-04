@@ -500,70 +500,71 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 				r.With(requireRole("super_admin")).Post("/gdpr/erase", dsarHandler.Erase)
 				r.With(requireRole("super_admin")).Post("/gdpr/subject-digests", dsarHandler.SubjectDigests)
 			}
-		})
 
-		r.With(sessionCurrent, metricsAuth(cfg.MetricsToken)).Get("/metrics", metrics.Handler().ServeHTTP)
+			// pprof endpoints: super_admin only (sensitive memory/cpu data).
+			// Mount at /api/admin/debug/pprof/ for Go tool compatibility:
+			//   go tool pprof http://localhost:3001/api/admin/debug/pprof/heap
+			r.With(requireRole("super_admin")).HandleFunc("/debug/pprof/", pprof.Index)
+			r.With(requireRole("super_admin")).HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+			r.With(requireRole("super_admin")).HandleFunc("/debug/pprof/profile", pprof.Profile)
+			r.With(requireRole("super_admin")).HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+			r.With(requireRole("super_admin")).HandleFunc("/debug/pprof/trace", pprof.Trace)
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/heap", memoryProfileGuard("heap", pprof.Handler("heap")))
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/allocs", memoryProfileGuard("allocs", pprof.Handler("allocs")))
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/block", pprof.Handler("block"))
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
+			r.With(requireRole("super_admin")).Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
 
-		// pprof endpoints: super_admin only (sensitive memory/cpu data).
-		// Mount at /api/admin/debug/pprof/ for Go tool compatibility:
-		//   go tool pprof http://localhost:3001/api/admin/debug/pprof/heap
-		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/", pprof.Index)
-		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/profile", pprof.Profile)
-		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		r.With(sessionCurrent, requireRole("super_admin")).HandleFunc("/debug/pprof/trace", pprof.Trace)
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/heap", memoryProfileGuard("heap", pprof.Handler("heap")))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/goroutine", pprof.Handler("goroutine"))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/allocs", memoryProfileGuard("allocs", pprof.Handler("allocs")))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/block", pprof.Handler("block"))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
-		r.With(sessionCurrent, requireRole("super_admin")).Handle("/debug/pprof/threadcreate", pprof.Handler("threadcreate"))
+			// Latency stats: super_admin only, because the rankings cover every
+			// tenant on the instance.
+			r.With(requireRole("super_admin")).Get("/debug/latency", latencyStatsHandler(o.latencyTracker))
 
-		// Latency stats: admin or super_admin. Rankings of slowest endpoints.
-		r.With(sessionCurrent, requireRole("admin", "super_admin")).Get("/debug/latency", latencyStatsHandler(o.latencyTracker))
+			// GC config: read current GOGC and GOMEMLIMIT.
+			r.With(requireRole("admin", "super_admin")).Get("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
+				var memLimit int64
+				if ml := runtimedebug.SetMemoryLimit(-1); ml > 0 {
+					memLimit = ml
+				}
+				respond(w, http.StatusOK, map[string]any{
+					"gogc":         os.Getenv("GOGC"),
+					"gomemlimit":   os.Getenv("GOMEMLIMIT"),
+					"memory_limit": memLimit,
+				})
+			})
 
-		// GC config: read current GOGC and GOMEMLIMIT.
-		r.With(sessionCurrent, requireRole("admin", "super_admin")).Get("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
-			var memLimit int64
-			if ml := runtimedebug.SetMemoryLimit(-1); ml > 0 {
-				memLimit = ml
-			}
-			respond(w, http.StatusOK, map[string]any{
-				"gogc":         os.Getenv("GOGC"),
-				"gomemlimit":   os.Getenv("GOMEMLIMIT"),
-				"memory_limit": memLimit,
+			// Update GC at runtime (no restart needed).
+			r.With(requireRole("super_admin")).Post("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
+				var input struct {
+					GOGC int `json:"gogc"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					respond(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
+					return
+				}
+				old := runtimedebug.SetGCPercent(input.GOGC)
+				respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": input.GOGC})
+			})
+
+			// The views over the scaling primitives beside this snapshot, the
+			// tunables behind them, and the request profiler are plugin routes
+			// and mount with them.
+			// Goroutine tracker snapshot.
+			r.With(requireRole("super_admin")).Get("/debug/goroutines", func(w http.ResponseWriter, r *http.Request) {
+				if o.scalingHost == nil {
+					respond(w, http.StatusOK, map[string]any{"total": runtime.NumGoroutine()})
+					return
+				}
+				tracker := o.scalingHost.GoroutineTracker()
+				if tracker == nil {
+					respond(w, http.StatusOK, map[string]any{"total": runtime.NumGoroutine()})
+					return
+				}
+				respond(w, http.StatusOK, tracker.Snapshot())
 			})
 		})
 
-		// Update GC at runtime (no restart needed).
-		r.With(sessionCurrent, requireRole("super_admin")).Post("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
-			var input struct {
-				GOGC int `json:"gogc"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-				respond(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
-				return
-			}
-			old := runtimedebug.SetGCPercent(input.GOGC)
-			respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": input.GOGC})
-		})
-
-		// The views over the scaling primitives beside this snapshot, the
-		// tunables behind them, and the request profiler are plugin routes
-		// and mount with them.
-		// Goroutine tracker snapshot.
-		r.With(sessionCurrent, requireRole("admin", "super_admin")).Get("/debug/goroutines", func(w http.ResponseWriter, r *http.Request) {
-			if o.scalingHost == nil {
-				respond(w, http.StatusOK, map[string]any{"total": runtime.NumGoroutine()})
-				return
-			}
-			tracker := o.scalingHost.GoroutineTracker()
-			if tracker == nil {
-				respond(w, http.StatusOK, map[string]any{"total": runtime.NumGoroutine()})
-				return
-			}
-			respond(w, http.StatusOK, tracker.Snapshot())
-		})
+		r.With(sessionCurrent, metricsAuth(cfg.MetricsToken)).Get("/metrics", metrics.Handler().ServeHTTP)
 
 		// A public route with no limit of its own runs on the general limit,
 		// the global cap, unless no global cap is set: then it runs unlimited,

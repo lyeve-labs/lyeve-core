@@ -23,20 +23,18 @@ import (
 // POST /api/admin/auth/logout
 // Body: {"refresh_token": "..."} (optional, best-effort revocation)
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// Extract family ID from the refresh_token body for revocation.
+	// The refresh_token body names the session to end.
 	var body struct {
 		RefreshToken string `json:"refresh_token"`
 	}
 	_ = jsonpool.DecodeJSON(r.Body, &body) // best-effort. Revocation is fire-and-forget
 
-	if body.RefreshToken != "" && h.refreshTokenStore != nil {
-		familyID, _, err := parseTokenForFamily(body.RefreshToken)
-		if err == nil {
-			// Fire-and-forget: the cookie is cleared regardless.
-			if err := h.refreshTokenStore.RevokeFamily(r.Context(), familyID); err != nil {
-				slog.Warn("failed to revoke refresh token family on logout",
-					"err", err, "family_id", familyID)
-			}
+	// Only the caller's own token revokes its family: the store checks the
+	// token's hash and the family's owner, so naming a family is not enough.
+	if claims := claimsFromCtx(r); body.RefreshToken != "" && h.refreshTokenStore != nil && claims != nil {
+		// Fire-and-forget: the cookie is cleared regardless.
+		if err := h.refreshTokenStore.RevokeOwnFamily(r.Context(), body.RefreshToken, claims.UserID); err != nil {
+			slog.Warn("failed to revoke refresh token family on logout", "err", err)
 		}
 	}
 
@@ -64,12 +62,6 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, map[string]string{"message": "logged out"})
-}
-
-// parseTokenForFamily extracts the family ID from an opaque refresh token.
-// This is a lightweight parse (no Redis access) used for logout revocation.
-func parseTokenForFamily(token string) (familyID string, _ string, err error) {
-	return auth.RefreshTokenFamilyID(token)
 }
 
 // Me returns the currently authenticated user.

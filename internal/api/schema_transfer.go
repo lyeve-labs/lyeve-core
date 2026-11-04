@@ -36,6 +36,11 @@ const maxBundleBytes = 4 << 20
 // path alone, so the document declares exactly what a caller may send.
 var schemaImportMediaTypes = []string{"application/yaml", "application/x-yaml", "text/yaml"}
 
+// exportSource labels every export. The instance id stays out of it: that id
+// is the one the license is bound to, and a tenant admin or a schemas:read
+// token may download an export.
+const exportSource = "lyeve"
+
 // schemaExportHandler writes every content type as a portable bundle.
 // GET /api/admin/schemas/export?format=yaml|json
 func schemaExportHandler(host core.Host) http.HandlerFunc {
@@ -46,7 +51,7 @@ func schemaExportHandler(host core.Host) http.HandlerFunc {
 			return
 		}
 
-		bundle, err := schemaimport.ExportBundle(r.Context(), eng, instanceSource(host))
+		bundle, err := schemaimport.ExportBundle(r.Context(), eng, exportSource)
 		if err != nil {
 			httpx.StoreError(w, r, err, "failed to export content types")
 			return
@@ -242,20 +247,4 @@ func schemaEngineFrom(host core.Host) schemaimport.Engine {
 		return nil
 	}
 	return eng
-}
-
-// instanceSource labels an export with the instance it came from, for a human
-// reading the file later.
-func instanceSource(host core.Host) string {
-	if host == nil {
-		return "lyeve"
-	}
-	cfg := host.Config()
-	if cfg == nil {
-		return "lyeve"
-	}
-	if id := cfg.String("instance_id"); id != "" {
-		return "lyeve/" + id
-	}
-	return "lyeve"
 }
