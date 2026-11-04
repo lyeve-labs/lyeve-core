@@ -1590,3 +1590,35 @@ func TestParseIssuerPolicies(t *testing.T) {
 		})
 	}
 }
+
+// The delivery lifetimes are whole seconds from 1 to 86400. Zero is refused
+// as well as a value past the cap, because a public answer with no max-age is
+// one a cache may keep for as long as its own heuristic says.
+func TestLoad_DeliveryLifetimes(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://localhost/cms")
+	t.Setenv("JWT_SECRET", "test-secret-16+chars!")
+	t.Setenv("ENCRYPTION_KEY", "separate-encryption-key-128-bits-long")
+
+	cfg, err := config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 60*time.Second, cfg.DeliveryMaxAge)
+	assert.Equal(t, 300*time.Second, cfg.DeliverySharedMaxAge)
+
+	t.Setenv("DELIVERY_MAX_AGE", "30")
+	t.Setenv("DELIVERY_SHARED_MAX_AGE", "86400")
+	cfg, err = config.Load()
+	require.NoError(t, err)
+	assert.Equal(t, 30*time.Second, cfg.DeliveryMaxAge)
+	assert.Equal(t, 86400*time.Second, cfg.DeliverySharedMaxAge)
+
+	for _, key := range []string{"DELIVERY_MAX_AGE", "DELIVERY_SHARED_MAX_AGE"} {
+		for _, bad := range []string{"0", "-1", "86401", "60s", "abc"} {
+			t.Run(key+"="+bad, func(t *testing.T) {
+				t.Setenv(key, bad)
+				_, err := config.Load()
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), key)
+			})
+		}
+	}
+}

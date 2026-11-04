@@ -136,6 +136,11 @@ type Config struct {
 	CacheTTL        time.Duration // CACHE_TTL (default 60s)
 	CacheMaxEntries int           // CACHE_MAX_ENTRIES (default 1000)
 
+	// How long a browser and a shared cache may keep an answer of the public
+	// delivery routes.
+	DeliveryMaxAge       time.Duration // DELIVERY_MAX_AGE, whole seconds (default 60)
+	DeliverySharedMaxAge time.Duration // DELIVERY_SHARED_MAX_AGE, whole seconds (default 300)
+
 	// DatabaseDriver selects the SQL dialect the schema engine generates DDL
 	// for. Supported: "postgres", "mysql", "mssql". Defaults to the dialect of
 	// DatabaseURL rather than a fixed value, so a MySQL or MSSQL deployment

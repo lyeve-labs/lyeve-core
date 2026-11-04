@@ -500,6 +500,14 @@ func resolveConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	deliveryMaxAge, err := parseDeliverySeconds("DELIVERY_MAX_AGE", 60)
+	if err != nil {
+		return nil, err
+	}
+	deliverySharedMaxAge, err := parseDeliverySeconds("DELIVERY_SHARED_MAX_AGE", 300)
+	if err != nil {
+		return nil, err
+	}
 
 	tracingSamplingRate := 1.0
 	if v := lookup("TRACING_SAMPLING_RATE"); v != "" {
@@ -569,6 +577,8 @@ func resolveConfig() (*Config, error) {
 		PreStopDrainDelay:                 preStopDrain,
 		CacheTTL:                          cacheTTL,
 		CacheMaxEntries:                   cacheMaxEntries,
+		DeliveryMaxAge:                    deliveryMaxAge,
+		DeliverySharedMaxAge:              deliverySharedMaxAge,
 		DatabaseDriver:                    envOr("DATABASE_DRIVER", db.EngineFromDSN(dbURL)),
 		StorageDriver:                     envOr("STORAGE_DRIVER", "local"),
 		StorageLocalPath:                  envOr("STORAGE_LOCAL_PATH", "./uploads"),
@@ -699,6 +709,27 @@ func parseCacheMaxEntries() (int, error) {
 		return 0, fmt.Errorf("CACHE_MAX_ENTRIES must be positive, got %d", n)
 	}
 	return n, nil
+}
+
+// maxDeliverySeconds caps a delivery lifetime at one day.
+const maxDeliverySeconds = 86400
+
+// parseDeliverySeconds reads a delivery lifetime in whole seconds, from 1 to
+// one day. Zero is refused: a public answer with no max-age is one a cache
+// may keep for as long as its own heuristic says.
+func parseDeliverySeconds(key string, def int) (time.Duration, error) {
+	v := lookup(key)
+	if v == "" {
+		return time.Duration(def) * time.Second, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a whole number of seconds: %w", key, err)
+	}
+	if n < 1 || n > maxDeliverySeconds {
+		return 0, fmt.Errorf("%s must be from 1 to %d seconds, got %d", key, maxDeliverySeconds, n)
+	}
+	return time.Duration(n) * time.Second, nil
 }
 
 // consoleKeySetting reads a console key setting under its current name and
