@@ -47,6 +47,7 @@ func TestLockout_WrongPasswordsLockOnlyTheirNetwork(t *testing.T) {
 			}{
 				{"ipv4", "203.0.113.7:4000", "203.0.113.7:4001", "198.51.100.9:4000"},
 				{"ipv6", "[2001:db8:1:2::a]:4000", "[2001:db8:1:2::b]:4000", "[2001:db8:1:3::a]:4000"},
+				{"ipv4-mapped ipv6", "[::ffff:203.0.113.7]:4000", "203.0.113.7:4001", "198.51.100.9:4000"},
 			} {
 				t.Run(backend+"/"+route.name+"/"+tc.name, func(t *testing.T) {
 					t.Parallel()
@@ -88,5 +89,36 @@ func TestLockout_AccountCeilingLocksAcrossNetworks(t *testing.T) {
 				assert.Zero(t, n, "an attempt the ceiling refused was never checked, so its network keeps no count of it")
 			})
 		}
+	}
+}
+
+// The password step-up confirms an admin token or a device sign-in approval,
+// and only a caller already holding the account's session reaches it. Its
+// wrong passwords are counted per account, whatever network they come from:
+// counted per network, a stolen session could make five guesses from every
+// network it switched to.
+func TestStepUpPassword_WrongPasswordsLockAcrossNetworks(t *testing.T) {
+	t.Parallel()
+	for _, backend := range lockoutBackends {
+		t.Run(backend, func(t *testing.T) {
+			t.Parallel()
+			users, _ := oneUser(t)
+			h := lockoutHandler(users, nil, backend)
+			user := users.byEmail["user@test.com"]
+			stepUp := func(n int, password string) int {
+				req := httptest.NewRequest(http.MethodPost, "/api/admin/admin-tokens", nil)
+				req.RemoteAddr = fmt.Sprintf("192.0.2.%d:4000", n+1)
+				status, _ := h.stepUpPassword(req, user, password)
+				return status
+			}
+			for n := 0; n < h.MaxFailedAttempts; n++ {
+				require.Equal(t, http.StatusForbidden, stepUp(n, "wrong-password"), "attempt %d", n+1)
+			}
+			assert.Equal(t, http.StatusTooManyRequests, stepUp(h.MaxFailedAttempts, "wrong-password"),
+				"a wrong password from yet another network is still refused once the account's step-up limit is spent")
+			login := passwordRoutes[0]
+			assert.Equal(t, http.StatusOK, signInFrom(h, login.path, login.call, "198.51.100.9:4000", "correct-horse-battery-staple"),
+				"the step-up count does not lock password sign-in")
+		})
 	}
 }

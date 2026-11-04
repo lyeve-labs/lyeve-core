@@ -189,18 +189,19 @@ func (h *AuthHandler) WithSharedLockoutBackend(backend core.CacheBackend) {
 }
 
 // passwordAttempt is what one password check reserved: an attempt against
-// the account from the requester's network, and one against the account from
-// every network.
+// a narrow counter of the account, the requester's network for a sign-in or
+// the step-up counter for a step-up, and one against the account from every
+// network.
 type passwordAttempt struct {
-	networkKey uuid.UUID
-	network    Reservation
-	account    Reservation
+	narrowKey uuid.UUID
+	narrow    Reservation
+	account   Reservation
 	// failures and limit are the count and the limit that refused the
 	// attempt, for the line that reports a lockout.
 	failures, limit int
 }
 
-// reservePasswordAttempt counts one password attempt before the password is
+// reservePasswordAttempt counts one password sign-in before the password is
 // checked, against the account from the requester's network and against the
 // account from every network. Counting per account alone let anyone who knew
 // an address keep its owner out: five wrong passwords from anywhere refused
@@ -211,21 +212,34 @@ type passwordAttempt struct {
 // It reports false when either count is at its limit. An attempt the
 // ceiling refuses gives back its network attempt, which was never checked.
 func (h *AuthHandler) reservePasswordAttempt(r *http.Request, userID uuid.UUID) (passwordAttempt, bool, error) {
-	a := passwordAttempt{networkKey: networkAttemptKey(userID, requesterNet(clientIP(r)))}
+	return h.reserveAttempt(r.Context(), userID, networkAttemptKey(userID, requesterNet(clientIP(r))))
+}
+
+// reserveStepUpAttempt counts one password step-up before the password is
+// checked, against the account's step-up counter at MaxFailedAttempts and
+// against accountAttemptCeiling. Only a caller holding the account's session
+// reaches a step-up, so an outsider cannot spend its count, and counting it
+// per network would let a stolen session guess five times from every network
+// it switched to.
+func (h *AuthHandler) reserveStepUpAttempt(ctx context.Context, userID uuid.UUID) (passwordAttempt, bool, error) {
+	return h.reserveAttempt(ctx, userID, stepUpAttemptKey(userID))
+}
+
+func (h *AuthHandler) reserveAttempt(ctx context.Context, userID, narrowKey uuid.UUID) (passwordAttempt, bool, error) {
+	a := passwordAttempt{narrowKey: narrowKey}
 	if h.lockoutChecker == nil {
 		return a, true, nil
 	}
-	ctx := r.Context()
 	var ok bool
 	var err error
-	a.network, ok, err = h.lockoutChecker.ReserveAttempt(ctx, a.networkKey, h.MaxFailedAttempts)
+	a.narrow, ok, err = h.lockoutChecker.ReserveAttempt(ctx, a.narrowKey, h.MaxFailedAttempts)
 	if err != nil || !ok {
-		a.failures, a.limit = a.network.Count, h.MaxFailedAttempts
+		a.failures, a.limit = a.narrow.Count, h.MaxFailedAttempts
 		return a, false, err
 	}
 	a.account, ok, err = h.lockoutChecker.ReserveAttempt(ctx, userID, accountAttemptCeiling)
 	if err != nil || !ok {
-		h.releaseReservation(ctx, userID, a.networkKey, a.network)
+		h.releaseReservation(ctx, userID, a.narrowKey, a.narrow)
 		a.failures, a.limit = a.account.Count, accountAttemptCeiling
 		return a, false, err
 	}
@@ -239,7 +253,7 @@ func (h *AuthHandler) releasePasswordAttempt(ctx context.Context, userID uuid.UU
 	if h.lockoutChecker == nil {
 		return
 	}
-	h.releaseReservation(ctx, userID, a.networkKey, a.network)
+	h.releaseReservation(ctx, userID, a.narrowKey, a.narrow)
 	h.releaseReservation(ctx, userID, userID, a.account)
 }
 

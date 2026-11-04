@@ -629,8 +629,9 @@ func (h *AuthHandler) stepUpPassword(r *http.Request, u *domain.User, password s
 	}
 	// The attempt is counted before the password is checked, in the same
 	// step that reads the count, so concurrent wrong passwords cannot all be
-	// checked. A correct password gives back its own attempt.
-	lock, reserved, err := h.reservePasswordAttempt(r, u.ID)
+	// checked. A correct password gives back its own attempt. The count is
+	// the account's, not its network's: see reserveStepUpAttempt.
+	lock, reserved, err := h.reserveStepUpAttempt(ctx, u.ID)
 	if err != nil {
 		slog.WarnContext(ctx, "step-up lockout check failed, failing closed", "err", err, "user_id", u.ID)
 		return http.StatusServiceUnavailable, "account check unavailable"
