@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Security
 
 - A flow request or data source allowed to reach private networks no longer follows a redirect. It gets the 3xx answer back instead, so an allowed internal target cannot forward the request to an address nobody allowed.
+- Boot refuses three settings that booted before. An `APP_ENV` other than `production` or `development`, `staging` and `test` included, is refused: set `development` for local work and leave it unset or `production` everywhere else, since unset still means production. A `METRICS_TOKEN` shorter than 32 characters or one that reads as a placeholder is refused in every environment: generate one with `openssl rand -hex 32`, or leave it unset so the metrics route needs a super admin. A `JWT_SECRETS` entry shorter than 16 characters or one that reads as a placeholder is refused, as `JWT_SECRET` already was: replace it with a long random value. The boot error names the setting and never prints its value.
 
 ## [0.58.0] - 2026-11-04
 

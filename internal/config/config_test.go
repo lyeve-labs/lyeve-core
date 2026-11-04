@@ -400,12 +400,12 @@ func TestLoad_JWTSecrets(t *testing.T) {
 	defer os.Unsetenv("JWT_SECRET")
 	os.Setenv("ENCRYPTION_KEY", "separate-encryption-key-128-bits-long")
 	defer os.Unsetenv("ENCRYPTION_KEY")
-	os.Setenv("JWT_SECRETS", "new-secret,old-secret")
+	os.Setenv("JWT_SECRETS", "new-signing-key-16+chars,old-signing-key-16+chars")
 	defer os.Unsetenv("JWT_SECRETS")
 
 	cfg, err := config.Load()
 	require.NoError(t, err)
-	assert.Equal(t, []string{"new-secret", "old-secret"}, cfg.JWTSecrets)
+	assert.Equal(t, []string{"new-signing-key-16+chars", "old-signing-key-16+chars"}, cfg.JWTSecrets)
 }
 
 func TestLoad_SecureCookie(t *testing.T) {

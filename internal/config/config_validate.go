@@ -38,6 +38,9 @@ var weakSecretWords = map[string]bool{
 	"default":  true,
 }
 
+// minMetricsTokenLen is the shortest METRICS_TOKEN the engine boots with.
+const minMetricsTokenLen = 32
+
 // isWeakSecret reports whether a configured secret is a placeholder or a
 // common weak value.
 func isWeakSecret(v string) bool {
@@ -64,19 +67,33 @@ func (c *Config) IsProduction() bool {
 func (c *Config) ValidateCritical() error {
 	var errs []string
 
-	// Weak JWT secret
+	// The refusals name a secret's variable and never its value: a long
+	// random secret that contains a refused word is still a secret.
 	if isWeakSecret(c.JWTSecret) {
-		errs = append(errs, fmt.Sprintf("JWT_SECRET %q is too weak - must be a strong, unique key", c.JWTSecret))
+		errs = append(errs, "JWT_SECRET is too weak - must be a strong, unique key")
 	}
 	if len(c.JWTSecret) > 0 && len(c.JWTSecret) < 16 {
 		errs = append(errs, fmt.Sprintf("JWT_SECRET too short (%d chars) - must be at least 16 characters", len(c.JWTSecret)))
+	}
+	// Every JWT_SECRETS entry verifies tokens, so each is held to the same
+	// rules. An entry equal to JWT_SECRET was checked above.
+	for i, s := range c.JWTSecrets {
+		if s == c.JWTSecret {
+			continue
+		}
+		if isWeakSecret(s) {
+			errs = append(errs, fmt.Sprintf("JWT_SECRETS entry %d is too weak - must be a strong, unique key", i+1))
+		}
+		if len(s) < 16 {
+			errs = append(errs, fmt.Sprintf("JWT_SECRETS entry %d too short (%d chars) - must be at least 16 characters", i+1, len(s)))
+		}
 	}
 
 	// Weak encryption key
 	// Empty EncryptionKey falls back to JWTSecret: not a hard error here.
 	if c.EncryptionKey != "" {
 		if isWeakSecret(c.EncryptionKey) {
-			errs = append(errs, fmt.Sprintf("ENCRYPTION_KEY %q is too weak - must be a strong, unique key", c.EncryptionKey))
+			errs = append(errs, "ENCRYPTION_KEY is too weak - must be a strong, unique key")
 		}
 		if len(c.EncryptionKey) < 32 {
 			errs = append(errs, fmt.Sprintf("ENCRYPTION_KEY too short (%d chars) - must be at least 32 chars", len(c.EncryptionKey)))
@@ -84,6 +101,17 @@ func (c *Config) ValidateCritical() error {
 	}
 	if c.EncryptionKey != "" && c.EncryptionKey == c.JWTSecret {
 		errs = append(errs, "ENCRYPTION_KEY must not equal JWT_SECRET - key hierarchy requires separate values")
+	}
+
+	// The metrics token is a bearer credential that never expires. Unset is
+	// allowed, and the route then needs a super admin.
+	if c.MetricsToken != "" {
+		if isWeakSecret(c.MetricsToken) {
+			errs = append(errs, "METRICS_TOKEN is a placeholder or a common value, set a long random value such as the output of openssl rand -hex 32")
+		}
+		if len(c.MetricsToken) < minMetricsTokenLen {
+			errs = append(errs, fmt.Sprintf("METRICS_TOKEN is %d characters, it must be at least %d", len(c.MetricsToken), minMetricsTokenLen))
+		}
 	}
 
 	// CORS wildcards: fail-closed in all environments

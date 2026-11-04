@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -649,6 +650,13 @@ func resolveConfig() (*Config, error) {
 		PluginStopParallelism:             pluginStopParallelism,
 	}
 
+	// APP_ENV decides whether the production checks run, so a value naming
+	// neither environment is refused rather than read as not production.
+	switch strings.ToLower(cfg.Environment) {
+	case "production", "development":
+	default:
+		return nil, errors.New("config validation: APP_ENV must be production or development")
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
