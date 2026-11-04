@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- The latency rankings at `GET /api/admin/debug/latency` and the goroutine snapshot at `GET /api/admin/debug/goroutines` answer a super admin only, because both cover every tenant on the instance. A tenant admin now gets 403 for both. The debug routes also sit behind the same session, request size and cross-site request checks as the other admin routes, so a change to the garbage collector setting from a browser session needs the CSRF token.
 - A flow request or data source allowed to reach private networks no longer follows a redirect. It gets the 3xx answer back instead, so an allowed internal target cannot forward the request to an address nobody allowed.
 
 ## [0.58.0] - 2026-11-04
