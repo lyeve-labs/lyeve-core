@@ -85,7 +85,7 @@ func TestCachePolicyBuildCacheControl(t *testing.T) {
 func TestDefaultContentPolicy(t *testing.T) {
 	assert.Equal(t, 60*time.Second, DefaultContentPolicy.MaxAge)
 	assert.Equal(t, 600*time.Second, DefaultContentPolicy.StaleWhileRevalidate)
-	assert.True(t, DefaultContentPolicy.Public)
+	assert.False(t, DefaultContentPolicy.Public, "every content read carries a credential, so none is public")
 }
 
 func TestDefaultDashboardPolicy(t *testing.T) {

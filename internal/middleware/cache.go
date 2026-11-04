@@ -69,13 +69,15 @@ type CachePolicy struct {
 	Public bool
 }
 
-// DefaultContentPolicy is the recommended policy for public content API reads:
-// 60s fresh, 600s stale-while-revalidate.
+// DefaultContentPolicy is the policy the credentialed content reads name. It
+// is private because every such read carries a credential, and a request
+// that carries one is answered "private, no-store" whatever the policy says,
+// so its lifetimes are not sent on those routes. Content meant for a shared
+// cache is served on the public delivery routes.
 var DefaultContentPolicy = CachePolicy{
 	MaxAge:               60 * time.Second,
 	StaleWhileRevalidate: 600 * time.Second,
 	StaleIfError:         86400 * time.Second,
-	Public:               true,
 }
 
 // DefaultDashboardPolicy is the recommended policy for admin dashboard queries:
