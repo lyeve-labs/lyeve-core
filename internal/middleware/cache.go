@@ -34,6 +34,11 @@ type CachePolicy struct {
 	// Set to 0 to omit the max-age directive.
 	MaxAge time.Duration
 
+	// SharedMaxAge is how long a shared cache (CDN, proxy) may keep the
+	// response, in place of MaxAge. Only emitted when Public and MaxAge > 0.
+	// Set to 0 to omit.
+	SharedMaxAge time.Duration
+
 	// StaleWhileRevalidate allows the browser to use a stale response for up to
 	// this duration while a background revalidation happens. Only emitted when
 	// MaxAge > 0. Set to 0 to omit.
@@ -129,6 +134,9 @@ func (p CachePolicy) buildCacheControl() string {
 		dirs = append(dirs, "no-cache")
 	} else if p.MaxAge > 0 {
 		dirs = append(dirs, fmt.Sprintf("max-age=%d", int(p.MaxAge.Seconds())))
+		if p.Public && p.SharedMaxAge > 0 {
+			dirs = append(dirs, fmt.Sprintf("s-maxage=%d", int(p.SharedMaxAge.Seconds())))
+		}
 		if p.StaleWhileRevalidate > 0 {
 			dirs = append(dirs, fmt.Sprintf("stale-while-revalidate=%d", int(p.StaleWhileRevalidate.Seconds())))
 		}
@@ -269,7 +277,7 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 				ew.Header().Set("ETag", `"`+hex.EncodeToString(hash[:])+`"`)
 			}
 
-			if ew.Header().Get(PrivateResponseHeader) != "" || carriesCredential(r) {
+			if ew.Header().Get(PrivateResponseHeader) != "" || CarriesCredential(r) {
 				ew.Header().Del(PrivateResponseHeader)
 				ew.Header().Set("Cache-Control", privateCacheControl)
 			} else if cc := policy.buildCacheControl(); cc != "" {
@@ -302,14 +310,16 @@ func cacheHeaders(policy CachePolicy) func(http.Handler) http.Handler {
 	}
 }
 
-// carriesCredential reports whether the request presents a credential: an
+// CarriesCredential reports whether the request presents a credential: an
 // Authorization header, an API key, or a session cookie. A response computed
 // for any of them may hold what an anonymous reader cannot see, so it is
 // theirs alone. Vary names the two headers, but a shared cache that honors
 // public is not bound to key on them, and Vary cannot name one cookie among
 // the others a browser sends. A credential that fails to authenticate only
-// costs the response its shared caching.
-func carriesCredential(r *http.Request) bool {
+// costs the response its shared caching. The public delivery routes refuse a
+// request this reports true for, so a credential means one thing on both
+// paths.
+func CarriesCredential(r *http.Request) bool {
 	if r.Header.Get("Authorization") != "" || r.Header.Get("X-API-Key") != "" {
 		return true
 	}
@@ -331,7 +341,7 @@ func carriesCredential(r *http.Request) bool {
 // A request with no credential passes through untouched.
 func CredentialedPrivate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !carriesCredential(r) {
+		if !CarriesCredential(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
