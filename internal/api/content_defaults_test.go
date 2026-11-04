@@ -222,6 +222,31 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "title", "field_type": "text", "required": true}
 		]
 	}`},
+	// A parent with a has_many and a many_to_many into two types with soft
+	// delete. books carries the belongs_to back to shelves that the has_many
+	// reads, and pages is applied first so the pivot can reference it.
+	"shelves": {`{
+		"name": "pages",
+		"display_name": "Pages",
+		"with_soft_delete": true,
+		"fields": [{"name": "title", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "shelves",
+		"display_name": "Shelves",
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "books", "field_type": "relation", "relation_to": "books", "relation_type": "has_many"},
+			{"name": "pages", "field_type": "relation", "relation_to": "pages", "relation_type": "many_to_many"}
+		]
+	}`, `{
+		"name": "books",
+		"display_name": "Books",
+		"with_soft_delete": true,
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "shelves", "field_type": "relation", "relation_to": "shelves", "relation_type": "belongs_to"}
+		]
+	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
 	// many_to_many, for the reads that follow a relation.
 	"essays": {`{
@@ -289,6 +314,9 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 					}
 					if id == "essays" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("essays", "topics"))
+					}
+					if id == "shelves" {
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("shelves", "pages"))
 					}
 					for i := len(names) - 1; i >= 0; i-- {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+domain.TableName(names[i]))

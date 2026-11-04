@@ -338,6 +338,12 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 	dataExpr := dataColumnExpr(s.pool.Engine(), sc, "r")
 	fkColQuoted := dialect.Must(s.pool.Engine()).QuoteIdentifier(fkCol)
 	tenantID := tenant.ID(ctx)
+	// A child in the trash is not served, as GetByIDs serves no trashed
+	// parent.
+	visible := ""
+	if sc.WithSoftDelete {
+		visible = " AND r.deleted_at IS NULL"
+	}
 
 	for start := 0; start < len(parentIDs); start += maxBatchSize {
 		end := start + maxBatchSize
@@ -358,9 +364,9 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
-			WHERE %s IN (%s) AND tenant_id = $%d
+			WHERE %s IN (%s) AND tenant_id = $%d%s
 			ORDER BY created_at DESC`,
-			dataExpr, table, fkColQuoted, strings.Join(phs, ", "), len(chunk)+1)
+			dataExpr, table, fkColQuoted, strings.Join(phs, ", "), len(chunk)+1, visible)
 
 		rows, qErr := s.pool.Query(ctx, query, args...)
 		if qErr != nil {
@@ -421,6 +427,11 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 	if relErr != nil {
 		return nil, fmt.Errorf("list related batch: resolve schema %q: %w", f.RelationTo, relErr)
 	}
+	// A target in the trash is not served, as ListRelated serves none.
+	visible := ""
+	if relSchema.WithSoftDelete {
+		visible = " AND t.deleted_at IS NULL"
+	}
 
 	result := make(map[uuid.UUID][]*domain.Content, len(sourceIDs))
 
@@ -448,12 +459,12 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 			       %s
 			FROM %s t
 			JOIN %s p ON p.%s = t.id
-			WHERE p.%s IN (%s) AND p.tenant_id = $%d AND t.tenant_id = $%d
+			WHERE p.%s IN (%s) AND p.tenant_id = $%d AND t.tenant_id = $%d%s
 			ORDER BY t.created_at DESC`,
 			aCol,
 			dataColumnExpr(s.pool.Engine(), relSchema, "t"),
 			targetTable, pivotName, bCol, aCol,
-			strings.Join(phs, ", "), len(chunk)+1, len(chunk)+2,
+			strings.Join(phs, ", "), len(chunk)+1, len(chunk)+2, visible,
 		), args...)
 		if qErr != nil {
 			return nil, fmt.Errorf("list related batch %s->%s: %w", schemaName, f.RelationTo, qErr)
