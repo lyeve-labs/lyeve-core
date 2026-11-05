@@ -13,6 +13,7 @@ import (
 
 func TestGoroutineTracker_Go(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: 5 * time.Second, MaxGoroutines: 10000})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
 
 	var counter atomic.Int32
 
@@ -35,6 +36,7 @@ func TestGoroutineTracker_Go(t *testing.T) {
 
 func TestGoroutineTracker_PanicRecovery(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: 5 * time.Second, MaxGoroutines: 10000})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
 
 	var recovered atomic.Bool
 	tracker.Go("panicking-task", func(ctx context.Context) {
@@ -62,6 +64,7 @@ func TestGoroutineTracker_PanicRecovery(t *testing.T) {
 func TestGoroutineTracker_ReportsTheRecoveredPanic(t *testing.T) {
 	reports := catchPanicReports(t, OwnerEngine+"/tracked-report")
 	tracker := NewGoroutineTracker(TrackerConfig{LeakThreshold: 5 * time.Second, MaxGoroutines: 10000})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
 
 	tracker.Go("tracked-report", func(ctx context.Context) { panic("tracked boom") })
 
@@ -99,6 +102,7 @@ func TestGoroutineTracker_Shutdown(t *testing.T) {
 
 func TestGoroutineTracker_Snapshot(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{MaxGoroutines: 10000})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
 
 	block := make(chan struct{})
 	tracker.Go("blocked-task", func(ctx context.Context) {
@@ -124,6 +128,7 @@ func TestGoroutineTracker_Snapshot(t *testing.T) {
 
 func TestGoroutineTracker_DefaultConfig(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{})
+	t.Cleanup(func() { _ = tracker.Shutdown(time.Second) })
 	if tracker == nil {
 		t.Fatal("expected non-nil tracker")
 	}
