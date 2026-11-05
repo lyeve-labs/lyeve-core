@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Security
+
+- Through the plugin releases this engine pins: adding the first second factor to an account takes the account's password or a sign-in within the last 15 minutes, set by `MFA_RECENT_SIGN_IN_SECS`. Before, anyone holding a signed-in session could add a passkey or an authenticator app, which then guarded the account against its owner.
+- Through the plugin releases this engine pins: a password reset removes the account's passkeys unless the person chooses to keep them, and says how many it removed. Before, a passkey someone added from a stolen session kept signing in after the reset.
+
 ### Added
 
 - `GET /api/admin/debug/pprof/goroutineleak` serves Go's goroutine leak profile to a super admin: the goroutines parked on a channel or lock that nothing else can reach, so nothing can ever wake them. Writing it runs one garbage collection, and it needs no full goroutine dump.
