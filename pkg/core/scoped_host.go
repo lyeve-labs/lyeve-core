@@ -1211,6 +1211,10 @@ var OperatorOnlyKeys = map[string]bool{
 	"webhook_allowed_private_networks": true,
 	"smtp_allowed_private_networks":    true,
 	"lyeve_outbound_allow_cgnat":       true,
+	// How recent a sign-in lets a session add a first second factor without
+	// the password. A stolen session could otherwise widen it and enroll
+	// its own factor.
+	"mfa_recent_sign_in_secs": true,
 }
 
 // IsOperatorOnlyKey reports whether key may be set only by the operator. It
