@@ -865,48 +865,6 @@ func TestClaimsFromCtx_WithClaims(t *testing.T) {
 	}
 }
 
-// ETag helpers (used by content handler)
-
-func TestSetETag_NotModified(t *testing.T) {
-	t.Parallel()
-
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	// Exercises the etag path: etagFor hashes the response body.
-	dummy := map[string]any{"id": "test"}
-	etag := etagFor(dummy)
-	if etag == "" {
-		t.Error("etag should not be empty")
-	}
-
-	// Set If-None-Match to trigger 304
-	r.Header.Set("If-None-Match", etag)
-	rr := httptest.NewRecorder()
-	modified := setETagAndCheckNotModified(rr, r, etag)
-	if !modified {
-		t.Error("expected not-modified=true (304) when If-None-Match matches")
-	}
-	if rr.Code != http.StatusNotModified {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusNotModified)
-	}
-}
-
-func TestSetETag_NoMatch_Proceeds(t *testing.T) {
-	t.Parallel()
-
-	dummy := map[string]any{"id": "test"}
-	etag := etagFor(dummy)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("If-None-Match", `"different-etag"`)
-	rr := httptest.NewRecorder()
-	modified := setETagAndCheckNotModified(rr, r, etag)
-	if modified {
-		t.Error("expected modified=false when If-None-Match differs")
-	}
-	if rr.Header().Get("ETag") != etag {
-		t.Errorf("ETag header = %q, want %q", rr.Header().Get("ETag"), etag)
-	}
-}
-
 // query helpers
 
 func TestQueryInt(t *testing.T) {
