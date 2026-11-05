@@ -2074,7 +2074,7 @@ body (json, newline):
     },
     "/api/admin/users/{id}/password": {
       "put": {
-        "description": "remove_passkeys defaults to true, which removes the account's passkeys before the password changes. When they cannot be removed the answer is 503 and the password is not changed.",
+        "description": "remove_passkeys defaults to true, which removes the account's passkeys before the password changes when a running plugin supplies passkey removal. When they cannot be removed the answer is 503 and the password is not changed.",
         "parameters": [
           {
             "in": "path",

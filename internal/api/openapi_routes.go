@@ -344,7 +344,7 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	}, super...))
 	set("/api/admin/users/{id}/password", "put", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Set a user's password; every session the account held ends", Security: both,
-		Description: "remove_passkeys defaults to true, which removes the account's passkeys before the password changes. When they cannot be removed the answer is 503 and the password is not changed.",
+		Description: "remove_passkeys defaults to true, which removes the account's passkeys before the password changes when a running plugin supplies passkey removal. When they cannot be removed the answer is 503 and the password is not changed.",
 		Parameters:  []openAPIParameter{id}, RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object", "example": map[string]any{"password": "a-new-password-of-twelve", "remove_passkeys": true}}}}},
 		Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "404": err404, "409": map[string]any{"description": "The account signs in through a trusted issuer and has no password"}, "422": map[string]any{"description": "Password policy not met"}, "503": map[string]any{"description": "The passkeys could not be removed, so the password was not changed"}},
 	}, super...))
