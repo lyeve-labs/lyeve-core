@@ -42,6 +42,7 @@ func TestUsersHandler_SetPassword(t *testing.T) {
 	defer func() { _ = store.Delete(ctx, u.ID) }()
 
 	h := NewUsersHandler(store)
+	h.passkeys = &passkeyRevokerFake{}
 	call := func(id, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPut, "/api/admin/users/"+id+"/password", strings.NewReader(body))
 		r = chiCtx(r, map[string]string{"id": id})
@@ -125,6 +126,7 @@ func TestUsersHandler_SetPasswordLogsAnotherTenantsAccountUnderNoTenant(t *testi
 	require.NoError(t, err)
 
 	h := NewUsersHandler(store)
+	h.passkeys = &passkeyRevokerFake{}
 	h.revokeRefresh = func(context.Context, string) error { return errors.New("refresh store unreachable") }
 	set := func(id uuid.UUID) {
 		r := httptest.NewRequest(http.MethodPut, "/api/admin/users/"+id.String()+"/password", strings.NewReader(`{"password":"The-new-password-2"}`))

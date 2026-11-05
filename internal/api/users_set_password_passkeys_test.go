@@ -16,19 +16,38 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/pkg/compliance"
 )
 
-// passkeyRevokerFake stands in for the plugin that stores passkeys. It
-// records every account it was asked about and answers count or err.
+// passkeyRevokerFake stands in for the plugin that stores passkeys. It holds
+// stored passkeys for the account, records every account it was asked about,
+// and removes what it holds on each call. registerDuring passkeys are
+// registered right after the first removal, as a session the reset has not
+// ended yet could. err fails every call and lateErr every call after the
+// first. afterRemoval runs once a call has removed what it held.
 type passkeyRevokerFake struct {
-	asked []uuid.UUID
-	count int
-	err   error
+	asked          []uuid.UUID
+	stored         int
+	registerDuring int
+	err            error
+	lateErr        error
+	afterRemoval   func()
 }
 
 func (f *passkeyRevokerFake) RevokePasskeys(_ context.Context, userID uuid.UUID) (int, error) {
 	f.asked = append(f.asked, userID)
-	return f.count, f.err
+	if f.err != nil {
+		return 0, f.err
+	}
+	if len(f.asked) > 1 && f.lateErr != nil {
+		return 0, f.lateErr
+	}
+	n := f.stored
+	f.stored, f.registerDuring = f.registerDuring, 0
+	if f.afterRemoval != nil {
+		f.afterRemoval()
+	}
+	return n, nil
 }
 
 // passkeyReset is an account with a known password and a users handler that
@@ -51,7 +70,7 @@ func newPasskeyReset(t *testing.T, store *db.UserStore, hash string) *passkeyRes
 	}
 	user, err := store.Create(context.Background(), "passkey-reset-"+uuid.NewString()[:8]+"@example.com", hash, []string{"editor"}, "")
 	require.NoError(t, err)
-	revoker := &passkeyRevokerFake{count: 2}
+	revoker := &passkeyRevokerFake{stored: 2}
 	h := NewUsersHandler(store)
 	h.passkeys = revoker
 	return &passkeyReset{store: store, user: user, h: h, revoker: revoker}
@@ -83,12 +102,13 @@ func TestUsersHandler_SetPasswordRemovesPasskeysByDefault(t *testing.T) {
 		p := newPasskeyReset(t, store, "")
 		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2"}`)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		assert.Equal(t, []uuid.UUID{p.user.ID}, p.revoker.asked)
+		assert.Equal(t, []uuid.UUID{p.user.ID, p.user.ID}, p.revoker.asked, "removed before the write and again after it")
 		assert.Equal(t, float64(2), passkeysRemoved(t, rr))
 
+		p.revoker.stored = 1
 		rr = p.set(t, p.user.ID, `{"password":"The-third-password-3","remove_passkeys":true}`)
 		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
-		assert.Len(t, p.revoker.asked, 2, "an explicit choice to remove removes")
+		assert.Equal(t, float64(1), passkeysRemoved(t, rr), "an explicit choice to remove removes")
 	})
 }
 
@@ -150,5 +170,100 @@ func TestUsersHandler_SetPasswordMissingAccountRemovesNothing(t *testing.T) {
 		rr := p.set(t, uuid.New(), `{"password":"The-new-password-2"}`)
 		require.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
 		assert.Empty(t, p.revoker.asked)
+	})
+}
+
+// A session the reset has not ended yet can register a passkey after the
+// first removal and before the password write. The route removes again once
+// the write has ended every session, so no passkey outlasts the reset, and
+// the count covers both removals.
+func TestUsersHandler_SetPasswordRemovesAPasskeyRegisteredDuringTheChange(t *testing.T) {
+	eachAccountDialect(t, func(t *testing.T, store *db.UserStore) {
+		p := newPasskeyReset(t, store, "")
+		p.revoker.registerDuring = 1
+		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Zero(t, p.revoker.stored, "no passkey is left")
+		assert.Equal(t, float64(3), passkeysRemoved(t, rr))
+	})
+}
+
+// The second removal runs after the password changed, so its failure cannot
+// undo the reset. The route answers 200 with the first count, and the audit
+// trail says the second removal failed.
+func TestUsersHandler_SetPasswordLateRemovalFailureKeepsTheNewPassword(t *testing.T) {
+	eachAccountDialect(t, func(t *testing.T, store *db.UserStore) {
+		audit := &recordingAuditWriter{}
+		compliance.RegisterAuditWriter(audit)
+		t.Cleanup(compliance.ClearAuditWriter)
+		p := newPasskeyReset(t, store, "")
+		p.h.host = auditOnlyHost{}
+		p.revoker.lateErr = errors.New("passkey store unreachable")
+
+		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2"}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Equal(t, float64(2), passkeysRemoved(t, rr))
+		again, err := store.GetByID(context.Background(), p.user.ID)
+		require.NoError(t, err)
+		require.NoError(t, auth.VerifyPassword("bcrypt", again.PasswordHash, "The-new-password-2"))
+		_, ok := audit.actions()["user.passkeys.remove_failed"]
+		assert.True(t, ok, "the failed second removal is audited")
+	})
+}
+
+// The removal is recorded where it happens. A password write that fails after
+// the passkeys were removed still leaves the removal in the audit trail.
+func TestUsersHandler_SetPasswordAuditsTheRemovalWhenTheWriteFails(t *testing.T) {
+	eachAccountDialect(t, func(t *testing.T, store *db.UserStore) {
+		audit := &recordingAuditWriter{}
+		compliance.RegisterAuditWriter(audit)
+		t.Cleanup(compliance.ClearAuditWriter)
+		p := newPasskeyReset(t, store, "")
+		p.h.host = auditOnlyHost{}
+		p.revoker.afterRemoval = func() {
+			p.revoker.afterRemoval = nil
+			require.NoError(t, store.Delete(context.Background(), p.user.ID))
+		}
+
+		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2"}`)
+		require.Equal(t, http.StatusNotFound, rr.Code, rr.Body.String())
+		e, ok := audit.actions()["user.passkeys.remove"]
+		require.True(t, ok, "the removal is audited although the write failed")
+		assert.JSONEq(t, `{"count":2}`, e.AfterJSON)
+		_, ok = audit.actions()["user.password.set"]
+		assert.False(t, ok, "the password did not change")
+	})
+}
+
+// A super admin who keeps the passkeys made a choice the audit trail keeps.
+func TestUsersHandler_SetPasswordAuditsTheChoiceToKeepPasskeys(t *testing.T) {
+	eachAccountDialect(t, func(t *testing.T, store *db.UserStore) {
+		audit := &recordingAuditWriter{}
+		compliance.RegisterAuditWriter(audit)
+		t.Cleanup(compliance.ClearAuditWriter)
+		p := newPasskeyReset(t, store, "")
+		p.h.host = auditOnlyHost{}
+
+		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2","remove_passkeys":false}`)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		e, ok := audit.actions()["user.password.set"]
+		require.True(t, ok)
+		assert.JSONEq(t, `{"remove_passkeys":false}`, e.AfterJSON)
+	})
+}
+
+// A handler with nothing wired to remove passkeys cannot do what the reset
+// asked, so it refuses and leaves the password alone. The engine host decides
+// what an install with no passkey plugin does, never this handler.
+func TestUsersHandler_SetPasswordWithNoRemovalWiredRefuses(t *testing.T) {
+	eachAccountDialect(t, func(t *testing.T, store *db.UserStore) {
+		p := newPasskeyReset(t, store, "")
+		p.h.passkeys = nil
+		rr := p.set(t, p.user.ID, `{"password":"The-new-password-2"}`)
+		require.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), "PASSKEYS_NOT_REMOVED")
+		again, err := store.GetByID(context.Background(), p.user.ID)
+		require.NoError(t, err)
+		require.NoError(t, auth.VerifyPassword("bcrypt", again.PasswordHash, passkeyResetOldPassword))
 	})
 }
