@@ -1353,8 +1353,9 @@ var writtenTimeLayouts = []string{
 	"2006-01-02",
 }
 
-// parseContentTime reads a datetime a caller sent, in UTC.
-func parseContentTime(s string) (time.Time, bool) {
+// ParseContentTime reads a datetime a caller sent, in UTC, in any of the
+// forms a write accepts.
+func ParseContentTime(s string) (time.Time, bool) {
 	for _, layout := range writtenTimeLayouts {
 		if t, err := time.ParseInLocation(layout, s, time.UTC); err == nil {
 			return t.UTC(), true
@@ -1665,7 +1666,7 @@ func bindContentValue(f domain.SchemaField, v any) (any, error) {
 	// would have read it in the session's zone and the other two as the
 	// wall clock, so one value would have meant three instants.
 	if str, ok := v.(string); ok && f.FieldType == "datetime" {
-		if t, ok := parseContentTime(str); ok {
+		if t, ok := ParseContentTime(str); ok {
 			return t, nil
 		}
 		return v, nil

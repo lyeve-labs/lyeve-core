@@ -247,6 +247,51 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "shelves", "field_type": "relation", "relation_to": "shelves", "relation_type": "belongs_to"}
 		]
 	}`},
+	// The public delivery routes: a marked type with a private field, typed
+	// fields, a relation into another marked type and into an unmarked one,
+	// and a many_to_many. dl_tags is marked and has no draft and publish.
+	"delivery": {`{
+		"name": "dl_tags",
+		"display_name": "Tags",
+		"public_delivery": true,
+		"fields": [{"name": "label", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "dl_people",
+		"display_name": "People",
+		"with_draft_publish": true,
+		"public_delivery": true,
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "email", "field_type": "text", "private": true},
+			{"name": "badge", "field_type": "relation", "relation_to": "dl_tags", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "dl_vaults",
+		"display_name": "Vaults",
+		"fields": [{"name": "code", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "dl_posts",
+		"display_name": "Posts",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"with_draft_publish": true,
+		"with_soft_delete": true,
+		"public_delivery": true,
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true, "indexed": true},
+			{"name": "body", "field_type": "text"},
+			{"name": "secret", "field_type": "text", "private": true},
+			{"name": "author", "field_type": "relation", "relation_to": "dl_people", "relation_type": "belongs_to"},
+			{"name": "vault", "field_type": "relation", "relation_to": "dl_vaults", "relation_type": "belongs_to"},
+			{"name": "tags", "field_type": "relation", "relation_to": "dl_tags", "relation_type": "many_to_many"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "featured", "field_type": "boolean"},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "extra", "field_type": "json"}
+		]
+	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
 	// many_to_many, for the reads that follow a relation.
 	"essays": {`{
@@ -317,6 +362,9 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 					}
 					if id == "shelves" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("shelves", "pages"))
+					}
+					if id == "delivery" {
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("dl_posts", "dl_tags"))
 					}
 					for i := len(names) - 1; i >= 0; i-- {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+domain.TableName(names[i]))

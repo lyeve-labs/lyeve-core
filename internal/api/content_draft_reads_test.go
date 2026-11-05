@@ -291,8 +291,15 @@ func TestContentHandler_DraftReadersAreNotCachedPublicly(t *testing.T) {
 			assert.Empty(t, h.Get("X-Cache-Private"), "%s leaked the internal signal", name)
 		}
 
-		reader := serve(asReader(fx.ctx), "/api/v1/content/drafts", all, fx.content.List)
-		assert.Contains(t, reader.Get("Cache-Control"), "public", "a reader's published list stays cacheable")
+		// The route sits behind requireAuth, so a reader's request always
+		// carries its credential, and a credentialed answer is never stored.
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/content/drafts", nil)
+		r.Header.Set("Authorization", "Bearer reader-token")
+		r = chiCtx(r.WithContext(asReader(fx.ctx)), all)
+		rr := httptest.NewRecorder()
+		cached(http.HandlerFunc(fx.content.List)).ServeHTTP(rr, r)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Equal(t, "private, no-store", rr.Header().Get("Cache-Control"))
 	})
 }
 

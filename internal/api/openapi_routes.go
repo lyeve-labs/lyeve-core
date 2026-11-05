@@ -669,3 +669,40 @@ func pathParams(pattern string) []openAPIParameter {
 	}
 	return out
 }
+
+// documentDelivery writes the two public delivery reads. They take no
+// credential, so they carry no security requirement, and a request that
+// sends one is refused.
+func documentDelivery(paths map[string]openAPIPath) {
+	const tag = "Content API / Delivery"
+	schema := openAPIParameter{Name: "schema", In: "path", Required: true, Description: "A collection its tenant marked for public delivery, spelled as it is stored.", Schema: map[string]any{"type": "string"}}
+	id := openAPIParameter{Name: "id", In: "path", Required: true, Description: "Record id, in lower case with hyphens. Any other spelling answers 404.", Schema: map[string]any{"type": "string", "format": "uuid"}}
+	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.", Schema: map[string]any{"type": "string"}}
+	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.", Schema: map[string]any{"type": "integer", "minimum": 0, "maximum": deliveryMaxDepth}}
+	const served = "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused."
+	responses := map[string]any{
+		"200": map[string]any{"description": "OK"},
+		"304": map[string]any{"description": "Not modified"},
+		"400": map[string]any{"description": "A parameter outside the grammar, or a request that carries a credential"},
+		"404": map[string]any{"description": "No such record, or a collection that is not marked for public delivery"},
+		"429": map[string]any{"description": "Too many requests from this address"},
+		"503": map[string]any{"description": "The collection's definition or a related record could not be read"},
+	}
+	paths["/api/v1/delivery/{schema}"] = openAPIPath{
+		"get": {
+			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+			Parameters: []openAPIParameter{schema,
+				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
+				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
+				populate, depth},
+			Responses: responses,
+		},
+	}
+	paths["/api/v1/delivery/{schema}/{id}"] = openAPIPath{
+		"get": {
+			Tags: []string{tag}, Summary: "Get a published record", Description: served,
+			Parameters: []openAPIParameter{schema, id, populate, depth},
+			Responses:  responses,
+		},
+	}
+}
