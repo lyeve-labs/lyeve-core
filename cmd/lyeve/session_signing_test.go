@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -141,5 +142,29 @@ func TestCapPolicy_OnlyPasswordResetRevokesPasskeys(t *testing.T) {
 		case name != "password-reset" && !errors.Is(err, core.ErrCapDenied):
 			t.Errorf("%s does not remove passkeys, but its scoped host returned %d, %v", name, n, err)
 		}
+	}
+}
+
+// A password reset removes passkeys through the one plugin that stores them.
+// The engine asks the role's running holder, and with no holder a reset
+// removes nothing while the passkeys keep signing in, so this build has to
+// link mfa as the role's only implementer.
+func TestWiredRoles_MFAHoldsThePasskeyRevoker(t *testing.T) {
+	role := reflect.TypeFor[core.PasskeyRevokerProvider]()
+	wired := slices.ContainsFunc(plugin.WiredRoles(), func(r plugin.Role) bool {
+		return r.Type == role && r.Single
+	})
+	if !wired {
+		t.Fatalf("the engine does not wire %s as a single role", role)
+	}
+	var holders []string
+	for _, name := range core.RegisteredPlugins() {
+		if _, ok := plugin.LookupPlugin(name)().(core.PasskeyRevokerProvider); ok {
+			holders = append(holders, name)
+		}
+	}
+	slices.Sort(holders)
+	if !slices.Equal(holders, []string{"mfa"}) {
+		t.Errorf("%s is implemented by %v in this build, want mfa alone", role, holders)
 	}
 }
