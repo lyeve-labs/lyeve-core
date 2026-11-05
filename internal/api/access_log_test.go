@@ -161,7 +161,7 @@ func assertEveryRouteLogs(t *testing.T, router http.Handler, cap *logCapture) {
 
 		var logged bool
 		for _, line := range cap.requestLines() {
-			if line["method"] == method && line["path"] == path {
+			if line["method"] == method && (line["path"] == path || line["route"] == pattern) {
 				logged = true
 				break
 			}

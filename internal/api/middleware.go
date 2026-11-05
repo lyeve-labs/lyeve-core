@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -23,7 +24,6 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
 	"github.com/lyeve-labs/lyeve-core/pkg/security"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // dynamicCORSMu guards dynamicCORSProvider, which is set by the runtime when
@@ -90,6 +90,9 @@ func structuredLogger(next http.Handler) http.Handler {
 		// A super admin's request may name another tenant in its path, so
 		// its line goes under no tenant rather than the one it acts in.
 		ctx, superAdmin := apimw.WithSuperAdminSlot(ctx)
+		// The caller is known only below the credential middleware, so the
+		// line reads it from a slot too.
+		ctx, actorSlot := apimw.WithActorSlot(ctx)
 		r = r.WithContext(ctx)
 
 		// Track in-flight requests for metrics.
@@ -99,26 +102,38 @@ func structuredLogger(next http.Handler) http.Handler {
 		next.ServeHTTP(ww, r)
 		dur := time.Since(start)
 
-		// Extract OTel span context for trace correlation.
-		span := trace.SpanFromContext(r.Context())
-		traceID := span.SpanContext().TraceID().String()
-		spanID := span.SpanContext().SpanID().String()
-
 		logCtx := r.Context()
 		if tid := tenantSlot.Get(); tid != "" && !superAdmin.Load() {
 			logCtx = core.WithTenantID(logCtx, tid)
 		}
 
-		slog.InfoContext(logCtx, "request",
-			"method", r.Method,
-			"path", logstream.Clip(r.URL.Path, maxLoggedPathBytes),
+		// The trace and span ids come from the enrich handler, which adds
+		// them only while tracing is on, so a line never carries zero ids.
+		attrs := make([]any, 0, 16)
+		attrs = append(attrs, "method", r.Method)
+		// A route that takes an identifier in its path is logged by its
+		// pattern alone, because the identifier can be an address. An
+		// unrouted path is kept, since it is what a scan looks like.
+		route := ""
+		if rctx := chi.RouteContext(r.Context()); rctx != nil {
+			route = rctx.RoutePattern()
+		}
+		if route != "" {
+			attrs = append(attrs, "route", route)
+		}
+		if !strings.Contains(route, "{") {
+			attrs = append(attrs, "path", logstream.Clip(r.URL.Path, maxLoggedPathBytes))
+		}
+		attrs = append(attrs,
 			"status", ww.Status(),
 			"bytes", ww.BytesWritten(),
 			"duration_ms", dur.Milliseconds(),
 			"request_id", middleware.GetReqID(r.Context()),
-			"trace_id", traceID,
-			"span_id", spanID,
 		)
+		if actor := actorSlot.Load(); actor != nil {
+			attrs = append(attrs, "actor", *actor)
+		}
+		slog.InfoContext(logCtx, "request", attrs...)
 
 		// Record Prometheus metrics.
 		metrics.RecordRequest(r, ww.Status(), dur.Seconds())

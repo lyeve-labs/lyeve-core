@@ -74,8 +74,11 @@ func RequestIDFromCtx(ctx context.Context) string {
 // Log enrichment helpers
 
 // EnrichAttrs returns log attributes extracted from the context, including
-// trace-id, span-id, tenant-id, request-id, and plugin name. These are
-// attached to every log record by the EnrichHandler.
+// trace-id, span-id, tenant-id, request-id, plugin name and actor. These are
+// attached to every log record by the EnrichHandler. The route is left to the
+// access line: chi pools its route context and hands it to another request
+// once this one returns, so a line logged later would read that request's
+// route.
 func EnrichAttrs(ctx context.Context) []slog.Attr {
 	var attrs []slog.Attr
 
@@ -98,7 +101,26 @@ func EnrichAttrs(ctx context.Context) []slog.Attr {
 		attrs = append(attrs, slog.String("plugin", plugin))
 	}
 
+	if actor := Actor(ctx); actor != "" {
+		attrs = append(attrs, slog.String("actor", actor))
+	}
+
 	return attrs
+}
+
+// Actor names the caller of the request on ctx by id: the API key's id for a
+// key, and the account's id otherwise, which for an admin token is its owner.
+// Both are opaque, so a line can be joined to the audit log and the account
+// without carrying an address. Empty for an anonymous request.
+func Actor(ctx context.Context) string {
+	claims := core.GetClaims(ctx)
+	if claims == nil {
+		return ""
+	}
+	if claims.IsAPIKey && claims.APIKeyID != "" {
+		return claims.APIKeyID
+	}
+	return claims.UserID
 }
 
 // ContextAbout is core.LogContextAbout, the one rule for which tenant a line
