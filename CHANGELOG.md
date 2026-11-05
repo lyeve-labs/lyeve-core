@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Added
 
 - Session tokens carry `auth_time`, the time the person signed in. A refresh keeps it, so a plugin can tell a recent sign-in from a long-lived session through `core.AuthClaims.SignedInWithin`. A session issued before this release carries none and counts as not recent.
-- A plugin that stores passkeys can supply `core.PasskeyRevoker`, and a plugin granted `CapPasskeyRevoke` can ask it to remove an account's passkeys. `PUT /api/admin/users/{id}/password` takes `remove_passkeys`, which is true when absent. When a running plugin supplies the role, the route removes the account's passkeys before it changes the password, says how many in `passkeys_removed`, and answers 503 without changing the password when they cannot be removed.
+- A plugin that stores passkeys can supply `core.PasskeyRevoker`, and a plugin granted `CapPasskeyRevoke` can ask it to remove an account's passkeys. `PUT /api/admin/users/{id}/password` takes `remove_passkeys`, which is true when absent. When a running plugin supplies the role, the route removes the account's passkeys before it changes the password, says how many in `passkeys_removed`, and answers 503 without changing the password when they cannot be removed. Without such a plugin it removes none and answers 0.
 
 ## [0.59.0] - 2026-11-09
 
