@@ -174,7 +174,7 @@ func (rg *providerRig) session(tenant string, roles ...string) string {
 	rg.t.Helper()
 	u, err := rg.users.Create(context.Background(), "person-"+uuid.NewString()[:8]+"@example.com", rg.hash, roles, tenant)
 	require.NoError(rg.t, err)
-	token, err := auth.Sign(rg.cfg.JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion)
+	token, err := auth.Sign(rg.cfg.JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion, time.Time{})
 	require.NoError(rg.t, err)
 	return token
 }

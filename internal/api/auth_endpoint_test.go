@@ -904,7 +904,7 @@ func TestAuthEndpoint_MFAVerify_FullSessionTokenRejected(t *testing.T) {
 	h := NewAuthHandler(nil, mfaStore, nil, secret, 3600, false)
 
 	// Create a full session token (typ=session, NOT pending MFA).
-	fullToken, err := auth.Sign(secret, 3600, userID, "full-token@test.com", []string{"editor"}, "", 1)
+	fullToken, err := auth.Sign(secret, 3600, userID, "full-token@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("sign full token: %v", err)
 	}
@@ -1366,7 +1366,7 @@ func TestJWTAuth_AcceptsSessionToken(t *testing.T) {
 	secret := "test-secret-32-bytes-minimum-len!!"
 	userID := uuid.New()
 
-	sessionToken, err := auth.Sign(secret, 3600, userID, "session@test.com", []string{"editor"}, "", 1)
+	sessionToken, err := auth.Sign(secret, 3600, userID, "session@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign session: %v", err)
 	}
@@ -1667,7 +1667,7 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 		return rr
 	}
 
-	otherDevice, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 3, 15*time.Minute)
+	otherDevice, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 3, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -1680,7 +1680,7 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 		t.Error("a refused family must be revoked, not left to try again")
 	}
 
-	current, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 4, 15*time.Minute)
+	current, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 4, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}

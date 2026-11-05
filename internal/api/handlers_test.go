@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -91,7 +92,7 @@ var _ db.DB = (*fakeDB)(nil)
 
 // makeJWT creates a valid HS256-signed JWT for testing.
 func makeJWT(secret string, userID uuid.UUID, email string, roles []string, expirySecs int64) string {
-	tok, err := auth.Sign(secret, expirySecs, userID, email, roles, "", 1)
+	tok, err := auth.Sign(secret, expirySecs, userID, email, roles, "", 1, time.Time{})
 	if err != nil {
 		panic("makeJWT: " + err.Error())
 	}

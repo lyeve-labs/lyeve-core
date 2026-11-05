@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +22,7 @@ import (
 // version 0 so the version check reads the stub row.
 func bearerWithRoles(t *testing.T, roles ...string) string {
 	t.Helper()
-	tok, err := auth.Sign(testConfig().JWTSecret, 3600, uuid.New(), "someone@test.local", roles, "", 0)
+	tok, err := auth.Sign(testConfig().JWTSecret, 3600, uuid.New(), "someone@test.local", roles, "", 0, time.Time{})
 	require.NoError(t, err)
 	return tok
 }

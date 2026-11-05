@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -35,7 +36,7 @@ func TestInitJWTSigning_GenerateNewKey(t *testing.T) {
 	secret := "fallback-hmac-secret-at-least-32-bytes-long"
 	id := uuid.New()
 
-	token, err := auth.Sign(secret, 3600, id, "eddsa@example.com", []string{"admin"}, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "eddsa@example.com", []string{"admin"}, "", 1, time.Time{})
 	require.NoError(t, err, "Sign with EdDSA should succeed")
 
 	claims, err := auth.Parse(secret, token)
@@ -55,7 +56,7 @@ func TestInitJWTSigning_LoadExistingKey(t *testing.T) {
 
 	secret := "test-secret-thats-long-enough-for-signing"
 	id := uuid.New()
-	token1, err := auth.Sign(secret, 3600, id, "alice@example.com", nil, "", 1)
+	token1, err := auth.Sign(secret, 3600, id, "alice@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	// Simulate a restart: reload the key.
@@ -85,7 +86,7 @@ func TestInitJWTSigning_HS256OptOut(t *testing.T) {
 
 	secret := "secret-at-least-32-bytes-for-hmac-sha256-signing"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "hs256@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "hs256@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -113,7 +114,7 @@ func TestEdDSA_SignParseRoundTrip(t *testing.T) {
 	email := "roundtrip@example.com"
 	roles := []string{"admin", "editor"}
 
-	token, err := auth.Sign(secret, 7200, id, email, roles, "", 1)
+	token, err := auth.Sign(secret, 7200, id, email, roles, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -158,7 +159,7 @@ func TestEdDSA_ParseEdDSATokenAfterKeyReset(t *testing.T) {
 
 	secret := "secret-must-be-long-enough-for-hmac-256"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "user@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "user@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	// Simulate an admin key reset: delete the file and re-init.
@@ -180,7 +181,7 @@ func TestMixedSigning_HS256StillWorksWhenEdDSAActive(t *testing.T) {
 	secret := "legacy-secret-that-is-at-least-32-bytes"
 	id := uuid.New()
 
-	edToken, err := auth.Sign(secret, 3600, id, "mixed@example.com", nil, "", 1)
+	edToken, err := auth.Sign(secret, 3600, id, "mixed@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, edToken)
@@ -195,7 +196,7 @@ func TestParseMulti_EdDSAToken(t *testing.T) {
 
 	secret := "multi-secret-long-enough-for-parse-multi-test"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "multi@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "multi@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.ParseMulti([]string{secret}, token)
@@ -209,7 +210,7 @@ func TestParseMulti_EdDSATokenWrongHMACSecret(t *testing.T) {
 	ensureEdDSA(t)
 
 	id := uuid.New()
-	token, err := auth.Sign("original-secret-is-long-enough-for-sign", 3600, id, "eddsa-only@example.com", nil, "", 1)
+	token, err := auth.Sign("original-secret-is-long-enough-for-sign", 3600, id, "eddsa-only@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.ParseMulti([]string{"wrong-secret"}, token)

@@ -569,7 +569,7 @@ func (h *deviceLoginHandler) exchange(w http.ResponseWriter, r *http.Request, d 
 		return
 	}
 
-	token, err := auth.Sign(h.auth.jwtSecret, h.auth.expirySecs, user.ID, user.SignInEmail(), roles, tenant, user.TokenVersion)
+	token, err := auth.Sign(h.auth.jwtSecret, h.auth.expirySecs, user.ID, user.SignInEmail(), roles, tenant, user.TokenVersion, time.Now())
 	if err != nil {
 		httpx.ErrorReq(w, r, http.StatusInternalServerError, "Could not complete the sign-in.")
 		return

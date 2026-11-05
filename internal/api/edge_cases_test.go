@@ -40,7 +40,7 @@ import (
 var testSecret = "test-secret-at-least-32-bytes-long!!"
 
 func adminJWT(userID uuid.UUID, email string, roles []string) string {
-	tok, err := auth.Sign(testSecret, 3600, userID, email, roles, "", 1)
+	tok, err := auth.Sign(testSecret, 3600, userID, email, roles, "", 1, time.Time{})
 	if err != nil {
 		panic("adminJWT: " + err.Error())
 	}

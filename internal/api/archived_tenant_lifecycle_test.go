@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -54,7 +55,7 @@ func TestAdminRouter_ArchivedTenantLifecycleExemptionIsForSuperAdmins(t *testing
 
 	post := func(roles []string, id uuid.UUID, email string, version int, path string) int {
 		t.Helper()
-		tok, err := auth.Sign(cfg.JWTSecret, 3600, id, email, roles, "default", version)
+		tok, err := auth.Sign(cfg.JWTSecret, 3600, id, email, roles, "default", version, time.Time{})
 		if err != nil {
 			t.Fatalf("sign: %v", err)
 		}

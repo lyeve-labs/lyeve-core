@@ -44,6 +44,11 @@ type Claims struct {
 	TokenType    string   `json:"typ,omitempty"`
 	TokenVersion int      `json:"tv"`
 	MFAPending   bool     `json:"mfa_pending,omitempty"`
+	// AuthTime is when the person signed in, in Unix seconds: the OIDC
+	// auth_time claim. A refresh copies it rather than renewing it, so it
+	// tells a recent sign-in from a session kept alive for days. Zero means
+	// the token does not say.
+	AuthTime int64 `json:"auth_time,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -69,6 +74,7 @@ func (c *Claims) AuthClaims() *core.AuthClaims {
 		Roles:      c.Roles,
 		TenantID:   c.TenantID,
 		MFAPending: c.MFAPending,
+		AuthTime:   c.AuthTime,
 	}
 }
 
@@ -125,7 +131,12 @@ func SignChallenge(secret string, userID uuid.UUID, email string, roles []string
 // tenantID becomes the "tenant_id" claim, which is how TenantHeader learns
 // which tenant a request belongs to. It is omitted when empty, so a
 // super_admin with no home tenant carries no tenant claim.
-func Sign(secret string, expirySecs int64, userID uuid.UUID, email string, roles []string, tenantID string, tokenVersion int) (string, error) {
+//
+// authTime becomes the "auth_time" claim. A caller that starts a session
+// passes the time of the sign-in, and a refresh passes the time its family
+// recorded. The zero time omits the claim, and such a session never counts
+// as a recent sign-in.
+func Sign(secret string, expirySecs int64, userID uuid.UUID, email string, roles []string, tenantID string, tokenVersion int, authTime time.Time) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID:       userID.String(),
@@ -134,6 +145,7 @@ func Sign(secret string, expirySecs int64, userID uuid.UUID, email string, roles
 		TenantID:     tenantID,
 		TokenVersion: tokenVersion,
 		TokenType:    "session",
+		AuthTime:     unixOrZero(authTime),
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        uuid.New().String(),
 			Subject:   userID.String(),
@@ -160,6 +172,15 @@ func Sign(secret string, expirySecs int64, userID uuid.UUID, email string, roles
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return tok.SignedString([]byte(secret))
+}
+
+// unixOrZero is t in Unix seconds, or 0 for the zero time, which the claim's
+// omitempty then leaves out.
+func unixOrZero(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.Unix()
 }
 
 // Parse validates a JWT string and returns the claims.

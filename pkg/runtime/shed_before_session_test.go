@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -50,7 +51,7 @@ func TestRouters_ShedRequestReadsNoSessionVersion(t *testing.T) {
 	lifetime, cancel := context.WithCancel(ctx)
 	t.Cleanup(cancel)
 	latency := apimw.NewLatencyTracker(200, 500)
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "shed@test.com", []string{"admin"}, "", 1)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "shed@test.com", []string{"admin"}, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	shedding := apimw.BackpressureResult{Middleware: func(http.Handler) http.Handler {

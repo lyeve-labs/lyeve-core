@@ -354,7 +354,7 @@ func (rg *tokenRig) userIn(tenant string, roles ...string) (*domain.User, string
 	require.NoError(rg.t, err)
 	u, err := rg.users.Create(context.Background(), "owner-"+uuid.NewString()[:8]+"@example.com", hash, roles, tenant)
 	require.NoError(rg.t, err)
-	session, err := auth.Sign(rg.cfg.JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion)
+	session, err := auth.Sign(rg.cfg.JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion, time.Time{})
 	require.NoError(rg.t, err)
 	return u, session
 }

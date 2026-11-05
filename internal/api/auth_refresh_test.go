@@ -47,7 +47,7 @@ func newRefreshFixture(t *testing.T) *refreshFixture {
 	store := auth.NewRefreshTokenStore(auth.NewMemoryBackend(), "cms-test")
 	h := NewAuthHandler(users, nil, nil, "test-secret-at-least-32-bytes-long!!", 3600, false)
 	h.WithRefreshTokenStore(store, 15*time.Minute)
-	issued, err := store.IssueForSession(context.Background(), uid.String(), "", 0, 15*time.Minute)
+	issued, err := store.IssueForSession(context.Background(), uid.String(), "", 0, 15*time.Minute, time.Time{})
 	require.NoError(t, err)
 	return &refreshFixture{users: users, store: store, token: issued.RefreshToken, h: h}
 }
