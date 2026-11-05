@@ -243,8 +243,9 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas", catalog.List)
 			r.With(apimw.CacheWithPolicy(apimw.DefaultSchemaPolicy)).Get("/schemas/{name}", catalog.Get)
 
-			// Content reads: any authenticated role. Cache with strong ETag
-			// and stale-while-revalidate for CDN-friendly delivery.
+			// Content reads: any authenticated role. A strong ETag answers a
+			// repeated read with 304. A read made with a credential, as every
+			// read here is, is answered private, so no shared cache stores it.
 			r.With(apimw.CacheWithPolicy(apimw.DefaultContentPolicy)).Get("/content/{schema}", contentHandler.List)
 			r.With(apimw.CacheWithPolicy(apimw.DefaultContentPolicy)).Get("/content/{schema}/cursor", contentHandler.ListCursor)
 			// Stream: no cache policy (SSE, chunked transfer).
