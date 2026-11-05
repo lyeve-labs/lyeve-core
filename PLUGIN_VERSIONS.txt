@@ -15,9 +15,9 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-11-05T02:45:47Z from origin default branches.
+# Generated 2026-11-05T17:25:54Z from origin default branches.
 
-lyeve-libs = 2346a72c99fb7ffb950c80e3f6d4445d54966c50
+lyeve-libs = 98f10d4fc4fd8115a6eb9eed0a22fdfa3aee5458
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = d72c27ece0d0db7c843037c98a8e0437aa0f6683
 lyeve-plugin-analytics = 67d8c9fd07a63d77adb641407665b310a672a541
@@ -46,10 +46,10 @@ lyeve-plugin-logging = 35e76b42ce43a292562583c900f086feb03423e0
 lyeve-plugin-magic-link = 9ebdd40f183f3914f6cdb5bc8b4ad141143af3ba
 lyeve-plugin-media = 0b034ddbde187fb8adf88a19117015c426d8276f
 lyeve-plugin-messagebroker = 01cf12e196404e61e2d8dadb77dabbb53440a548
-lyeve-plugin-mfa = 1c8d468539f1c18631a265f04154969162217524
-lyeve-plugin-multitenant = c5e54eef10ed4e8aef9c5e5c39fe2162f8802220
+lyeve-plugin-mfa = 1e159e263ae004719bb72acce46d61f83ffc382c
+lyeve-plugin-multitenant = 777e94b0adf5cb48981493b8b710117fcf69bdad
 lyeve-plugin-oauth = 19c07dc4a419751c269838186ddecce87b27fd00
-lyeve-plugin-password-reset = 1e5a379401194bbb45924629af38a9aef4935096
+lyeve-plugin-password-reset = 67bccf239622eb57636aa859086c4f6f464d867f
 lyeve-plugin-permissions = 95d1966df796a5f177af834d5f55410bbd4fd588
 lyeve-plugin-pii-mask = 13a1257990f060ee5bbd36492dbf49e503f24193
 lyeve-plugin-profiler = 0aefa01100646cbfe6ff4ea5afbd8ebef5ccbdb7
@@ -60,7 +60,7 @@ lyeve-plugin-recommendations = 2de0f15a368b73a7e630ab59f80a4bd43b757ee4
 lyeve-plugin-request-capture = 77cbe6561a6066d277fe3e7402236f49d22a61f6
 lyeve-plugin-review = 5ecaa17582b0e3621ba97583b93458d3639a6a52
 lyeve-plugin-saml = 28e422186f149657d2156b3cd84e963743a2e3ad
-lyeve-plugin-schema = bc6e584e3cfb1ffcfebc581433993396f4625f3b
+lyeve-plugin-schema = d71d8ad78fc6a257db916d471e1c53833556f19d
 lyeve-plugin-scim = d08fa4015d2703e7d745bd4c2f563dfc483866f6
 lyeve-plugin-search = 83c85289fd744f9dd1400cf1358fb548b42f5f92
 lyeve-plugin-storage = fa7a4e75c9ee451740f759123f37467480bc50aa
