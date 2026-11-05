@@ -16,6 +16,12 @@ const DefaultMaxFailedAttempts = 5
 // DefaultLockoutWindow is the default window for counting login failures.
 const DefaultLockoutWindow = 15 * time.Minute
 
+// maxTrackedLockouts is the size at which the password failure windows are
+// first swept. A window is read again only when its user signs in, so an
+// account that failed once and never came back would keep its entry for the
+// life of the process.
+const maxTrackedLockouts = 4096
+
 // Reservation is one attempt a lockout counted before its answer was checked.
 // It names the window the attempt was counted in, so releasing it gives back
 // that attempt and never one counted in a later window.
@@ -52,6 +58,7 @@ type InMemoryLockout struct {
 
 	mu      sync.Mutex
 	entries map[uuid.UUID]*lockoutUserState
+	sweepAt int // the size that triggers the next sweep of entries (see nextSweep)
 }
 
 // NewInMemoryLockout creates an in-memory lockout checker for password
@@ -69,12 +76,22 @@ func NewInMemoryLockout(maxAttempts int, window time.Duration) *InMemoryLockout 
 		window:      window,
 		now:         time.Now,
 		entries:     make(map[uuid.UUID]*lockoutUserState),
+		sweepAt:     maxTrackedLockouts,
 	}
 }
 
 func (l *InMemoryLockout) getOrCreate(userID uuid.UUID) *lockoutUserState {
 	s, ok := l.entries[userID]
 	if !ok {
+		if len(l.entries) >= l.sweepAt {
+			now := l.now().UnixNano()
+			for id, e := range l.entries {
+				if now-e.windowStart.Load() > int64(l.window) {
+					delete(l.entries, id)
+				}
+			}
+			l.sweepAt = nextSweep(len(l.entries), maxTrackedLockouts)
+		}
 		s = &lockoutUserState{}
 		l.entries[userID] = s
 	}
