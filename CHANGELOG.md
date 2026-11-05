@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - The engine reads the console's signing key from `LYEVE_CONSOLE_KEY` and its rotation partner from `LYEVE_CONSOLE_KEY_PREVIOUS`, matching `LYEVE_CONSOLE_URL`. The old names `ADMIN_CONSOLE_KEY` and `ADMIN_CONSOLE_KEY_PREVIOUS` still work for one more minor release, and the engine logs a deprecation warning at boot when it reads one. A new and an old name set to different values stop the boot with an error that names both.
 
+### Fixed
+
+- A content read that populates a has-one, has-many or many-to-many relation leaves out the related entries an editor moved to the trash, as a belongs-to relation, a list and a read by id already did. Before, a trashed entry still came back inside its parent, with its deletion time.
+
 ### Security
 
 - The administrator of an archived tenant can no longer write through the plugin routes under `/api/admin/tenants`, such as the tenant's region and replication settings. Those writes answer 423 like any other write to an archived tenant. Only a super admin still passes the archived-tenant guard under that prefix, which keeps the archive, restore and delete routes reachable.
