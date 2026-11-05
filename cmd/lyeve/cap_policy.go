@@ -42,6 +42,9 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     action: analytics, before it hands a person their own data export, and
 //     mfa, before a session that did not sign in recently adds the account's
 //     first second factor.
+//   - core.CapPasskeyRevoke, because the plugin removes an account's
+//     passkeys: password-reset, at a reset, so a passkey added from a stolen
+//     session stops signing in once the password changes.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -74,7 +77,7 @@ var capPolicy = map[string]core.Capability{
 	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey | core.CapStepUp,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
 	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
-	"password-reset":       core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"password-reset":       core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapPasskeyRevoke,
 	"permissions":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapPermissionChecker,
 	"pii-mask":             core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"profiler":             core.CapRoutes,

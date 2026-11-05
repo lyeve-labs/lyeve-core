@@ -73,6 +73,7 @@ var wiredRoles = []Role{
 	// The roles the host hands to other plugins, asking the activator for the
 	// holder on each call.
 	singleRole[core.TenantRegionResolverProvider](),
+	singleRole[core.PasskeyRevokerProvider](),
 
 	// Roles any number of running plugins contribute to.
 	sharedRole[core.PreAuthMiddlewareProvider](),

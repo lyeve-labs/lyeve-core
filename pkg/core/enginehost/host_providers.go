@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +75,30 @@ func (h *engineHost) TenantRegionResolver() core.TenantRegionResolver {
 		return nil
 	}
 	return h.tenantRegions.TenantRegionResolver()
+}
+
+// WithPasskeyRevokers wires the source of the passkey revoker role. The
+// runtime passes the activator, which answers from the running plugin that
+// stores passkeys. Called once at boot, before any plugin starts.
+func (h *engineHost) WithPasskeyRevokers(src core.PasskeyRevokerProvider) {
+	h.passkeyRevokers = src
+}
+
+// RevokePasskeys implements core.PasskeyRevoker by asking the running plugin
+// that stores passkeys. With none running it removes nothing and answers 0:
+// no running plugin accepts a passkey sign-in then, and refusing would block
+// every password reset on an install that runs without passkeys. The warning
+// says the passkeys a stopped plugin stored were left in place.
+func (h *engineHost) RevokePasskeys(ctx context.Context, userID uuid.UUID) (int, error) {
+	var r core.PasskeyRevoker
+	if h.passkeyRevokers != nil {
+		r = h.passkeyRevokers.PasskeyRevoker()
+	}
+	if r == nil {
+		slog.WarnContext(ctx, "passkeys not removed: no running plugin stores passkeys", "user_id", userID.String())
+		return 0, nil
+	}
+	return r.RevokePasskeys(ctx, userID)
 }
 
 // EmailSender implements EmailSenderProvider. Returns the registered email
