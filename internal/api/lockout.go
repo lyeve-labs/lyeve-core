@@ -84,7 +84,7 @@ func (l *InMemoryLockout) getOrCreate(userID uuid.UUID) *lockoutUserState {
 	s, ok := l.entries[userID]
 	if !ok {
 		if len(l.entries) >= l.sweepAt {
-			now := time.Now().UnixNano()
+			now := l.now().UnixNano()
 			for id, e := range l.entries {
 				if now-e.windowStart.Load() > int64(l.window) {
 					delete(l.entries, id)
