@@ -60,6 +60,9 @@ const (
 	// CodeUserErasurePending refuses to enable or delete an account whose
 	// erasure has not finished.
 	CodeUserErasurePending Code = "USER_ERASURE_PENDING"
+	// CodePasskeysNotRemoved refuses to set a password whose reset was to
+	// remove the account's passkeys and could not.
+	CodePasskeysNotRemoved Code = "PASSKEYS_NOT_REMOVED"
 
 	// Tenant features
 	CodeTenantFeatureWithheld Code = "TENANT_FEATURE_WITHHELD"

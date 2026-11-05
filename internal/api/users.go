@@ -40,6 +40,9 @@ type UsersHandler struct {
 	// host is the engine host the audit writer stores each account change
 	// through. Nil records nothing.
 	host core.Host
+	// passkeys removes an account's passkeys when its password is set. Nil
+	// removes none.
+	passkeys core.PasskeyRevoker
 }
 
 // NewUsersHandler constructs a UsersHandler. passwordHashAlgo defaults to
@@ -308,7 +311,7 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 
 // SetPassword replaces a user's password.
 // PUT /api/admin/users/{id}/password
-// Body: {"password": "..."}
+// Body: {"password": "...", "remove_passkeys": true}
 // Auth: super_admin.
 //
 // This is how an account whose owner forgot the password is recovered: the
@@ -317,6 +320,11 @@ func (h *UsersHandler) UpdateState(w http.ResponseWriter, r *http.Request) {
 // policy a new account's does, and every session the account held ends with
 // the change, on this node and on every other, because the token version
 // moves with the hash.
+//
+// A passkey signs in on its own, so one added from a stolen session would
+// outlast the new password. The account's passkeys are removed first unless
+// the body sends remove_passkeys false, and the password changes only once
+// the removal succeeded, so a failure leaves nothing half done.
 func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 	id, err := reqparse.ParseUUID(r, "id")
 	if err != nil {
@@ -325,7 +333,8 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Password string `json:"password"`
+		Password       string `json:"password"`
+		RemovePasskeys *bool  `json:"remove_passkeys"`
 	}
 	if err := jsonpool.DecodeJSON(r.Body, &body); err != nil {
 		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeInvalidBody, nil)
@@ -343,6 +352,11 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	removed, ok := h.removePasskeys(w, r, id, body.RemovePasskeys == nil || *body.RemovePasskeys)
+	if !ok {
+		return
+	}
+
 	user, err := h.users.SetPassword(r.Context(), id, hash)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
@@ -350,7 +364,7 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, domain.ErrConflict) {
-			httpx.ErrorReq(w, r, http.StatusConflict, "this account signs in through a trusted issuer and has no password")
+			respondIssuerAccount(w, r)
 			return
 		}
 		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
@@ -366,7 +380,49 @@ func (h *UsersHandler) SetPassword(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.audit(r, "user.password.set", user.ID, user.TenantID, nil, nil)
-	respond(w, http.StatusOK, safeUser(user))
+	if removed > 0 {
+		h.audit(r, "user.passkeys.remove", user.ID, user.TenantID, nil, map[string]any{"count": removed})
+	}
+	out := safeUser(user)
+	out["passkeys_removed"] = removed
+	respond(w, http.StatusOK, out)
+}
+
+// removePasskeys removes the passkeys of the account whose password is about
+// to be set, when remove is true. The account is read first, so a missing
+// account answers 404 and a trusted issuer's account 409 before anything is
+// removed. It answers the count removed, and false once it has written the
+// response.
+func (h *UsersHandler) removePasskeys(w http.ResponseWriter, r *http.Request, id uuid.UUID, remove bool) (int, bool) {
+	if !remove || h.passkeys == nil {
+		return 0, true
+	}
+	user, err := h.users.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			respondErrCode(w, r, http.StatusNotFound, i18n.CodeUserNotFound, nil)
+			return 0, false
+		}
+		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
+		return 0, false
+	}
+	if user.PasswordHash == auth.ExternalIssuerMarker {
+		respondIssuerAccount(w, r)
+		return 0, false
+	}
+	removed, err := h.passkeys.RevokePasskeys(r.Context(), id)
+	if err != nil {
+		slog.WarnContext(logging.ContextAbout(r.Context(), user.TenantID), "set password: passkeys not removed, password left unchanged", "user_id", id.String(), "error", err)
+		respondErrCode(w, r, http.StatusServiceUnavailable, i18n.CodePasskeysNotRemoved, nil)
+		return 0, false
+	}
+	return removed, true
+}
+
+// respondIssuerAccount refuses a password for a trusted issuer's account,
+// which signs in through the issuer alone.
+func respondIssuerAccount(w http.ResponseWriter, r *http.Request) {
+	httpx.ErrorReq(w, r, http.StatusConflict, "this account signs in through a trusted issuer and has no password")
 }
 
 // Delete removes a user.
