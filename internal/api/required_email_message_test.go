@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -98,7 +99,7 @@ func TestAdminRouter_MissingEmailNamesTheField(t *testing.T) {
 			admin, err := users.Create(context.Background(), "email-admin-"+uuid.NewString()[:8]+"@example.com",
 				"$2a$10$placeholderhashforemailXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", []string{"super_admin"}, "default")
 			require.NoError(t, err)
-			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion)
+			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion, time.Time{})
 			require.NoError(t, err)
 			for _, b := range bodies {
 				for _, lang := range languages {

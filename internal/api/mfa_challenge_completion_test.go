@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -144,7 +145,7 @@ func TestCompleteMFAChallenge_Refusals(t *testing.T) {
 	t.Run("a session token is no challenge", func(t *testing.T) {
 		t.Parallel()
 		c := newChallengeCompletion(t)
-		session, err := auth.Sign(challengeCompletionSecret, 3600, c.user.ID, c.user.Email, []string{"editor"}, "acme", 3)
+		session, err := auth.Sign(challengeCompletionSecret, 3600, c.user.ID, c.user.Email, []string{"editor"}, "acme", 3, time.Time{})
 		require.NoError(t, err)
 		_, err = c.h.CompleteMFAChallenge(context.Background(), session)
 		assert.ErrorIs(t, err, core.ErrMFAChallengeInvalid)

@@ -39,7 +39,9 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     serves every other secret and never this one.
 //   - core.CapStepUp, because the plugin asks the person at a session for
 //     the account's password or an authenticator code before a sensitive
-//     action: analytics, before it hands a person their own data export.
+//     action: analytics, before it hands a person their own data export, and
+//     mfa, before a session that did not sign in recently adds the account's
+//     first second factor.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -69,7 +71,7 @@ var capPolicy = map[string]core.Capability{
 	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
 	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"messagebroker":        core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
+	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey | core.CapStepUp,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
 	"oauth":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
 	"password-reset":       core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,

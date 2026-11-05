@@ -357,7 +357,7 @@ func TestRefresh_FamilyOfAnotherTenantOnADomainEnds(t *testing.T) {
 		family := func(address, tenant string) string {
 			u, err := s.users.GetByEmail(ctx, address)
 			require.NoError(t, err)
-			issued, err := store.IssueForSession(ctx, u.ID.String(), tenant, u.TokenVersion, time.Hour)
+			issued, err := store.IssueForSession(ctx, u.ID.String(), tenant, u.TokenVersion, time.Hour, time.Time{})
 			require.NoError(t, err)
 			return issued.RefreshToken
 		}

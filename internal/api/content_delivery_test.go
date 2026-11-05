@@ -380,7 +380,7 @@ func TestDelivery_CredentialIsRefused(t *testing.T) {
 	forEachDialectWithSchemas(t, []string{"delivery"}, func(t *testing.T, fx schemaContentFixture) {
 		rg := newDeliveryRig(t, fx, nil)
 		id := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "pub"})
-		token, err := auth.Sign(rg.cfg.JWTSecrets[0], 3600, uuid.New(), "reader@example.com", []string{"viewer"}, "t2", 1)
+		token, err := auth.Sign(rg.cfg.JWTSecrets[0], 3600, uuid.New(), "reader@example.com", []string{"viewer"}, "t2", 1, time.Time{})
 		require.NoError(t, err)
 
 		require.Equal(t, http.StatusOK, rg.get(t, deliveryHostA, deliveryPostsPath, nil).Code)

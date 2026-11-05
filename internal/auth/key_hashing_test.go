@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -184,7 +185,7 @@ func TestExtractRoles_NilClaimKeyUsesDefault(t *testing.T) {
 func TestSign_WithTenantID(t *testing.T) {
 	secret := "test-sign-with-tenant-secret32b"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "tenant@example.com", []string{"editor"}, "acme", 1)
+	token, err := auth.Sign(secret, 3600, id, "tenant@example.com", []string{"editor"}, "acme", 1, time.Time{})
 	require.NoError(t, err)
 
 	// The raw payload, read without verification, must carry the tenant the
@@ -198,7 +199,7 @@ func TestSign_WithTenantID(t *testing.T) {
 func TestSign_NilRoles(t *testing.T) {
 	secret := "test-nil-roles-secret-32-bytes"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "noroles@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "noroles@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -209,7 +210,7 @@ func TestSign_NilRoles(t *testing.T) {
 func TestParse_TamperedPayload(t *testing.T) {
 	secret := "tamper-test-secret-32-bytes-ok"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "tamper@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "tamper@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	// Corrupt the signature by appending garbage.
@@ -583,7 +584,7 @@ func TestClaims_AuthClaims_NilRoles(t *testing.T) {
 func TestSign_TokenTypeSession(t *testing.T) {
 	secret := "test-typ-session-secret-32bytes"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "alice@example.com", []string{"admin"}, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "alice@example.com", []string{"admin"}, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -609,7 +610,7 @@ func TestSignChallenge_TokenTypeChallenge(t *testing.T) {
 func TestSign_MFAPendingFalse(t *testing.T) {
 	secret := "test-mfa-false-secret-32bytes!"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "carol@example.com", []string{"editor"}, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "carol@example.com", []string{"editor"}, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)

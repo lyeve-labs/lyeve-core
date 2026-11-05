@@ -26,7 +26,7 @@ func TestLogout_RevokesOnlyTheCallersOwnFamily(t *testing.T) {
 	require.NoError(t, err)
 
 	otherOwner := uuid.NewString()
-	other, err := victim.store.IssueForSession(context.Background(), otherOwner, "", 0, 15*time.Minute)
+	other, err := victim.store.IssueForSession(context.Background(), otherOwner, "", 0, 15*time.Minute, time.Time{})
 	require.NoError(t, err)
 
 	logout := func(userID, refreshToken string) {
@@ -53,7 +53,7 @@ func TestLogout_RevokesOnlyTheCallersOwnFamily(t *testing.T) {
 	victimUser := ownerOf(victim.token)
 
 	// Another user presents a real token of a family that is not theirs.
-	stranger, err := victim.store.IssueForSession(context.Background(), victimUser, "", 0, 15*time.Minute)
+	stranger, err := victim.store.IssueForSession(context.Background(), victimUser, "", 0, 15*time.Minute, time.Time{})
 	require.NoError(t, err)
 	logout(uuid.NewString(), stranger.RefreshToken)
 	assert.Equal(t, victimUser, ownerOf(stranger.RefreshToken))

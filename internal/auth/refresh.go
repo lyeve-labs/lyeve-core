@@ -150,6 +150,22 @@ type familyRecord struct {
 	// the same successor, and the field is then cleared. A reader of the
 	// backend learns nothing from it.
 	Successor string `json:"successor,omitempty"`
+
+	// AuthTime is when the person signed in to start the family, in Unix
+	// seconds. Rotation never changes it, so every access token the family
+	// signs carries the sign-in's time. A record without it decodes to 0, and
+	// its tokens carry no sign-in time, so a family from before the field
+	// existed never counts as a recent sign-in.
+	AuthTime int64 `json:"auth_time,omitempty"`
+}
+
+// authTime is the family's sign-in time, or the zero time when it recorded
+// none.
+func (r *familyRecord) authTime() time.Time {
+	if r.AuthTime == 0 {
+		return time.Time{}
+	}
+	return time.Unix(r.AuthTime, 0)
 }
 
 // RefreshTokenStore manages refresh token families over a core.CacheBackend.
@@ -220,13 +236,14 @@ func (s *RefreshTokenStore) Issue(ctx context.Context, userID string, ttl time.D
 // IssueForTenant creates a new token family for userID acting in tenantID. An
 // empty tenantID means the account's home tenant.
 func (s *RefreshTokenStore) IssueForTenant(ctx context.Context, userID, tenantID string, ttl time.Duration) (*IssueResult, error) {
-	return s.IssueForSession(ctx, userID, tenantID, 0, ttl)
+	return s.IssueForSession(ctx, userID, tenantID, 0, ttl, time.Time{})
 }
 
 // IssueForSession creates a new token family for userID acting in tenantID,
 // bound to the account's token_version at the time. Refresh refuses the
-// family once that version has moved on.
-func (s *RefreshTokenStore) IssueForSession(ctx context.Context, userID, tenantID string, tokenVersion int, ttl time.Duration) (*IssueResult, error) {
+// family once that version has moved on. authTime is when the person signed
+// in, which every rotation hands back unchanged. The zero time records none.
+func (s *RefreshTokenStore) IssueForSession(ctx context.Context, userID, tenantID string, tokenVersion int, ttl time.Duration, authTime time.Time) (*IssueResult, error) {
 	familyID := uuid.New().String()
 	token, tokenHash, err := generateRefreshToken(familyID)
 	if err != nil {
@@ -246,6 +263,7 @@ func (s *RefreshTokenStore) IssueForSession(ctx context.Context, userID, tenantI
 		IssuedAt:     now,
 		ExpiresAt:    expires,
 		Revoked:      false,
+		AuthTime:     unixOrZero(authTime),
 	}
 
 	unlock := s.locks.lock(familyID)
@@ -279,6 +297,9 @@ type RotateResult struct {
 	// TokenVersion is the token_version the family was issued under.
 	TokenVersion int
 	ExpiresAt    time.Time
+	// AuthTime is when the person signed in to start the family. It is the
+	// zero time for a family that recorded none.
+	AuthTime time.Time
 
 	oldHash, newHash string
 	oldIssuedAt      time.Time
@@ -355,6 +376,7 @@ func (s *RefreshTokenStore) Rotate(ctx context.Context, oldToken string, ttl tim
 			TenantID:     rec.TenantID,
 			TokenVersion: rec.TokenVersion,
 			ExpiresAt:    rec.ExpiresAt,
+			AuthTime:     rec.authTime(),
 			oldHash:      oldHash,
 			newHash:      newHash,
 			oldIssuedAt:  oldIssuedAt,
@@ -413,6 +435,7 @@ func (s *RefreshTokenStore) reissueSuccessor(ctx context.Context, familyID strin
 		TenantID:     rec.TenantID,
 		TokenVersion: rec.TokenVersion,
 		ExpiresAt:    rec.ExpiresAt,
+		AuthTime:     rec.authTime(),
 		oldHash:      oldHash,
 		newHash:      rec.CurrentHash,
 		oldIssuedAt:  rec.IssuedAt,

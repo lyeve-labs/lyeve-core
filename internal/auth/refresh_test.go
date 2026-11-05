@@ -309,3 +309,56 @@ func TestRefreshTokenStore_Rotate_CASCrossReplicaRace(t *testing.T) {
 	_, postErr := store1.Rotate(ctx, winner.RefreshToken, 5*time.Minute)
 	require.NoError(t, postErr, "post-race rotation with the winner's token")
 }
+
+// Every rotation hands back the time the family's sign-in happened, the
+// answer to a retried trade included, so a refresh never renews it.
+func TestRefreshTokenStore_RotateKeepsAuthTime(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	signedIn := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	issued, err := store.IssueForSession(ctx, "user-1", "", 0, 5*time.Minute, signedIn)
+	require.NoError(t, err)
+	first, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, signedIn.Equal(first.AuthTime), "first rotation: got %v, want %v", first.AuthTime, signedIn)
+
+	retried, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err, "the retry of a lost answer gets the successor")
+	assert.True(t, signedIn.Equal(retried.AuthTime), "retried trade: got %v, want %v", retried.AuthTime, signedIn)
+
+	second, err := store.Rotate(ctx, first.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, signedIn.Equal(second.AuthTime), "second rotation: got %v, want %v", second.AuthTime, signedIn)
+}
+
+// A family recorded before the sign-in time existed rotates with none, so
+// the tokens it signs never read as a recent sign-in.
+func TestRefreshTokenStore_RecordWithoutAuthTimeRotatesWithNone(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	issued, err := store.Issue(ctx, "user-1", 5*time.Minute)
+	require.NoError(t, err)
+	rotated, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, rotated.AuthTime.IsZero(), "got %v, want the zero time", rotated.AuthTime)
+}
+
+// Undoing a rotation whose answer never reached the client leaves the
+// family's sign-in time as it was.
+func TestRefreshTokenStore_UnrotateKeepsAuthTime(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	signedIn := time.Now().Add(-time.Hour).Truncate(time.Second)
+
+	issued, err := store.IssueForSession(ctx, "user-1", "", 0, 5*time.Minute, signedIn)
+	require.NoError(t, err)
+	rotated, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, store.Unrotate(ctx, rotated, 5*time.Minute))
+
+	again, err := store.Rotate(ctx, issued.RefreshToken, 5*time.Minute)
+	require.NoError(t, err)
+	assert.True(t, signedIn.Equal(again.AuthTime), "got %v, want %v", again.AuthTime, signedIn)
+}

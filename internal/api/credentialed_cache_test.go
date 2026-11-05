@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -51,7 +52,7 @@ func TestAPIRouter_CredentialedPublicRouteIsPrivate(t *testing.T) {
 		WithPluginRoutes(routes))
 	require.NoError(t, err)
 
-	token, err := auth.Sign(cfg.JWTSecrets[0], 3600, uuid.New(), "reader@example.com", []string{"viewer"}, "acme", 1)
+	token, err := auth.Sign(cfg.JWTSecrets[0], 3600, uuid.New(), "reader@example.com", []string{"viewer"}, "acme", 1, time.Time{})
 	require.NoError(t, err)
 
 	credentials := []struct {

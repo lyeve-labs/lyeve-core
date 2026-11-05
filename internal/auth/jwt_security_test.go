@@ -107,7 +107,7 @@ func TestJWT_ExpiredToken_HMAC(t *testing.T) {
 	secret := "expired-token-hmac-test-secret-32b"
 	id := uuid.New()
 	// -1 second expiry = already expired.
-	token, err := auth.Sign(secret, -1, id, "expired@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, -1, id, "expired@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.Parse(secret, token)
@@ -124,7 +124,7 @@ func TestJWT_ExpiredToken_EdDSA(t *testing.T) {
 	}
 	secret := "fallback-hmac-secret-for-eddsa-expired"
 	id := uuid.New()
-	token, err := auth.Sign(secret, -1, id, "expired-eddsa@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, -1, id, "expired-eddsa@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.Parse(secret, token)
@@ -212,7 +212,7 @@ func TestJWT_NotBeforeToken_EdDSA(t *testing.T) {
 func TestJWT_TamperedSignature_Rejected(t *testing.T) {
 	secret := "tamper-sig-test-secret-32-bytes"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "tamper@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "tamper@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	tampered := token + "X"
@@ -224,7 +224,7 @@ func TestJWT_TamperedSignature_Rejected(t *testing.T) {
 func TestJWT_TamperedPayload_Rejected(t *testing.T) {
 	secret := "tamper-payload-test-secret-32b"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "tamper-payload@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "tamper-payload@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	parts := splitJWT(token)
@@ -257,7 +257,7 @@ func TestJWT_KeyRotation_OldKeyStillValid(t *testing.T) {
 	newSecret := "new-rotation-secret-32-bytes-long"
 	id := uuid.New()
 
-	token, err := auth.Sign(oldSecret, 3600, id, "rotate@example.com", nil, "", 1)
+	token, err := auth.Sign(oldSecret, 3600, id, "rotate@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.ParseMulti([]string{newSecret, oldSecret}, token)
@@ -269,7 +269,7 @@ func TestJWT_KeyRotation_OldKeyOnly(t *testing.T) {
 	oldSecret := "only-old-secret-32-bytes-minimum"
 	id := uuid.New()
 
-	token, err := auth.Sign(oldSecret, 3600, id, "oldonly@example.com", nil, "", 1)
+	token, err := auth.Sign(oldSecret, 3600, id, "oldonly@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.ParseMulti([]string{oldSecret}, token)
@@ -282,7 +282,7 @@ func TestJWT_KeyRotation_NewSecretFailsOldToken(t *testing.T) {
 	newSecret := "active-secret-32-bytes-for-rotation"
 	id := uuid.New()
 
-	token, err := auth.Sign(oldSecret, 3600, id, "removed@example.com", nil, "", 1)
+	token, err := auth.Sign(oldSecret, 3600, id, "removed@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	if !auth.IsEdDSAActive() {
@@ -303,7 +303,7 @@ func TestJWT_MissingSignatureSegment(t *testing.T) {
 func TestJWT_NullByteInToken(t *testing.T) {
 	secret := "nullbyte-test-secret-32-bytes-x"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "null@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "null@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.Parse(secret, token+"\x00")
@@ -316,7 +316,7 @@ func TestJWT_IssuerAudience_Valid(t *testing.T) {
 	// Sign() populates iss+aud. Parse must accept the result.
 	secret := "iss-aud-valid-test-secret-32b"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "issaud@example.com", []string{"admin"}, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "issaud@example.com", []string{"admin"}, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -420,7 +420,7 @@ func TestJWT_IssuerAudience_MultiKeyRotation(t *testing.T) {
 	// ParseMulti enforces iss/aud even across a key-rotation list.
 	secret := "rotation-iss-aud-test-secret"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "rotate@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "rotate@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.ParseMulti([]string{"wrong-key", secret}, token)
@@ -434,7 +434,7 @@ func TestJWT_WrappedError_ExpiredToken(t *testing.T) {
 	// auth.Parse wraps the sentinel so callers can errors.Is by failure mode.
 	secret := "wrapped-expired-test-secret-32b"
 	id := uuid.New()
-	token, err := auth.Sign(secret, -1, id, "expired@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, -1, id, "expired@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.Parse(secret, token)
@@ -448,7 +448,7 @@ func TestJWT_WrappedError_ExpiredToken(t *testing.T) {
 func TestJWT_WrappedError_ExpiredToken_Multi(t *testing.T) {
 	secret := "wrapped-expired-multi-32b"
 	id := uuid.New()
-	token, err := auth.Sign(secret, -1, id, "expired2@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, -1, id, "expired2@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.ParseMulti([]string{secret}, token)
@@ -510,7 +510,7 @@ func TestJWT_WrappedError_WrongAudience(t *testing.T) {
 func TestJWT_WrappedError_SignatureInvalid(t *testing.T) {
 	secret := "wrapped-sig-test-secret-32bytes"
 	id := uuid.New()
-	token, err := auth.Sign(secret, 3600, id, "tampered@example.com", nil, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "tampered@example.com", nil, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	_, err = auth.Parse(secret, token+"X")

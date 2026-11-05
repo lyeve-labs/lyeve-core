@@ -348,7 +348,7 @@ func (p *documentProbe) session(t *testing.T, roles ...string) string {
 	email := "probe-" + uuid.NewString() + "@example.com"
 	user, err := p.users.Create(context.Background(), email, "$2a$10$placeholder-hash-for-test", roles, "")
 	require.NoError(t, err)
-	token, err := auth.Sign(p.cfg.JWTSecret, p.cfg.JWTExpirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion)
+	token, err := auth.Sign(p.cfg.JWTSecret, p.cfg.JWTExpirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion, time.Time{})
 	require.NoError(t, err)
 	return token
 }

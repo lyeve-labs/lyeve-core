@@ -74,7 +74,7 @@ func TestParse_AcceptsTheTokenTheEngineIssues(t *testing.T) {
 	withEdDSA(t)
 
 	const secret = "a-secret-long-enough-for-the-check"
-	signed, err := Sign(secret, 3600, uuid.New(), "a@b.test", []string{"admin"}, "t", 0)
+	signed, err := Sign(secret, 3600, uuid.New(), "a@b.test", []string{"admin"}, "t", 0, time.Time{})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestParse_AcceptsHS256WhereItIsTheConfiguredAlgorithm(t *testing.T) {
 	})
 
 	const secret = "a-secret-long-enough-for-the-check"
-	signed, err := Sign(secret, 3600, uuid.New(), "a@b.test", []string{"admin"}, "t", 0)
+	signed, err := Sign(secret, 3600, uuid.New(), "a@b.test", []string{"admin"}, "t", 0, time.Time{})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}

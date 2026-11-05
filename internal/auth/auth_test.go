@@ -17,7 +17,7 @@ func TestSign_ParseRoundTrip(t *testing.T) {
 	email := "alice@example.com"
 	roles := []string{"admin"}
 
-	token, err := auth.Sign(secret, 3600, id, email, roles, "", 1)
+	token, err := auth.Sign(secret, 3600, id, email, roles, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestParse_WrongSecret(t *testing.T) {
 		t.Skip("EdDSA active: wrong-secret test relies on HMAC-only path")
 	}
 	id := uuid.New()
-	token, _ := auth.Sign("correct-secret", 3600, id, "a@b.com", nil, "", 1)
+	token, _ := auth.Sign("correct-secret", 3600, id, "a@b.com", nil, "", 1, time.Time{})
 
 	if _, err := auth.Parse("wrong-secret", token); err == nil {
 		t.Error("expected error for wrong secret, got nil")
@@ -60,11 +60,11 @@ func TestSign_UniquePerIssuance(t *testing.T) {
 	// cookie.
 	secret := "test-secret-32-chars-minimum-len"
 	id := uuid.New()
-	tok1, err := auth.Sign(secret, 3600, id, "a@b.com", nil, "", 1)
+	tok1, err := auth.Sign(secret, 3600, id, "a@b.com", nil, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	tok2, err := auth.Sign(secret, 3600, id, "a@b.com", nil, "", 1)
+	tok2, err := auth.Sign(secret, 3600, id, "a@b.com", nil, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestSign_UniquePerIssuance(t *testing.T) {
 func TestParse_ExpiredToken(t *testing.T) {
 	id := uuid.New()
 	// expiry of -1 second = already expired
-	token, err := auth.Sign("secret", -1, id, "a@b.com", nil, "", 1)
+	token, err := auth.Sign("secret", -1, id, "a@b.com", nil, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestParse_MalformedToken(t *testing.T) {
 
 func TestParseMulti_FirstSecretWins(t *testing.T) {
 	id := uuid.New()
-	token, _ := auth.Sign("old-secret", 3600, id, "a@b.com", nil, "", 1)
+	token, _ := auth.Sign("old-secret", 3600, id, "a@b.com", nil, "", 1, time.Time{})
 
 	claims, err := auth.ParseMulti([]string{"new-secret", "old-secret"}, token)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestParseMulti_NoSecretsMatch(t *testing.T) {
 		t.Skip("EdDSA active: no-secrets-match test relies on HMAC-only path")
 	}
 	id := uuid.New()
-	token, _ := auth.Sign("secret", 3600, id, "a@b.com", nil, "", 1)
+	token, _ := auth.Sign("secret", 3600, id, "a@b.com", nil, "", 1, time.Time{})
 	if _, err := auth.ParseMulti([]string{"wrong1", "wrong2"}, token); err == nil {
 		t.Error("expected error when no secrets match")
 	}

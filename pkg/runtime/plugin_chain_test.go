@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -273,7 +274,7 @@ func crossedChains(t *testing.T, a *plugin.Activator, trace *chainTrace) (admin,
 	require.NoError(t, err)
 	// A write with a session, because a residency guard looks up the tenant's
 	// region only on a write that names a tenant.
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "chain@test.com", []string{"editor"}, "", 1)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "chain@test.com", []string{"editor"}, "", 1, time.Time{})
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/chain-probe", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")

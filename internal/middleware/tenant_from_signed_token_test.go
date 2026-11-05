@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -24,7 +25,7 @@ import (
 func TestTenantHeader_ResolvesTenantFromASignedToken(t *testing.T) {
 	const secret = "tenant-from-token-secret-32-bytes!"
 
-	token, err := auth.Sign(secret, 3600, uuid.New(), "member@acme.test", []string{"admin"}, "acme", 1)
+	token, err := auth.Sign(secret, 3600, uuid.New(), "member@acme.test", []string{"admin"}, "acme", 1, time.Time{})
 	require.NoError(t, err)
 	claims, err := auth.Parse(secret, token)
 	require.NoError(t, err)
@@ -48,7 +49,7 @@ func TestTenantHeader_ResolvesTenantFromASignedToken(t *testing.T) {
 func TestTenantHeader_TenantUserCannotOverrideWithAHeader(t *testing.T) {
 	const secret = "tenant-no-override-secret-32bytes!"
 
-	token, err := auth.Sign(secret, 3600, uuid.New(), "member@acme.test", []string{"admin"}, "acme", 1)
+	token, err := auth.Sign(secret, 3600, uuid.New(), "member@acme.test", []string{"admin"}, "acme", 1, time.Time{})
 	require.NoError(t, err)
 	claims, err := auth.Parse(secret, token)
 	require.NoError(t, err)

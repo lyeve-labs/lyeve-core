@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
@@ -191,7 +192,7 @@ func TestPBT_JWTSignParseRoundTrip(t *testing.T) {
 			roles[i] = rapid.StringMatching(`[a-z]{3,12}`).Draw(t, "role")
 		}
 
-		token, err := auth.Sign(secret, 3600, userID, email, roles, "", 1)
+		token, err := auth.Sign(secret, 3600, userID, email, roles, "", 1, time.Time{})
 		if err != nil {
 			t.Fatalf("Sign: %v", err)
 		}
@@ -251,7 +252,7 @@ func TestPBT_JWTTamperedTokenRejected(t *testing.T) {
 		email := "test@example.com"
 		roles := []string{"admin"}
 
-		token, err := auth.Sign(secret, 3600, userID, email, roles, "", 1)
+		token, err := auth.Sign(secret, 3600, userID, email, roles, "", 1, time.Time{})
 		if err != nil {
 			t.Fatalf("Sign: %v", err)
 		}
@@ -287,7 +288,7 @@ func TestPBT_JWTWrongSecretRejected(t *testing.T) {
 		}
 		userID := uuid.New()
 
-		token, err := auth.Sign(secret1, 3600, userID, "test@example.com", []string{"user"}, "", 1)
+		token, err := auth.Sign(secret1, 3600, userID, "test@example.com", []string{"user"}, "", 1, time.Time{})
 		if err != nil {
 			t.Fatalf("Sign: %v", err)
 		}
