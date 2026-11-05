@@ -47,6 +47,9 @@ services:
       # Set a license key to enable licensed plugins. Without one, the
       # plugins that need a license stay off.
       LYEVE_LICENSE_KEY: ${LYEVE_LICENSE_KEY:-}
+    # The engine sets Go's soft memory limit to 85% of this, so it collects
+    # garbage harder as it nears the limit instead of being killed at it.
+    mem_limit: ${CORE_MEMORY_LIMIT:-1g}
     ports:
       - '3001:3001'   # admin server
       - '3002:3002'   # public API

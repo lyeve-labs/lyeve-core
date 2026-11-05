@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - A content read by id or a content list computes its entity tag once instead of twice, so a page of 50 entries allocates about half the memory it did. Responses and their entity tags are unchanged, and a conditional request with the tag a client was served still answers 304.
+- The engine no longer reads the cgroup's CPU limit to set GOMAXPROCS itself. Go already sizes its scheduler to that limit, never below two threads, and follows a change to it while it runs, which the engine's own setting stopped. `GOMAXPROCS` still wins, and `CPU_QUOTA` remains an override that the engine applies when `GOMAXPROCS` is not set.
+- The engine sets Go's soft memory limit to 85% of the first limit it finds: `MEMORY_LIMIT_BYTES`, then its own cgroup's limit, then the machine's total memory. `GOMEMLIMIT` still wins over all three. Before, `MEMORY_LIMIT_BYTES` applied only without a cgroup limit, and a machine without one got no soft limit. The cgroup limit is now read at the process's own path, so a systemd unit's `MemoryMax`, a cgroup v1 host and a limited child cgroup set it too. The bundled compose file gives the engine a 1 GiB memory limit, which `CORE_MEMORY_LIMIT` changes.
+- `POST /api/admin/debug/gc-config` requires `gogc`: a body without it answers 422 and a field it does not read answers 400, where both used to set the percentage to 0. It refuses a negative `gogc` with 422 unless a memory limit is set, because that turns the garbage collector off. `GET` reports the `gogc` and `memory_limit` in force, with 0 for no limit, instead of the environment the process started with, and `POST` reports both after its change.
 
 ### Fixed
 

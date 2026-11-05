@@ -312,14 +312,15 @@ type Config struct {
 	BackpressureTenantQuotaPct        float64 // BACKPRESSURE_TENANT_QUOTA_PCT: fraction of max inflight per tenant (default 0.4)
 	BackpressurePoolPressureThreshold float64 // BACKPRESSURE_POOL_PRESSURE_THRESHOLD: InUse/MaxOpen (default 0.85)
 
-	// MemoryLimitBytes is the container memory limit for GOMEMLIMIT tuning.
-	// Auto-detected from cgroup when unset. Falls back to 0 (no soft limit).
-	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (auto-detected from cgroup)
+	// MemoryLimitBytes is the limit Go's soft memory limit is 85% of, unless
+	// GOMEMLIMIT is set. MEMORY_LIMIT_BYTES overrides the cgroup's limit, and
+	// the machine's memory applies when neither sets one.
+	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (default: the cgroup's limit, then the machine's memory)
 
-	// CPUQuota is the container CPU allowance in whole cores, rounded up, for
-	// GOMAXPROCS tuning. Auto-detected from cgroup when unset. Falls back to 0,
-	// which leaves the Go default of one thread per host core.
-	CPUQuota int // CPU_QUOTA (auto-detected from cgroup)
+	// CPUQuota is the thread count the engine gives the scheduler when
+	// GOMAXPROCS is not set. 0 leaves Go's default, which follows the
+	// cgroup's CPU limit while the process runs.
+	CPUQuota int // CPU_QUOTA (default 0)
 
 	// DBConcurrency enables parallel warmup/stop for plugins.
 	DBWarmupParallelism   int // DB_WARMUP_PARALLELISM (default 4)

@@ -294,48 +294,16 @@ func resolveConfig() (*Config, error) {
 		backpressurePoolPressureThreshold = n
 	}
 
-	// Memory limit: try cgroup v2 first, then env var.
-	var memoryLimitBytes int64
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
-		if n, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); parseErr == nil && n > 0 {
-			memoryLimitBytes = n
-		}
-	}
-	if memoryLimitBytes == 0 {
-		if v := lookup("MEMORY_LIMIT_BYTES"); v != "" {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be a number: %w", err)
-			}
-			if n < 0 {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be non-negative, got %d", n)
-			}
-			memoryLimitBytes = n
-		}
+	// Memory limit: MEMORY_LIMIT_BYTES, then the process's cgroup, then the
+	// machine's memory.
+	memoryLimitBytes, err := memoryLimit(lookup("MEMORY_LIMIT_BYTES"), os.DirFS("/"))
+	if err != nil {
+		return nil, err
 	}
 
-	// CPU quota: the same cgroup v2 story as the memory limit above. Go sizes
-	// its scheduler, its garbage collector's worker count and the default
-	// parallelism of everything built on them from the number of cores it can
-	// see, and it sees the host's cores rather than the share this container
-	// was given. Under a fractional or single-core quota that means the runtime
-	// arranges far more parallel work than the cgroup will let it run, and the
-	// kernel absorbs the difference as throttling, which arrives as latency
-	// spikes rather than as an error anyone can trace back to here.
-	//
-	// cpu.max holds "<quota> <period>", or "max <period>" for no limit. The
-	// value is rounded up: half a core still needs one thread to run on.
+	// CPU_QUOTA overrides Go's own default, which follows the cgroup's CPU
+	// limit. The engine applies it only when GOMAXPROCS is not set.
 	var cpuQuota int
-	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
-		fields := strings.Fields(strings.TrimSpace(string(data)))
-		if len(fields) == 2 && fields[0] != "max" {
-			quota, qErr := strconv.ParseInt(fields[0], 10, 64)
-			period, pErr := strconv.ParseInt(fields[1], 10, 64)
-			if qErr == nil && pErr == nil && quota > 0 && period > 0 {
-				cpuQuota = int((quota + period - 1) / period)
-			}
-		}
-	}
 	if v := lookup("CPU_QUOTA"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
