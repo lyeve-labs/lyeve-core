@@ -34,3 +34,9 @@ func TestAuthClaims_SignedInWithin(t *testing.T) {
 		})
 	}
 }
+
+// The window is a security setting, so a stored value cannot widen it.
+func TestIsOperatorOnlyKey_RecentSignInWindow(t *testing.T) {
+	assert.True(t, IsOperatorOnlyKey("mfa_recent_sign_in_secs"))
+	assert.True(t, IsOperatorOnlyKey("MFA_RECENT_SIGN_IN_SECS"))
+}
