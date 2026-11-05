@@ -180,12 +180,19 @@ const (
 	// plugin that re-checks the person behind a long-lived grant holds it.
 	CapTenantRoles // read an account's roles in a tenant (TenantRoles)
 
+	// CapPasskeyRevoke grants RevokePasskeys: removing every passkey of any
+	// account, which locks its owner out of a passkey sign-in. Only the
+	// plugin that resets a password holds it. Like CapStepUp it grants reach
+	// and not the role: the plugin that stores passkeys supplies the role
+	// with no grant.
+	CapPasskeyRevoke // remove an account's passkeys (RevokePasskeys)
+
 	// CapAll names every capability. PluginCaps reports it for a plugin that
 	// registered via RegisterPlugin, because a declaration of nothing narrows
 	// no policy ceiling. It is not that plugin's grant (see plugin.CapPolicy).
 	CapAll Capability = CapDBRead | CapDBWrite | CapRawDB | CapConfigSecret |
 		CapHooks | CapRoutes | CapAdmin | CapSchema | CapFlowRegistry | CapMetrics |
-		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey | CapStepUp | CapTenantRoles
+		CapConfigSectionsRead | CapRoles | CapSessionSign | CapSessionKey | CapStepUp | CapTenantRoles | CapPasskeyRevoke
 
 	// CapRoles is every capability that does nothing but appoint a plugin to
 	// a host role. A declaration narrows what a plugin reaches and never

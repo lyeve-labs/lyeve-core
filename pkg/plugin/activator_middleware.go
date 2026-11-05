@@ -136,6 +136,17 @@ func (a *Activator) TenantRegionResolver() core.TenantRegionResolver {
 	return nil
 }
 
+// PasskeyRevoker returns the passkey revoker of the running plugin that
+// implements core.PasskeyRevokerProvider, or nil. The runtime hands the
+// activator itself to the host, which asks this on every call, so a password
+// reset reaches the plugin that stores passkeys now.
+func (a *Activator) PasskeyRevoker() core.PasskeyRevoker {
+	if p, ok := owner[core.PasskeyRevokerProvider](a); ok {
+		return p.PasskeyRevoker()
+	}
+	return nil
+}
+
 // DSARAuditWriter returns the DSAR audit writer of the running plugin that
 // implements compliance.DSARAuditWriterProvider, or nil. The runtime wires it
 // into the WithDSARAudit router option, so the GDPR DSAR endpoints record

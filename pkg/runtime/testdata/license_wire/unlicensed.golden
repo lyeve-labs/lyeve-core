@@ -2074,6 +2074,7 @@ body (json, newline):
     },
     "/api/admin/users/{id}/password": {
       "put": {
+        "description": "remove_passkeys defaults to true, which removes the account's passkeys before the password changes when a running plugin supplies passkey removal. When they cannot be removed the answer is 503 and the password is not changed.",
         "parameters": [
           {
             "in": "path",
@@ -2090,7 +2091,8 @@ body (json, newline):
             "application/json": {
               "schema": {
                 "example": {
-                  "password": "a-new-password-of-twelve"
+                  "password": "a-new-password-of-twelve",
+                  "remove_passkeys": true
                 },
                 "type": "object"
               }
@@ -2111,8 +2113,14 @@ body (json, newline):
           "404": {
             "description": "Not found"
           },
+          "409": {
+            "description": "The account signs in through a trusted issuer and has no password"
+          },
           "422": {
             "description": "Password policy not met"
+          },
+          "503": {
+            "description": "The passkeys could not be removed, so the password was not changed"
           }
         },
         "security": [

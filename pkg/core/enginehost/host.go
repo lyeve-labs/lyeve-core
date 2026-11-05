@@ -210,6 +210,11 @@ type engineHost struct {
 	// answer, because the plugin that holds the role may start after the
 	// plugin asking, or stop while it runs. Nil: no region is known.
 	tenantRegions core.TenantRegionResolverProvider
+
+	// Wired by WithPasskeyRevokers (runtime boot, before plugins start). The
+	// host asks it on every RevokePasskeys call, as it does for tenant
+	// regions. Nil: no plugin stores passkeys.
+	passkeyRevokers core.PasskeyRevokerProvider
 }
 
 // Compile-time assertions that engineHost satisfies all required interfaces
@@ -248,6 +253,7 @@ var (
 	_ core.APIRoutesProvider                = (*engineHost)(nil)
 	_ core.APIRoutesRegistrar               = (*engineHost)(nil)
 	_ core.TenantRegionResolverProvider     = (*engineHost)(nil)
+	_ core.PasskeyRevoker                   = (*engineHost)(nil)
 	_ core.PasswordPolicyValidator          = (*engineHost)(nil)
 )
 

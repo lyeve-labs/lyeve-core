@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
@@ -101,6 +102,16 @@ func WithStepUpChecker(c core.StepUpChecker) HostOption {
 	}
 }
 
+// WithPasskeyRevoker registers r as the engine's passkey removal, the way
+// the plugin that stores passkeys supplies it on the engine host. When not
+// set, RevokePasskeys answers as an engine that cannot reach that plugin: an
+// outage, never a removal.
+func WithPasskeyRevoker(r core.PasskeyRevoker) HostOption {
+	return func(h *testHost) {
+		h.passkeys = r
+	}
+}
+
 // WithEmailSender registers s as the host's mail sender, the way the plugin
 // that owns mail does on the engine host. When not set, EmailSender returns
 // nil, as an engine with no mail plugin does.
@@ -167,6 +178,8 @@ type testHost struct {
 	stepUp  core.StepUpChecker
 	mail    core.EmailSender
 
+	passkeys core.PasskeyRevoker
+
 	// configSections is the registry a plugin's Start registers its
 	// configuration section in, as it does on the engine host.
 	configSections core.ConfigSectionRegistry
@@ -207,7 +220,16 @@ func (h *testHost) PermissionChecker() core.PermissionChecker {
 var (
 	_ core.StepUpChecker       = (*testHost)(nil)
 	_ core.EmailSenderProvider = (*testHost)(nil)
+	_ core.PasskeyRevoker      = (*testHost)(nil)
 )
+
+// RevokePasskeys answers through the revoker WithPasskeyRevoker registered.
+func (h *testHost) RevokePasskeys(ctx context.Context, userID uuid.UUID) (int, error) {
+	if h.passkeys == nil {
+		return 0, fmt.Errorf("passkey removal is not wired: %w", core.ErrServiceUnavailable)
+	}
+	return h.passkeys.RevokePasskeys(ctx, userID)
+}
 
 // CheckStepUp answers through the checker WithStepUpChecker registered.
 func (h *testHost) CheckStepUp(r *http.Request, factor, answer string) error {

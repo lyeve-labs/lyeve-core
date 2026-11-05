@@ -118,3 +118,28 @@ func TestCapPolicy_AnalyticsAndMFACheckStepUp(t *testing.T) {
 		}
 	}
 }
+
+// revokeHost removes one passkey for any account, the way the engine host
+// does through the plugin that stores them.
+type revokeHost struct{ core.Host }
+
+func (revokeHost) RevokePasskeys(context.Context, uuid.UUID) (int, error) { return 1, nil }
+
+// Removing an account's passkeys locks its owner out of a passkey sign-in,
+// so only the plugin that resets a password reaches it. Every other plugin
+// of this build is refused.
+func TestCapPolicy_OnlyPasswordResetRevokesPasskeys(t *testing.T) {
+	plugin.SetCapPolicy(capPolicy)
+	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
+
+	inner := revokeHost{mockhost.New(t).Host()}
+	for _, name := range core.RegisteredPlugins() {
+		n, err := core.NewScopedHost(inner, name, plugin.CapPolicy(name)).RevokePasskeys(context.Background(), uuid.New())
+		switch {
+		case name == "password-reset" && (err != nil || n != 1):
+			t.Errorf("password-reset removes passkeys at a reset, but its scoped host returned %d, %v", n, err)
+		case name != "password-reset" && !errors.Is(err, core.ErrCapDenied):
+			t.Errorf("%s does not remove passkeys, but its scoped host returned %d, %v", name, n, err)
+		}
+	}
+}
