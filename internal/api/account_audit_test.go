@@ -40,6 +40,7 @@ func TestUsersHandler_AccountChangesAreAudited(t *testing.T) {
 	pool := testdb.Postgres(t)
 	h := NewUsersHandler(db.NewUserStore(pool))
 	h.host = auditOnlyHost{}
+	h.passkeys = &passkeyRevokerFake{}
 
 	const tenant, requester = "audit-tenant", "requester-tenant"
 	admin := uuid.New()
