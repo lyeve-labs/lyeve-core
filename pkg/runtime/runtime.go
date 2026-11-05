@@ -666,6 +666,13 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}); ok {
 		setter.WithTenantRegions(activator)
 	}
+	// A password reset removes passkeys through whichever running plugin
+	// stores them, asking the activator on each call.
+	if setter, ok := hostBase.(interface {
+		WithPasskeyRevokers(core.PasskeyRevokerProvider)
+	}); ok {
+		setter.WithPasskeyRevokers(activator)
+	}
 	// cfg.Plugins comes from LYEVE_PLUGINS.
 	activator.Resolve(mgr, strings.Join(cfg.Plugins, ","))
 	if err := activator.Start(ctx); err != nil {
@@ -1262,6 +1269,9 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			// The admin port logs every key request, as the API port does.
 			api.WithAPIKeyAudit(apimw.APIKeyAudit(activator.APIKeyAuditLogFn(), trustedCIDRs)),
 			api.WithMFAStore(activator.MFAStore()),
+			// The engine host, not the holder read once here: it asks the
+			// activator at each reset and warns when no plugin stores passkeys.
+			api.WithPasskeyRevoker(hostBase.(core.PasskeyRevoker)),
 			api.WithLockoutBackend(lockoutBackend),
 			api.WithRefreshTokenStore(refreshTokenStore),
 			api.WithDeviceRiskAssessor(activator.RiskAssessor()),

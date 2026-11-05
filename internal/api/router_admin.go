@@ -253,6 +253,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 	}
 	usersHandler.passwordPolicy = passwordPolicy
 	usersHandler.host = o.scalingHost
+	usersHandler.passkeys = o.passkeys
 
 	// Kubernetes health probes
 	// Mounted on the outer router before JWT auth middleware: Kubernetes
