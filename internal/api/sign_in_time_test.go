@@ -16,7 +16,6 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
-	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/security/encryption"
 )
 
@@ -29,21 +28,9 @@ func eachAccountDialect(t *testing.T, fn func(t *testing.T, store *db.UserStore)
 	if testing.Short() {
 		t.Skip("integration test requires Docker (testcontainers)")
 	}
-	for _, d := range []struct {
-		name string
-		open func(*testing.T) db.DB
-	}{
-		{"postgres", testdb.Postgres},
-		{"mysql", testdb.MySQL},
-		{"mssql", testdb.MSSQL},
-	} {
-		t.Run(d.name, func(t *testing.T) {
-			if !testdb.ShouldTest(d.name) {
-				t.Skipf("%s not enabled for this run", d.name)
-			}
-			fn(t, db.NewUserStore(d.open(t)))
-		})
-	}
+	eachProviderDialect(t, func(t *testing.T, pool db.DB) {
+		fn(t, db.NewUserStore(pool))
+	})
 }
 
 // parseSession reads the claims of a session token the handler answered with.
