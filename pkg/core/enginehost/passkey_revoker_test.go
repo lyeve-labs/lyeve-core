@@ -3,12 +3,16 @@ package enginehost
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/testdb"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -56,18 +60,64 @@ func (failingRevoker) RevokePasskeys(context.Context, uuid.UUID) (int, error) {
 	return 0, errors.New("passkey store unreachable")
 }
 
-// With no running plugin that stores passkeys, no passkey can sign in, so a
-// reset removes nothing and goes ahead. The same holds before the runtime
-// wires a source.
-func TestEngineHost_RevokePasskeysWithNoHolderRemovesNothing(t *testing.T) {
-	unwired := &engineHost{}
-	n, err := unwired.RevokePasskeys(context.Background(), uuid.New())
-	require.NoError(t, err)
-	assert.Zero(t, n)
+// warningLog keeps each warning's message and the tenant its context files it
+// under.
+type warningLog struct {
+	mu    sync.Mutex
+	lines []warningLine
+}
 
-	h := &engineHost{}
-	h.WithPasskeyRevokers(&revokerSource{})
-	n, err = h.RevokePasskeys(context.Background(), uuid.New())
+type warningLine struct{ msg, tenant string }
+
+func (l *warningLog) Enabled(context.Context, slog.Level) bool { return true }
+
+func (l *warningLog) Handle(ctx context.Context, rec slog.Record) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines = append(l.lines, warningLine{rec.Message, core.TenantIDFromCtx(ctx)})
+	return nil
+}
+
+func (l *warningLog) WithAttrs([]slog.Attr) slog.Handler { return l }
+func (l *warningLog) WithGroup(string) slog.Handler      { return l }
+
+// With no running plugin that supplies passkey removal, a reset removes
+// nothing and goes ahead, before the runtime wires a source and after. An
+// older mfa may still run and store passkeys then, so the warning names the
+// missing removal, not missing passkeys. The line is about the account, so it
+// is filed under the account's tenant when the request acts there and under
+// no tenant when it acts in another.
+func TestEngineHost_RevokePasskeysWithNoSupplierRemovesNothingAndWarns(t *testing.T) {
+	if !testdb.ShouldTest("postgres") {
+		t.Skip("CI_DIALECT excludes postgres")
+	}
+	if testing.Short() {
+		t.Skip("integration test")
+	}
+	pool := testdb.Postgres(t)
+	account, err := db.NewUserStore(pool).Create(context.Background(), "revoker-"+uuid.NewString()[:8]+"@example.com", "x", []string{"editor"}, "globex")
 	require.NoError(t, err)
-	assert.Zero(t, n)
+
+	log := &warningLog{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(log))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	unwired := &engineHost{pool: pool}
+	wired := &engineHost{pool: pool}
+	wired.WithPasskeyRevokers(&revokerSource{})
+	for acting, h := range map[string]*engineHost{"globex": unwired, "acme": wired} {
+		n, err := h.RevokePasskeys(core.WithTenantID(context.Background(), acting), account.ID)
+		require.NoError(t, err)
+		assert.Zero(t, n)
+	}
+
+	require.Len(t, log.lines, 2)
+	tenants := map[string]bool{}
+	for _, l := range log.lines {
+		assert.Equal(t, "passkeys not removed: no running plugin supplies passkey removal", l.msg)
+		tenants[l.tenant] = true
+	}
+	assert.Equal(t, map[string]bool{"globex": true, "": true}, tenants,
+		"a line about the acting tenant's own account keeps it, one about another tenant's names none")
 }
