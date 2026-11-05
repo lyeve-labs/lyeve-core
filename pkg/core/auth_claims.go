@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // ContextKey is a typed string for context.WithValue keys so that
@@ -92,6 +93,12 @@ type AuthClaims struct {
 	// the token's owner, Roles the owner's current roles in the token's
 	// tenant, and TenantID the tenant the token is bound to.
 	AdminTokenID string `json:"admin_token_id,omitempty"`
+
+	// AuthTime is when the person behind a session signed in, in Unix
+	// seconds. A refresh keeps it. It is zero for an API key, an admin
+	// token, a trusted issuer's token and a session signed before the
+	// engine recorded it. Read it through SignedInWithin.
+	AuthTime int64 `json:"auth_time,omitempty"`
 }
 
 // HasRole reports whether the claims include the given role. Safe to call on nil.
@@ -105,6 +112,27 @@ func (c *AuthClaims) HasRole(role string) bool {
 		}
 	}
 	return false
+}
+
+// signInSkew is how far ahead of this replica's clock a sign-in time may be
+// and still count, because another replica's clock signed it.
+const signInSkew = time.Minute
+
+// SignedInWithin reports whether the session's sign-in happened no more than
+// window ago. A session with no sign-in time never counts: an API key, an
+// admin token, a trusted issuer's token, and a session signed before the
+// claim existed. A time up to a minute ahead counts, for clock skew between
+// replicas.
+func (c *AuthClaims) SignedInWithin(window time.Duration) bool {
+	return c.signedInWithin(time.Now(), window)
+}
+
+func (c *AuthClaims) signedInWithin(now time.Time, window time.Duration) bool {
+	if c == nil || c.AuthTime <= 0 {
+		return false
+	}
+	age := now.Sub(time.Unix(c.AuthTime, 0))
+	return age >= -signInSkew && age <= window
 }
 
 // AllowsSchema reports whether the claims may reach the named content schema.

@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -160,7 +161,7 @@ func forEachImportDialect(t *testing.T, fn func(t *testing.T, rig *importRig)) {
 			u, err := db.NewUserStore(pool).Create(context.Background(),
 				"importer-"+uuid.NewString()[:8]+"@example.com", hash, []string{"super_admin"}, "default")
 			require.NoError(t, err)
-			session, err := auth.Sign(testConfig().JWTSecret, 3600, u.ID, u.Email, u.Roles, "default", u.TokenVersion)
+			session, err := auth.Sign(testConfig().JWTSecret, 3600, u.ID, u.Email, u.Roles, "default", u.TokenVersion, time.Time{})
 			require.NoError(t, err)
 			fn(t, &importRig{pool: pool, user: u, session: session})
 		})

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -94,7 +95,7 @@ func (rg *importRig) tenantRouter(t *testing.T, multiTenant bool) (http.Handler,
 func (rg *importRig) sessionFor(t *testing.T, tenant string) string {
 	t.Helper()
 	u := rg.user
-	session, err := auth.Sign(testConfig().JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion)
+	session, err := auth.Sign(testConfig().JWTSecret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion, time.Time{})
 	require.NoError(t, err)
 	return session
 }

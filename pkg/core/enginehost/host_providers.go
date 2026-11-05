@@ -381,7 +381,7 @@ func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 			return "", err
 		}
 	}
-	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion)
+	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion, time.Now())
 }
 
 // homeRoles is the roles a session acting in the account's home tenant

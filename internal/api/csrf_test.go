@@ -352,7 +352,7 @@ func TestCSRF_TokenIssuedWithEverySession(t *testing.T) {
 			t.Fatalf("load seeded user: %v", err)
 		}
 		rt := auth.NewRefreshTokenStore(auth.NewMemoryBackend(), "cms-test")
-		issued, err := rt.IssueForSession(context.Background(), u.ID.String(), "", u.TokenVersion, time.Hour)
+		issued, err := rt.IssueForSession(context.Background(), u.ID.String(), "", u.TokenVersion, time.Hour, time.Time{})
 		if err != nil {
 			t.Fatalf("issue refresh token: %v", err)
 		}

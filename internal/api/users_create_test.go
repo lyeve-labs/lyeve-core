@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -49,7 +50,7 @@ func TestAdminRouter_UserCreateRequiresRoles(t *testing.T) {
 			cfg.PasswordHashAlgo = "bcrypt"
 			router, err := NewAdminRouter(pool, cfg, WithLifetime(testLifetime(t)))
 			require.NoError(t, err)
-			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion)
+			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion, time.Time{})
 			require.NoError(t, err)
 
 			send := func(body string) *httptest.ResponseRecorder {

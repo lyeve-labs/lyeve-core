@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -41,7 +42,7 @@ func TestAPIRouter_ExtraMiddlewareSeesResolvedTenant(t *testing.T) {
 				WithMiddleware(tenantProbe(&seen, &ran)))
 			require.NoError(t, err)
 
-			token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "writer@test.com", tc.roles, tc.claim, 1)
+			token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "writer@test.com", tc.roles, tc.claim, 1, time.Time{})
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/content/posts", strings.NewReader(`{}`))
 			req.Header.Set("Content-Type", "application/json")

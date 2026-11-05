@@ -130,7 +130,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	h.setupToken.Retire()
 	slog.Info("setup: first super admin created; the setup token no longer opens setup", "user_id", user.ID)
 
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, user.TenantID, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, user.TenantID, user.TokenVersion, time.Now())
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -387,7 +387,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.warnIfTenantMissing(r.Context(), actingTenant, user.Email)
 
 	// Login: no MFA required, issue full session token
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
+	signedIn := time.Now()
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion, signedIn)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -407,7 +408,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Issue refresh token if store is configured.
 	if h.refreshTokenStore != nil {
-		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), user.ID.String(), actingTenant, user.TokenVersion, h.refreshTokenTTL)
+		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), user.ID.String(), actingTenant, user.TokenVersion, h.refreshTokenTTL, signedIn)
 		if err != nil {
 			slog.Error("failed to issue refresh token, continuing without", "err", err)
 		} else {
@@ -792,8 +793,10 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Issue a full session JWT with current user data.
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, liveEmail, liveRoles, liveTenantID, liveTokenVersion)
+	// Issue a full session JWT with current user data. The session begins
+	// now, when the second factor passed, not at the password step.
+	signedIn := time.Now()
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, liveEmail, liveRoles, liveTenantID, liveTokenVersion, signedIn)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -812,7 +815,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	// Issue refresh token if store is configured.
 	if h.refreshTokenStore != nil {
-		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), userID.String(), liveTenantID, liveTokenVersion, h.refreshTokenTTL)
+		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), userID.String(), liveTenantID, liveTokenVersion, h.refreshTokenTTL, signedIn)
 		if err != nil {
 			slog.Error("failed to issue refresh token in mfa-verify, continuing without", "err", err)
 		} else {

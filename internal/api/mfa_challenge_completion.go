@@ -60,7 +60,7 @@ func (h *AuthHandler) CompleteMFAChallenge(ctx context.Context, challengeToken s
 	if err != nil {
 		return "", fmt.Errorf("complete mfa challenge: resolve tenant: %w", err)
 	}
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, user.SignInEmail(), roles, tenantID, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, user.SignInEmail(), roles, tenantID, user.TokenVersion, time.Now())
 	if err != nil {
 		return "", fmt.Errorf("complete mfa challenge: sign: %w", err)
 	}

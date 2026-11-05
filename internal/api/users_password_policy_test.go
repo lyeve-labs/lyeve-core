@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -54,7 +55,7 @@ func TestAdminRouter_UsersRoutesHoldTheConfiguredPasswordPolicy(t *testing.T) {
 			cfg.PasswordCheckCommon = true
 			router, err := NewAdminRouter(pool, cfg, WithLifetime(testLifetime(t)))
 			require.NoError(t, err)
-			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion)
+			tok, err := auth.Sign(cfg.JWTSecret, 3600, admin.ID, admin.Email, admin.Roles, "default", admin.TokenVersion, time.Time{})
 			require.NoError(t, err)
 
 			// Fifteen characters with mixed case and digits: the default

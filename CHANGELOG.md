@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Session tokens carry `auth_time`, the time the person signed in. A refresh keeps it, so a plugin can tell a recent sign-in from a long-lived session through `core.AuthClaims.SignedInWithin`. A session issued before this release carries none and counts as not recent.
+
 ## [0.59.0] - 2026-11-09
 
 ### Changed

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -84,7 +85,7 @@ func TestRouters_EndedSessionReachesPluginMiddlewareWithoutACaller(t *testing.T)
 		t.Fatalf("NewAPIRouter: %v", err)
 	}
 
-	tok, err := auth.Sign(cfg.JWTSecret, 3600, user.ID, user.Email, user.Roles, "default", user.TokenVersion)
+	tok, err := auth.Sign(cfg.JWTSecret, 3600, user.ID, user.Email, user.Roles, "default", user.TokenVersion, time.Time{})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
