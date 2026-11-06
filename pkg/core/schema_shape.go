@@ -27,6 +27,12 @@ type Schema struct {
 	// everywhere. See SchemaTransports.
 	Transports SchemaTransports `json:"transports,omitempty"`
 
+	// PublicDelivery opens the schema's published entries to the public
+	// delivery routes, which read no credential and answer in a form a
+	// shared cache may keep. Absent is false, so a definition written before
+	// the mark existed stays closed. It generates no DDL.
+	PublicDelivery bool `json:"public_delivery,omitempty"`
+
 	// CrossFieldValidation is a list of cross-field validation rules.
 	// Each rule operates on two or more fields, for example "date_to must be
 	// greater than or equal to date_from".
@@ -78,6 +84,12 @@ type SchemaField struct {
 	// LocalizedRefusal bounds it, and every validator refuses a field it
 	// names rather than dropping the mark.
 	Localized bool `json:"localized,omitempty"`
+
+	// Private keeps the field out of every answer on the public delivery
+	// routes, and a filter on it there is refused as one on an unknown
+	// field. The credentialed content routes are unaffected. It generates
+	// no DDL.
+	Private bool `json:"private,omitempty"`
 }
 
 // ValidationRule is a single field-level constraint.

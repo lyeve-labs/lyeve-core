@@ -97,24 +97,35 @@ func (b *Buffer) Unsubscribe(id uint64) {
 // Snapshot returns a copy of all entries in the buffer, from oldest to newest,
 // that match accepts. If match is nil, all entries are returned.
 // max limits the result count. 0 means no limit.
+//
+// The lock is held only to copy the window. Every log call in the process
+// pushes here, and match is the caller's, so running it under the lock would
+// stall each of them for as long as the filter takes.
 func (b *Buffer) Snapshot(match func(Entry) bool, max int) []Entry {
 	b.mu.RLock()
-	defer b.mu.RUnlock()
-
-	if b.size == 0 {
+	n := b.size
+	if match == nil && max > 0 && max < n {
+		n = max
+	}
+	if n == 0 {
+		b.mu.RUnlock()
 		return nil
 	}
-
-	result := make([]Entry, 0, b.size)
 	start := b.head - b.size
 	if start < 0 {
 		start += b.cap
 	}
+	window := make([]Entry, n)
+	copied := copy(window, b.entries[start:min(start+n, b.cap)])
+	copy(window[copied:], b.entries[:n-copied])
+	b.mu.RUnlock()
 
-	for i := 0; i < b.size; i++ {
-		idx := (start + i) % b.cap
-		e := b.entries[idx]
-		if match != nil && !match(e) {
+	if match == nil {
+		return window
+	}
+	result := window[:0]
+	for _, e := range window {
+		if !match(e) {
 			continue
 		}
 		result = append(result, e)
@@ -122,7 +133,6 @@ func (b *Buffer) Snapshot(match func(Entry) bool, max int) []Entry {
 			break
 		}
 	}
-
 	return result
 }
 

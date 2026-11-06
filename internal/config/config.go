@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -293,48 +294,16 @@ func resolveConfig() (*Config, error) {
 		backpressurePoolPressureThreshold = n
 	}
 
-	// Memory limit: try cgroup v2 first, then env var.
-	var memoryLimitBytes int64
-	if data, err := os.ReadFile("/sys/fs/cgroup/memory.max"); err == nil {
-		if n, parseErr := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); parseErr == nil && n > 0 {
-			memoryLimitBytes = n
-		}
-	}
-	if memoryLimitBytes == 0 {
-		if v := lookup("MEMORY_LIMIT_BYTES"); v != "" {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be a number: %w", err)
-			}
-			if n < 0 {
-				return nil, fmt.Errorf("MEMORY_LIMIT_BYTES must be non-negative, got %d", n)
-			}
-			memoryLimitBytes = n
-		}
+	// Memory limit: MEMORY_LIMIT_BYTES, then the process's cgroup, then the
+	// machine's memory.
+	memoryLimitBytes, err := memoryLimit(lookup("MEMORY_LIMIT_BYTES"), os.DirFS("/"))
+	if err != nil {
+		return nil, err
 	}
 
-	// CPU quota: the same cgroup v2 story as the memory limit above. Go sizes
-	// its scheduler, its garbage collector's worker count and the default
-	// parallelism of everything built on them from the number of cores it can
-	// see, and it sees the host's cores rather than the share this container
-	// was given. Under a fractional or single-core quota that means the runtime
-	// arranges far more parallel work than the cgroup will let it run, and the
-	// kernel absorbs the difference as throttling, which arrives as latency
-	// spikes rather than as an error anyone can trace back to here.
-	//
-	// cpu.max holds "<quota> <period>", or "max <period>" for no limit. The
-	// value is rounded up: half a core still needs one thread to run on.
+	// CPU_QUOTA overrides Go's own default, which follows the cgroup's CPU
+	// limit. The engine applies it only when GOMAXPROCS is not set.
 	var cpuQuota int
-	if data, err := os.ReadFile("/sys/fs/cgroup/cpu.max"); err == nil {
-		fields := strings.Fields(strings.TrimSpace(string(data)))
-		if len(fields) == 2 && fields[0] != "max" {
-			quota, qErr := strconv.ParseInt(fields[0], 10, 64)
-			period, pErr := strconv.ParseInt(fields[1], 10, 64)
-			if qErr == nil && pErr == nil && quota > 0 && period > 0 {
-				cpuQuota = int((quota + period - 1) / period)
-			}
-		}
-	}
 	if v := lookup("CPU_QUOTA"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -503,16 +472,22 @@ func resolveConfig() (*Config, error) {
 		return nil, fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must be set together")
 	}
 
-	adminConsoleKey := lookup("ADMIN_CONSOLE_KEY")
-	if adminConsoleKey != "" && len(adminConsoleKey) < 32 {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY must be at least 32 characters, got %d", len(adminConsoleKey))
+	adminConsoleKey, keyFrom, err := consoleKeySetting("LYEVE_CONSOLE_KEY", "ADMIN_CONSOLE_KEY")
+	if err != nil {
+		return nil, err
 	}
-	adminConsoleKeyPrevious := lookup("ADMIN_CONSOLE_KEY_PREVIOUS")
+	if adminConsoleKey != "" && len(adminConsoleKey) < 32 {
+		return nil, fmt.Errorf("%s must be at least 32 characters, got %d", keyFrom, len(adminConsoleKey))
+	}
+	adminConsoleKeyPrevious, previousFrom, err := consoleKeySetting("LYEVE_CONSOLE_KEY_PREVIOUS", "ADMIN_CONSOLE_KEY_PREVIOUS")
+	if err != nil {
+		return nil, err
+	}
 	if adminConsoleKeyPrevious != "" && len(adminConsoleKeyPrevious) < 32 {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY_PREVIOUS must be at least 32 characters, got %d", len(adminConsoleKeyPrevious))
+		return nil, fmt.Errorf("%s must be at least 32 characters, got %d", previousFrom, len(adminConsoleKeyPrevious))
 	}
 	if adminConsoleKeyPrevious != "" && adminConsoleKey == "" {
-		return nil, fmt.Errorf("ADMIN_CONSOLE_KEY_PREVIOUS is set without ADMIN_CONSOLE_KEY")
+		return nil, fmt.Errorf("%s is set without %s", previousFrom, strings.TrimSuffix(previousFrom, "_PREVIOUS"))
 	}
 
 	enforceAPIKeyPepper := lookup("ENFORCE_API_KEY_PEPPER") == "true"
@@ -522,6 +497,14 @@ func resolveConfig() (*Config, error) {
 		return nil, err
 	}
 	cacheMaxEntries, err := parseCacheMaxEntries()
+	if err != nil {
+		return nil, err
+	}
+	deliveryMaxAge, err := parseDeliverySeconds("DELIVERY_MAX_AGE", 60)
+	if err != nil {
+		return nil, err
+	}
+	deliverySharedMaxAge, err := parseDeliverySeconds("DELIVERY_SHARED_MAX_AGE", 300)
 	if err != nil {
 		return nil, err
 	}
@@ -594,6 +577,8 @@ func resolveConfig() (*Config, error) {
 		PreStopDrainDelay:                 preStopDrain,
 		CacheTTL:                          cacheTTL,
 		CacheMaxEntries:                   cacheMaxEntries,
+		DeliveryMaxAge:                    deliveryMaxAge,
+		DeliverySharedMaxAge:              deliverySharedMaxAge,
 		DatabaseDriver:                    envOr("DATABASE_DRIVER", db.EngineFromDSN(dbURL)),
 		StorageDriver:                     envOr("STORAGE_DRIVER", "local"),
 		StorageLocalPath:                  envOr("STORAGE_LOCAL_PATH", "./uploads"),
@@ -643,6 +628,13 @@ func resolveConfig() (*Config, error) {
 		PluginStopParallelism:             pluginStopParallelism,
 	}
 
+	// APP_ENV decides whether the production checks run, so a value naming
+	// neither environment is refused rather than read as not production.
+	switch strings.ToLower(cfg.Environment) {
+	case "production", "development":
+	default:
+		return nil, errors.New("config validation: APP_ENV must be production or development")
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
@@ -717,6 +709,49 @@ func parseCacheMaxEntries() (int, error) {
 		return 0, fmt.Errorf("CACHE_MAX_ENTRIES must be positive, got %d", n)
 	}
 	return n, nil
+}
+
+// maxDeliverySeconds caps a delivery lifetime at one day.
+const maxDeliverySeconds = 86400
+
+// parseDeliverySeconds reads a delivery lifetime in whole seconds, from 1 to
+// one day. Zero is refused: a public answer with no max-age is one a cache
+// may keep for as long as its own heuristic says.
+func parseDeliverySeconds(key string, def int) (time.Duration, error) {
+	v := lookup(key)
+	if v == "" {
+		return time.Duration(def) * time.Second, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a whole number of seconds: %w", key, err)
+	}
+	if n < 1 || n > maxDeliverySeconds {
+		return 0, fmt.Errorf("%s must be from 1 to %d seconds, got %d", key, maxDeliverySeconds, n)
+	}
+	return time.Duration(n) * time.Second, nil
+}
+
+// consoleKeySetting reads a console key setting under its current name and
+// its deprecated one, and returns the value with the name it came from. Both
+// names set to different values is refused, because either choice would sign
+// with a key the operator did not mean.
+func consoleKeySetting(name, deprecated string) (value, from string, err error) {
+	current, old := lookup(name), lookup(deprecated)
+	if old != "" {
+		// Deprecated: the old name is read for one more minor release. The
+		// engine logs one JSON object per line, so this goes through slog.
+		slog.Warn("deprecated config", "warning", fmt.Sprintf("%s is deprecated and stops being read after the next minor release. Set %s instead.", deprecated, name))
+	}
+	switch {
+	case current != "" && old != "" && current != old:
+		return "", "", fmt.Errorf("%s and %s are set to different values, so unset %s", name, deprecated, deprecated)
+	case current != "":
+		return current, name, nil
+	case old != "":
+		return old, deprecated, nil
+	}
+	return "", name, nil
 }
 
 func envOr(key, fallback string) string {

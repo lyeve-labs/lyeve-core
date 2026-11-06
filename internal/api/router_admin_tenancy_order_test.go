@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -38,7 +39,7 @@ func TestAdminRouter_ExtraMiddlewareSeesResolvedTenant(t *testing.T) {
 		t.Fatalf("NewAdminRouter: %v", err)
 	}
 
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "ops@test.com", []string{"super_admin"}, "", 1)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "ops@test.com", []string{"super_admin"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestAdminRouter_ExtraMiddlewareSeesClaimTenant(t *testing.T) {
 		t.Fatalf("NewAdminRouter: %v", err)
 	}
 
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "editor@test.com", []string{"editor"}, "beta", 1)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "editor@test.com", []string{"editor"}, "beta", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}

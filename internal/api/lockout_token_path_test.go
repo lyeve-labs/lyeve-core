@@ -72,12 +72,17 @@ func TestLockout_BothLoginPathsRecordAFailure(t *testing.T) {
 
 			tc.call(h, rr, req)
 
-			if len(lockout.recorded) != 1 {
-				t.Fatalf("%s recorded %d failures, want 1: a path that checks the lockout must also feed it, or the control is absent while reporting as present",
-					tc.path, len(lockout.recorded))
+			// One attempt is one reservation against the account from the
+			// requester's network and one against the account.
+			want := []uuid.UUID{networkAttemptKey(uid, requesterNet(clientIP(req))), uid}
+			if len(lockout.recorded) != len(want) {
+				t.Fatalf("%s recorded %d failures, want %d: a path that checks the lockout must also feed it, or the control is absent while reporting as present",
+					tc.path, len(lockout.recorded), len(want))
 			}
-			if lockout.recorded[0] != uid {
-				t.Errorf("recorded against %s, want %s", lockout.recorded[0], uid)
+			for i := range want {
+				if lockout.recorded[i] != want[i] {
+					t.Errorf("reservation %d recorded against %s, want %s", i, lockout.recorded[i], want[i])
+				}
 			}
 		})
 	}

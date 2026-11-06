@@ -63,6 +63,7 @@ type routerOptions struct {
 	healthProbes         *ProbeRegistry                         // nil -> probes not configured
 	latencyTracker       *apimw.LatencyTracker                  // nil -> latency tracking disabled
 	scalingHost          core.Host                              // the engine host: goroutine tracker, and the audit writer's database
+	passkeys             core.PasskeyRevoker                    // nil -> setting a password removes no passkeys
 	setupToken           *SetupToken                            // nil -> built from cfg.SetupToken
 	keyStore             *encryption.KeyStore                   // nil -> build from cfg.EncryptionKey
 	idempotency          func(http.Handler) http.Handler        // nil -> no Idempotency-Key enforcement, filled through core.IdempotencyMiddlewareProvider
@@ -235,6 +236,12 @@ func WithPluginConfigReloader(p PluginConfigReloader) RouterOption {
 // When not set, the MFA verification endpoint returns 501 Not Implemented.
 func WithMFAStore(s security.MFAStore) RouterOption {
 	return func(o *routerOptions) { o.mfaStore = s }
+}
+
+// WithPasskeyRevoker injects what removes an account's passkeys when a super
+// admin sets its password. When not set, the route removes none.
+func WithPasskeyRevoker(r core.PasskeyRevoker) RouterOption {
+	return func(o *routerOptions) { o.passkeys = r }
 }
 
 // WithRefreshTokenStore injects the refresh token store for Refresh/Logout
@@ -593,6 +600,10 @@ func applyBuiltinMiddleware(r *chi.Mux, cfg *config.Config, bodyOverrides map[st
 	for _, mw := range first {
 		r.Use(mw)
 	}
+
+	// A response to a request that carries a credential is never stored by
+	// a shared cache, on every route, plugin routes included.
+	r.Use(apimw.CredentialedPrivate)
 
 	// Path sanitization: reject null bytes, control characters, and
 	// fullwidth Unicode homoglyphs before any handler sees the URL.
@@ -1286,6 +1297,8 @@ func engineOwnedRoutes(prefix string) map[string]struct{} {
 			"GET /api/v1/ready",
 			"GET /api/v1/schemas",
 			"GET /api/v1/schemas/{name}",
+			"GET /api/v1/delivery/{schema}",
+			"GET /api/v1/delivery/{schema}/{id}",
 			"GET /api/v1/content/{schema}",
 			"GET /api/v1/content/{schema}/cursor",
 			"GET /api/v1/content/{schema}/stream",

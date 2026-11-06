@@ -93,7 +93,7 @@ func (p *pinRig) sessionAs(t *testing.T, tenant, role string) (uuid.UUID, string
 	u, err := p.users.Create(ctx, uuid.NewString()+"@pin.test", "!hash!", []string{role}, tenant)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = p.users.Delete(ctx, u.ID) })
-	tok, err := auth.Sign(p.secret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion)
+	tok, err := auth.Sign(p.secret, 3600, u.ID, u.Email, u.Roles, tenant, u.TokenVersion, time.Time{})
 	require.NoError(t, err)
 	return u.ID, tok
 }

@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-// PluginCategory is where the admin console files a plugin. The set is
+// PluginCategory is where the console files a plugin. The set is
 // closed, so every console groups plugins the same way, and a value outside
 // it is dropped rather than shown.
 type PluginCategory string
@@ -43,7 +43,7 @@ const (
 )
 
 // PluginManifest is how a plugin describes itself to the person running the
-// install. The plugin status carries it, and the admin console lists the
+// install. The plugin status carries it, and the console lists the
 // plugin under its label, in its category. It carries no license terms,
 // because what an install may run is the licensing implementation's to say.
 type PluginManifest struct {

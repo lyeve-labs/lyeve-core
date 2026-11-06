@@ -2,7 +2,7 @@
 # kernel-smoke.sh boots the kernel binary against an empty Postgres database
 # and walks the first run an operator makes: the probes and the container
 # healthcheck answer, setup creates the first super admin, that account signs
-# in, and the entitlements the admin console reads first report the plan an
+# in, and the entitlements the console reads first report the plan an
 # install reports with no license. Then it stops the engine and expects a clean
 # exit, after which the healthcheck has to fail.
 #

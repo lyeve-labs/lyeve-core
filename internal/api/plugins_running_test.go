@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -109,7 +110,7 @@ func TestRunningPluginsHandler_NeverAnswersNull(t *testing.T) {
 // token version 0 so the version check reads the stub row.
 func signedInAs(t *testing.T, tenant string, roles ...string) string {
 	t.Helper()
-	tok, err := auth.Sign(testConfig().JWTSecret, 3600, uuid.New(), "someone@test.local", roles, tenant, 0)
+	tok, err := auth.Sign(testConfig().JWTSecret, 3600, uuid.New(), "someone@test.local", roles, tenant, 0, time.Time{})
 	require.NoError(t, err)
 	return tok
 }

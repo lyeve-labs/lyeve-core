@@ -225,20 +225,26 @@ func TestToken_LockedOut_FailClosedOnCheckError(t *testing.T) {
 
 // LOGIN: Lockout triggers after N failed password attempts
 
+// recordingLockoutChecker counts per key, as the real lockouts do: the
+// handler reserves against the account and against the account from the
+// requester's network.
 type recordingLockoutChecker struct {
-	failures int
+	failures map[uuid.UUID]int
 }
 
 func (c *recordingLockoutChecker) ReserveAttempt(ctx context.Context, userID uuid.UUID, limit int) (Reservation, bool, error) {
-	if c.failures >= limit {
-		return Reservation{Count: c.failures}, false, nil
+	if c.failures == nil {
+		c.failures = map[uuid.UUID]int{}
 	}
-	c.failures++
-	return Reservation{Count: c.failures}, true, nil
+	if c.failures[userID] >= limit {
+		return Reservation{Count: c.failures[userID]}, false, nil
+	}
+	c.failures[userID]++
+	return Reservation{Count: c.failures[userID]}, true, nil
 }
 
 func (c *recordingLockoutChecker) ReleaseAttempt(ctx context.Context, userID uuid.UUID, _ Reservation) error {
-	c.failures--
+	c.failures[userID]--
 	return nil
 }
 
@@ -289,8 +295,8 @@ func TestLogin_LockoutTriggersAfterNFailures(t *testing.T) {
 		t.Errorf("6th attempt: status = %d, want %d: a lockout must look like any other rejection", rr.Code, http.StatusUnauthorized)
 	}
 
-	if recorder.failures != 5 {
-		t.Errorf("recorded failures = %d, want 5", recorder.failures)
+	if got := recorder.failures[uid]; got != 5 {
+		t.Errorf("recorded failures = %d, want 5", got)
 	}
 }
 
@@ -898,7 +904,7 @@ func TestAuthEndpoint_MFAVerify_FullSessionTokenRejected(t *testing.T) {
 	h := NewAuthHandler(nil, mfaStore, nil, secret, 3600, false)
 
 	// Create a full session token (typ=session, NOT pending MFA).
-	fullToken, err := auth.Sign(secret, 3600, userID, "full-token@test.com", []string{"editor"}, "", 1)
+	fullToken, err := auth.Sign(secret, 3600, userID, "full-token@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("sign full token: %v", err)
 	}
@@ -1360,7 +1366,7 @@ func TestJWTAuth_AcceptsSessionToken(t *testing.T) {
 	secret := "test-secret-32-bytes-minimum-len!!"
 	userID := uuid.New()
 
-	sessionToken, err := auth.Sign(secret, 3600, userID, "session@test.com", []string{"editor"}, "", 1)
+	sessionToken, err := auth.Sign(secret, 3600, userID, "session@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign session: %v", err)
 	}
@@ -1661,7 +1667,7 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 		return rr
 	}
 
-	otherDevice, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 3, 15*time.Minute)
+	otherDevice, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 3, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -1674,7 +1680,7 @@ func TestRefresh_FamilyIssuedUnderAnOlderTokenVersion(t *testing.T) {
 		t.Error("a refused family must be revoked, not left to try again")
 	}
 
-	current, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 4, 15*time.Minute)
+	current, err := rtStore.IssueForSession(context.Background(), uid.String(), "", 4, 15*time.Minute, time.Time{})
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}

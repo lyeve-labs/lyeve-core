@@ -120,7 +120,6 @@ func TestGoroutineTracker_WaitTimeout(t *testing.T) {
 	tracker := NewGoroutineTracker(TrackerConfig{MaxGoroutines: 10000})
 
 	neverDone := make(chan struct{})
-	defer close(neverDone) // clean up after test
 
 	tracker.Go("stuck", func(ctx context.Context) {
 		// Ignore ctx.Done(): this goroutine never exits on its own.
@@ -138,9 +137,10 @@ func TestGoroutineTracker_WaitTimeout(t *testing.T) {
 		t.Errorf("expected 1 tracked after timeout, got %d", c)
 	}
 
-	// Cleanup: close neverDone (via defer) then wait for the goroutine.
-	// Already deferred close(neverDone).
-	tracker.Wait(1 * time.Second) // should succeed now
+	close(neverDone)
+	if err := tracker.Shutdown(time.Second); err != nil {
+		t.Errorf("shutdown after the goroutine returned: %v", err)
+	}
 }
 
 func TestGoroutineTracker_MultiplePanics(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -36,7 +37,7 @@ func TestTokenVersionCheck_AcceptsCurrentVersion(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "current@test.com", []string{"editor"}, "", 3)
+	tok, err := auth.Sign(secret, 3600, uid, "current@test.com", []string{"editor"}, "", 3, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -76,7 +77,7 @@ func TestTokenVersionCheck_RejectsStaleVersion(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "stale@test.com", []string{"editor"}, "", 1)
+	tok, err := auth.Sign(secret, 3600, uid, "stale@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -118,7 +119,7 @@ func TestTokenVersionCheck_ZeroVersionCheckedAgainstStore(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "legacy@test.com", []string{"editor"}, "", 0)
+	tok, err := auth.Sign(secret, 3600, uid, "legacy@test.com", []string{"editor"}, "", 0, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestTokenVersionCheck_NilGetterSkipsCheck(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "nil-getter@test.com", []string{"editor"}, "", 1)
+	tok, err := auth.Sign(secret, 3600, uid, "nil-getter@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestTokenVersionCheck_GetterReturnsZeroSkipsCheck(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "zero-getter@test.com", []string{"editor"}, "", 1)
+	tok, err := auth.Sign(secret, 3600, uid, "zero-getter@test.com", []string{"editor"}, "", 1, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestTokenVersionCheck_LoggedWarningOnMismatch(t *testing.T) {
 	secret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tok, err := auth.Sign(secret, 3600, uid, "warn@test.com", []string{"editor"}, "", 5)
+	tok, err := auth.Sign(secret, 3600, uid, "warn@test.com", []string{"editor"}, "", 5, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestLogout_BumpsTokenVersion_WithVersionAwareFake(t *testing.T) {
 
 	h := NewAuthHandler(users, nil, nil, "test-secret-32-bytes-minimum-len!!", 3600, true)
 
-	tok, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion)
+	tok, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -321,7 +322,7 @@ func TestLogout_BumpsTokenVersion_CookiePath(t *testing.T) {
 
 	h := NewAuthHandler(users, nil, nil, "test-secret-32-bytes-minimum-len!!", 3600, true)
 
-	tok, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion)
+	tok, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, "", user.TokenVersion, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
@@ -375,7 +376,7 @@ func TestTokenVersion_LogoutInvalidatesJWT(t *testing.T) {
 	r.Get("/test", func(w http.ResponseWriter, req *http.Request) { h.ServeHTTP(w, req) })
 
 	// Token at version 3: should pass.
-	tokV3, err := auth.Sign(secret, 3600, user.ID, user.Email, user.Roles, "", 3)
+	tokV3, err := auth.Sign(secret, 3600, user.ID, user.Email, user.Roles, "", 3, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign(v3): %v", err)
 	}
@@ -400,7 +401,7 @@ func TestTokenVersion_LogoutInvalidatesJWT(t *testing.T) {
 	}
 
 	// Fresh v4 token: should pass.
-	tokV4, err := auth.Sign(secret, 3600, user.ID, user.Email, user.Roles, "", 4)
+	tokV4, err := auth.Sign(secret, 3600, user.ID, user.Email, user.Roles, "", 4, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign(v4): %v", err)
 	}
@@ -421,7 +422,7 @@ func TestTokenVersion_KeyRotation_RespectsTV(t *testing.T) {
 	oldSecret := strings.Repeat("x", 32)
 	uid := uuid.New()
 
-	tokOld, err := auth.Sign(oldSecret, 3600, uid, "rotate-tv@test.com", []string{"editor"}, "", 2)
+	tokOld, err := auth.Sign(oldSecret, 3600, uid, "rotate-tv@test.com", []string{"editor"}, "", 2, time.Time{})
 	if err != nil {
 		t.Fatalf("Sign(old): %v", err)
 	}

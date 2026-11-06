@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +22,7 @@ func TestSign_CarriesTenantThroughRoundTrip(t *testing.T) {
 	const secret = "tenant-claim-round-trip-secret-32b"
 	id := uuid.New()
 
-	token, err := auth.Sign(secret, 3600, id, "member@acme.test", []string{"admin"}, "acme", 1)
+	token, err := auth.Sign(secret, 3600, id, "member@acme.test", []string{"admin"}, "acme", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)
@@ -39,7 +40,7 @@ func TestSign_OmitsTheClaimWhenThereIsNoTenant(t *testing.T) {
 	const secret = "tenant-claim-omitted-secret-32byte"
 	id := uuid.New()
 
-	token, err := auth.Sign(secret, 3600, id, "root@example.com", []string{"super_admin"}, "", 1)
+	token, err := auth.Sign(secret, 3600, id, "root@example.com", []string{"super_admin"}, "", 1, time.Time{})
 	require.NoError(t, err)
 
 	claims, err := auth.Parse(secret, token)

@@ -40,6 +40,7 @@ func wrappers(inner http.ResponseWriter) map[string]http.ResponseWriter {
 		"etagWriter":            &etagWriter{ResponseWriter: inner},
 		"conditionalWriter":     &conditionalWriter{ResponseWriter: inner},
 		"levelCompressWriter":   &levelCompressWriter{ResponseWriter: inner},
+		"privateWriter":         &privateWriter{ResponseWriter: inner},
 	}
 }
 

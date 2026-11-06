@@ -558,7 +558,7 @@ func TestSecretKeys_Canonical(t *testing.T) {
 		"redis_url", "storage_s3_key", "storage_s3_secret",
 		"search_es_api_key", "search_es_password", "search_meili_api_key",
 		"smtp_pass", "smtp_user", "license_key", "license_cache_dir",
-		"rate_limit_redis_url", "admin_console_key_previous",
+		"rate_limit_redis_url", "admin_console_key_previous", "lyeve_console_key_previous",
 	}
 	for _, key := range required {
 		if !SecretKeys[key] {
@@ -792,7 +792,10 @@ func TestScopedHost_ProviderStorageFallback(t *testing.T) {
 // Both console keys verify a signature that names any client address, so
 // both are secret. The suffix rule catches the current one only.
 func TestIsSecretKey_BothConsoleKeys(t *testing.T) {
-	for _, key := range []string{"ADMIN_CONSOLE_KEY", "ADMIN_CONSOLE_KEY_PREVIOUS", "admin_console_key_previous"} {
+	for _, key := range []string{
+		"ADMIN_CONSOLE_KEY", "ADMIN_CONSOLE_KEY_PREVIOUS", "admin_console_key_previous",
+		"LYEVE_CONSOLE_KEY", "LYEVE_CONSOLE_KEY_PREVIOUS", "lyeve_console_key_previous", "lyeve.console-key.previous",
+	} {
 		if !IsSecretKey(key) {
 			t.Errorf("IsSecretKey(%q) = false, want true", key)
 		}

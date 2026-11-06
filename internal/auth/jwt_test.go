@@ -21,7 +21,7 @@ func TestAuthJWT_InvalidTokenErrorWrappedNotBareNew(t *testing.T) {
 
 	t.Run("expired", func(t *testing.T) {
 		id := uuid.New()
-		token, err := auth.Sign(secret, -1, id, "expired@test.com", nil, "", 1)
+		token, err := auth.Sign(secret, -1, id, "expired@test.com", nil, "", 1, time.Time{})
 		require.NoError(t, err)
 
 		_, err = auth.Parse(secret, token)
@@ -38,7 +38,7 @@ func TestAuthJWT_InvalidTokenErrorWrappedNotBareNew(t *testing.T) {
 			t.Skip("wrong_secret is HMAC-only; EdDSA ignores the secret parameter")
 		}
 		id := uuid.New()
-		token, err := auth.Sign(secret, 3600, id, "user@test.com", nil, "", 1)
+		token, err := auth.Sign(secret, 3600, id, "user@test.com", nil, "", 1, time.Time{})
 		require.NoError(t, err)
 
 		_, err = auth.Parse("different-secret-32bytes!!!!!!!!", token)
@@ -63,7 +63,7 @@ func TestAuthJWT_ParseRejectsExpiredAndNoneAlg(t *testing.T) {
 
 	t.Run("rejects_expired", func(t *testing.T) {
 		id := uuid.New()
-		token, err := auth.Sign(secret, -1, id, "expired@test.com", []string{"user"}, "", 1)
+		token, err := auth.Sign(secret, -1, id, "expired@test.com", []string{"user"}, "", 1, time.Time{})
 		require.NoError(t, err)
 
 		_, err = auth.Parse(secret, token)
@@ -96,7 +96,7 @@ func TestAuthJWT_ParseRejectsExpiredAndNoneAlg(t *testing.T) {
 			t.Skip("tampered-signature test is HMAC-only; EdDSA uses public-key validation")
 		}
 		id := uuid.New()
-		token, err := auth.Sign(secret, 3600, id, "tampered@test.com", nil, "", 1)
+		token, err := auth.Sign(secret, 3600, id, "tampered@test.com", nil, "", 1, time.Time{})
 		require.NoError(t, err)
 
 		_, err = auth.Parse(secret, token[:len(token)-1]+"X")
@@ -105,7 +105,7 @@ func TestAuthJWT_ParseRejectsExpiredAndNoneAlg(t *testing.T) {
 
 	t.Run("valid_token_returns_claims", func(t *testing.T) {
 		id := uuid.New()
-		token, err := auth.Sign(secret, 3600, id, "valid@test.com", []string{"admin", "user"}, "", 1)
+		token, err := auth.Sign(secret, 3600, id, "valid@test.com", []string{"admin", "user"}, "", 1, time.Time{})
 		require.NoError(t, err)
 
 		claims, err := auth.Parse(secret, token)
@@ -118,4 +118,42 @@ func TestAuthJWT_ParseRejectsExpiredAndNoneAlg(t *testing.T) {
 			t.Errorf("JWT has unexpected TenantID=%q: a token signed without a tenant must not name one", claims.TenantID)
 		}
 	})
+}
+
+// A session token carries the time the person signed in, which the caller
+// states and which can be older than the token itself.
+func TestSign_CarriesAuthTime(t *testing.T) {
+	secret := "auth-time-test-secret-at-least-32-bytes!"
+	signedIn := time.Now().Add(-10 * time.Minute).Truncate(time.Second)
+
+	token, err := auth.Sign(secret, 3600, uuid.New(), "signed-in@test.com", []string{"editor"}, "", 1, signedIn)
+	require.NoError(t, err)
+	claims, err := auth.Parse(secret, token)
+	require.NoError(t, err)
+	assert.Equal(t, signedIn.Unix(), claims.AuthTime)
+	assert.True(t, claims.IssuedAt.After(signedIn), "the token is issued now, after the sign-in it names")
+}
+
+// The zero time leaves the claim out, so a reader cannot mistake it for a
+// sign-in at the Unix epoch.
+func TestSign_ZeroAuthTimeOmitsTheClaim(t *testing.T) {
+	secret := "auth-time-test-secret-at-least-32-bytes!"
+	token, err := auth.Sign(secret, 3600, uuid.New(), "no-time@test.com", nil, "", 1, time.Time{})
+	require.NoError(t, err)
+
+	raw := jwt.MapClaims{}
+	_, _, err = jwt.NewParser().ParseUnverified(token, raw)
+	require.NoError(t, err)
+	assert.NotContains(t, raw, "auth_time")
+
+	claims, err := auth.Parse(secret, token)
+	require.NoError(t, err)
+	assert.Zero(t, claims.AuthTime)
+}
+
+// Plugins read the claims through core.AuthClaims, so the conversion has to
+// carry the sign-in time across.
+func TestClaims_AuthClaimsCopiesAuthTime(t *testing.T) {
+	claims := &auth.Claims{UserID: uuid.NewString(), AuthTime: 1_790_000_000}
+	assert.Equal(t, int64(1_790_000_000), claims.AuthClaims().AuthTime)
 }

@@ -21,13 +21,13 @@ func TestJWT_EdgeCases(t *testing.T) {
 	sec := "edge-case-test-secret-32bytes!"
 
 	t.Run("expired_token_rejected", func(t *testing.T) {
-		tok, _ := auth.Sign(sec, -1, uuid.New(), "exp@t.com", nil, "", 1)
+		tok, _ := auth.Sign(sec, -1, uuid.New(), "exp@t.com", nil, "", 1, time.Time{})
 		_, err := auth.Parse(sec, tok)
 		assert.True(t, errors.Is(err, jwt.ErrTokenExpired))
 	})
 
 	t.Run("invalid_signature_rejected", func(t *testing.T) {
-		tok, _ := auth.Sign(sec, 3600, uuid.New(), "sig@t.com", nil, "", 1)
+		tok, _ := auth.Sign(sec, 3600, uuid.New(), "sig@t.com", nil, "", 1, time.Time{})
 		_, err := auth.Parse(sec, tok[:len(tok)-3]+"bad")
 		assert.True(t, errors.Is(err, jwt.ErrTokenSignatureInvalid))
 	})

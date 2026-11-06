@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -98,21 +99,72 @@ type stepUpHost struct{ core.Host }
 func (stepUpHost) CheckStepUp(*http.Request, string, string) error { return nil }
 
 // A step-up check spends the lockouts of the account the request's claims
-// name, so only the plugin that asks a person to confirm their own export
-// reaches it. Every other plugin of this build is refused.
-func TestCapPolicy_OnlyAnalyticsChecksStepUp(t *testing.T) {
+// name, so only the plugins that ask a person to confirm an action on their
+// own account reach it: analytics before an export, mfa before a first
+// second factor. Every other plugin of this build is refused.
+func TestCapPolicy_AnalyticsAndMFACheckStepUp(t *testing.T) {
 	plugin.SetCapPolicy(capPolicy)
 	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
+	askers := map[string]bool{"analytics": true, "mfa": true}
 	inner := stepUpHost{mockhost.New(t).Host()}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil)
 	for _, name := range core.RegisteredPlugins() {
 		err := core.NewScopedHost(inner, name, plugin.CapPolicy(name)).CheckStepUp(r, core.StepUpPassword, "secret")
 		switch {
-		case name == "analytics" && err != nil:
-			t.Errorf("analytics asks for a step-up, but its scoped host returned %v", err)
-		case name != "analytics" && !errors.Is(err, core.ErrCapDenied):
+		case askers[name] && err != nil:
+			t.Errorf("%s asks for a step-up, but its scoped host returned %v", name, err)
+		case !askers[name] && !errors.Is(err, core.ErrCapDenied):
 			t.Errorf("%s does not ask for a step-up, but its scoped host returned %v", name, err)
 		}
+	}
+}
+
+// revokeHost removes one passkey for any account, the way the engine host
+// does through the plugin that stores them.
+type revokeHost struct{ core.Host }
+
+func (revokeHost) RevokePasskeys(context.Context, uuid.UUID) (int, error) { return 1, nil }
+
+// Removing an account's passkeys locks its owner out of a passkey sign-in,
+// so only the plugin that resets a password reaches it. Every other plugin
+// of this build is refused.
+func TestCapPolicy_OnlyPasswordResetRevokesPasskeys(t *testing.T) {
+	plugin.SetCapPolicy(capPolicy)
+	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
+
+	inner := revokeHost{mockhost.New(t).Host()}
+	for _, name := range core.RegisteredPlugins() {
+		n, err := core.NewScopedHost(inner, name, plugin.CapPolicy(name)).RevokePasskeys(context.Background(), uuid.New())
+		switch {
+		case name == "password-reset" && (err != nil || n != 1):
+			t.Errorf("password-reset removes passkeys at a reset, but its scoped host returned %d, %v", n, err)
+		case name != "password-reset" && !errors.Is(err, core.ErrCapDenied):
+			t.Errorf("%s does not remove passkeys, but its scoped host returned %d, %v", name, n, err)
+		}
+	}
+}
+
+// A password reset removes passkeys through the one plugin that stores them.
+// The engine asks the role's running holder, and with no holder a reset
+// removes nothing while the passkeys keep signing in, so this build has to
+// link mfa as the role's only implementer.
+func TestWiredRoles_MFAHoldsThePasskeyRevoker(t *testing.T) {
+	role := reflect.TypeFor[core.PasskeyRevokerProvider]()
+	wired := slices.ContainsFunc(plugin.WiredRoles(), func(r plugin.Role) bool {
+		return r.Type == role && r.Single
+	})
+	if !wired {
+		t.Fatalf("the engine does not wire %s as a single role", role)
+	}
+	var holders []string
+	for _, name := range core.RegisteredPlugins() {
+		if _, ok := plugin.LookupPlugin(name)().(core.PasskeyRevokerProvider); ok {
+			holders = append(holders, name)
+		}
+	}
+	slices.Sort(holders)
+	if !slices.Equal(holders, []string{"mfa"}) {
+		t.Errorf("%s is implemented by %v in this build, want mfa alone", role, holders)
 	}
 }

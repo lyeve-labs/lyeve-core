@@ -27,7 +27,8 @@ func (discardCapture) Capture(observability.CaptureEntry) error { return nil }
 //
 // This mounts a stream that renews its deadline on each write, as the realtime
 // stream does, behind the API router with request capture and API key audit
-// switched on, and reads an event written after the server's deadline.
+// switched on, opens it with a key, and reads an event written after the
+// server's deadline.
 func TestAPIRouter_StreamOutlivesTheServerWriteTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +90,9 @@ func TestAPIRouter_StreamOutlivesTheServerWriteTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("X-Test-Scopes", "widgets:read")
+	// A key in the request puts the writer that keeps credentialed responses
+	// out of shared caches into the chain as well.
+	req.Header.Set("X-API-Key", "lyeve_test_key")
 	sent := time.Now()
 	resp, err := srv.Client().Do(req)
 	if err != nil {

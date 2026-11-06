@@ -136,6 +136,11 @@ type Config struct {
 	CacheTTL        time.Duration // CACHE_TTL (default 60s)
 	CacheMaxEntries int           // CACHE_MAX_ENTRIES (default 1000)
 
+	// How long a browser and a shared cache may keep an answer of the public
+	// delivery routes.
+	DeliveryMaxAge       time.Duration // DELIVERY_MAX_AGE, whole seconds (default 60)
+	DeliverySharedMaxAge time.Duration // DELIVERY_SHARED_MAX_AGE, whole seconds (default 300)
+
 	// DatabaseDriver selects the SQL dialect the schema engine generates DDL
 	// for. Supported: "postgres", "mysql", "mssql". Defaults to the dialect of
 	// DatabaseURL rather than a fixed value, so a MySQL or MSSQL deployment
@@ -261,7 +266,7 @@ type Config struct {
 	// Example: "https://cms.example.com"
 	BaseURL string // LYEVE_BASE_URL
 
-	// ConsoleURL is the public URL of the admin console, the address a person
+	// ConsoleURL is the public URL of the console, the address a person
 	// opens in a browser. Links the engine and its plugins mail to a person
 	// (password reset, magic-link sign-in) point at pages the console serves,
 	// so they are built on this and never on a listen address. The trailing
@@ -275,17 +280,19 @@ type Config struct {
 	// ServiceMonitors can scrape without expiring JWTs.
 	MetricsToken string // METRICS_TOKEN
 
-	// AdminConsoleKey is the shared secret the admin console signs its engine
+	// AdminConsoleKey is the shared secret the console signs its engine
 	// requests with. A signed request carries the browser's address, so
 	// per-address controls count the console's users separately instead of as
 	// the console itself. Unset, the engine ignores the console headers. At
-	// least 32 characters. The console must hold the same value.
-	AdminConsoleKey string // ADMIN_CONSOLE_KEY
+	// least 32 characters. The console must hold the same value. The old name
+	// ADMIN_CONSOLE_KEY is read for one more minor release.
+	AdminConsoleKey string // LYEVE_CONSOLE_KEY
 
 	// AdminConsoleKeyPrevious is also accepted while a rotation is under way:
 	// set the new key as AdminConsoleKey and the old one here, move the
-	// console to the new key, then unset this. Requires AdminConsoleKey.
-	AdminConsoleKeyPrevious string // ADMIN_CONSOLE_KEY_PREVIOUS
+	// console to the new key, then unset this. Requires AdminConsoleKey. The
+	// old name ADMIN_CONSOLE_KEY_PREVIOUS is read for one more minor release.
+	AdminConsoleKeyPrevious string // LYEVE_CONSOLE_KEY_PREVIOUS
 
 	// AuditHMACKey is the hex-encoded 32-byte HMAC-SHA256 key for audit
 	// hash-chain integrity. Must be a 64-character hex string (32 bytes).
@@ -310,14 +317,15 @@ type Config struct {
 	BackpressureTenantQuotaPct        float64 // BACKPRESSURE_TENANT_QUOTA_PCT: fraction of max inflight per tenant (default 0.4)
 	BackpressurePoolPressureThreshold float64 // BACKPRESSURE_POOL_PRESSURE_THRESHOLD: InUse/MaxOpen (default 0.85)
 
-	// MemoryLimitBytes is the container memory limit for GOMEMLIMIT tuning.
-	// Auto-detected from cgroup when unset. Falls back to 0 (no soft limit).
-	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (auto-detected from cgroup)
+	// MemoryLimitBytes is the limit Go's soft memory limit is 85% of, unless
+	// GOMEMLIMIT is set. MEMORY_LIMIT_BYTES overrides the cgroup's limit, and
+	// the machine's memory applies when neither sets one.
+	MemoryLimitBytes int64 // MEMORY_LIMIT_BYTES (default: the cgroup's limit, then the machine's memory)
 
-	// CPUQuota is the container CPU allowance in whole cores, rounded up, for
-	// GOMAXPROCS tuning. Auto-detected from cgroup when unset. Falls back to 0,
-	// which leaves the Go default of one thread per host core.
-	CPUQuota int // CPU_QUOTA (auto-detected from cgroup)
+	// CPUQuota is the thread count the engine gives the scheduler when
+	// GOMAXPROCS is not set. 0 leaves Go's default, which follows the
+	// cgroup's CPU limit while the process runs.
+	CPUQuota int // CPU_QUOTA (default 0)
 
 	// DBConcurrency enables parallel warmup/stop for plugins.
 	DBWarmupParallelism   int // DB_WARMUP_PARALLELISM (default 4)

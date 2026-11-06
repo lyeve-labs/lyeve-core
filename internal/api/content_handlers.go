@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,7 +12,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
-	"github.com/lyeve-labs/lyeve-core/internal/jsonpool"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -86,9 +84,6 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		h.runAfterResponse(r, schemaName, "list", item.Data)
 	}
 
-	if setETagAndCheckNotModified(w, r, etagFor(items)) {
-		return
-	}
 	respond(w, http.StatusOK, items)
 }
 
@@ -140,9 +135,6 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	h.runAfterResponse(r, schemaName, "get", item.Data)
 	item.Data = mask(item.Data)
-	if setETagAndCheckNotModified(w, r, etagFor(item)) {
-		return
-	}
 	respond(w, http.StatusOK, item)
 }
 
@@ -649,31 +641,6 @@ func httpStatus(err error) int {
 		return http.StatusNotFound
 	}
 	return httpx.StoreStatusFor(err)
-}
-
-// etagFor computes a weak ETag from the JSON representation of v.
-// Returns a string of the form `W/"<hex>"`.
-func etagFor(v any) string {
-	b, err := jsonpool.MarshalJSON(v)
-	if err != nil {
-		return ""
-	}
-	sum := sha256.Sum256(b)
-	return fmt.Sprintf(`W/"%x"`, sum[:8])
-}
-
-// setETagAndCheckNotModified writes the ETag header and returns true (304) when
-// the client's If-None-Match header matches. Must be called before writing body.
-func setETagAndCheckNotModified(w http.ResponseWriter, r *http.Request, etag string) bool {
-	if etag == "" {
-		return false
-	}
-	w.Header().Set("ETag", etag)
-	if r.Header.Get("If-None-Match") == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return true
-	}
-	return false
 }
 
 // contentListLimits bound a content list page: minimum 1, matching the

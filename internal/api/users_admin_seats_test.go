@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,7 @@ func newSeatRouter(t *testing.T, ent seatEntitlements) *seatRouter {
 	store := db.NewUserStore(pool)
 	owner, err := store.GetByEmail(context.Background(), "owner@seats.test")
 	require.NoError(t, err)
-	tok, err := auth.Sign(cfg.JWTSecret, 3600, owner.ID, owner.Email, owner.Roles, owner.TenantID, owner.TokenVersion)
+	tok, err := auth.Sign(cfg.JWTSecret, 3600, owner.ID, owner.Email, owner.Roles, owner.TenantID, owner.TokenVersion, time.Time{})
 	require.NoError(t, err)
 	return &seatRouter{router: router, store: store, token: tok}
 }

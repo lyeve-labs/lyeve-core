@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -27,7 +28,7 @@ func BenchmarkSign_EdDSA(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		_, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1)
+		_, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1, time.Time{})
 		if err != nil {
 			b.Fatalf("Sign: %v", err)
 		}
@@ -39,7 +40,7 @@ func BenchmarkSign_HMAC(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		_, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1)
+		_, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1, time.Time{})
 		if err != nil {
 			b.Fatalf("Sign: %v", err)
 		}
@@ -48,7 +49,7 @@ func BenchmarkSign_HMAC(b *testing.B) {
 
 // EdDSA when active, HMAC otherwise.
 func BenchmarkParse(b *testing.B) {
-	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1)
+	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1, time.Time{})
 	if err != nil {
 		b.Fatalf("setup Sign: %v", err)
 	}
@@ -74,7 +75,7 @@ func BenchmarkSignChallenge(b *testing.B) {
 }
 
 func BenchmarkParseMulti_1Secret(b *testing.B) {
-	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1)
+	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1, time.Time{})
 	if err != nil {
 		b.Fatalf("setup Sign: %v", err)
 	}
@@ -91,7 +92,7 @@ func BenchmarkParseMulti_1Secret(b *testing.B) {
 
 // Key rotation scenario.
 func BenchmarkParseMulti_3Secrets(b *testing.B) {
-	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1)
+	token, err := auth.Sign(benchSecret, 3600, benchUserID, benchEmail, benchRoles, "", 1, time.Time{})
 	if err != nil {
 		b.Fatalf("setup Sign: %v", err)
 	}

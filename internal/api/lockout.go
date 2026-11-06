@@ -16,6 +16,12 @@ const DefaultMaxFailedAttempts = 5
 // DefaultLockoutWindow is the default window for counting login failures.
 const DefaultLockoutWindow = 15 * time.Minute
 
+// maxTrackedLockouts is the size at which the password failure windows are
+// first swept. A window is read again only when its user signs in, so an
+// account that failed once and never came back would keep its entry for the
+// life of the process.
+const maxTrackedLockouts = 4096
+
 // Reservation is one attempt a lockout counted before its answer was checked.
 // It names the window the attempt was counted in, so releasing it gives back
 // that attempt and never one counted in a later window.
@@ -48,9 +54,11 @@ type lockoutUserState struct {
 type InMemoryLockout struct {
 	maxAttempts int
 	window      time.Duration
+	now         func() time.Time
 
 	mu      sync.Mutex
 	entries map[uuid.UUID]*lockoutUserState
+	sweepAt int // the size that triggers the next sweep of entries (see nextSweep)
 }
 
 // NewInMemoryLockout creates an in-memory lockout checker for password
@@ -66,13 +74,24 @@ func NewInMemoryLockout(maxAttempts int, window time.Duration) *InMemoryLockout 
 	return &InMemoryLockout{
 		maxAttempts: maxAttempts,
 		window:      window,
+		now:         time.Now,
 		entries:     make(map[uuid.UUID]*lockoutUserState),
+		sweepAt:     maxTrackedLockouts,
 	}
 }
 
 func (l *InMemoryLockout) getOrCreate(userID uuid.UUID) *lockoutUserState {
 	s, ok := l.entries[userID]
 	if !ok {
+		if len(l.entries) >= l.sweepAt {
+			now := l.now().UnixNano()
+			for id, e := range l.entries {
+				if now-e.windowStart.Load() > int64(l.window) {
+					delete(l.entries, id)
+				}
+			}
+			l.sweepAt = nextSweep(len(l.entries), maxTrackedLockouts)
+		}
 		s = &lockoutUserState{}
 		l.entries[userID] = s
 	}
@@ -94,7 +113,7 @@ func (l *InMemoryLockout) ReserveAttempt(ctx context.Context, userID uuid.UUID, 
 	defer l.mu.Unlock()
 
 	s := l.getOrCreate(userID)
-	now := time.Now().UnixNano()
+	now := l.now().UnixNano()
 
 	// Start a fresh window if the previous one expired. A zero windowStart is
 	// a state that has never recorded anything, which counts as expired.
@@ -119,7 +138,7 @@ func (l *InMemoryLockout) ReleaseAttempt(ctx context.Context, userID uuid.UUID, 
 	defer l.mu.Unlock()
 
 	s, ok := l.entries[userID]
-	if !ok || s.windowStart.Load() != r.window || time.Now().UnixNano()-r.window > int64(l.window) {
+	if !ok || s.windowStart.Load() != r.window || l.now().UnixNano()-r.window > int64(l.window) {
 		return nil
 	}
 	if s.failures.Load() <= 1 {
@@ -136,4 +155,19 @@ func (l *InMemoryLockout) ResetFailedAttempts(userID uuid.UUID) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.entries, userID)
+}
+
+// networkAttemptKey names the counter of one account's password attempts
+// from one network. It is a name-based UUID in the account's namespace, so
+// the lockouts keep it in the same shape and keyspace as the account's own
+// counter without colliding with it.
+func networkAttemptKey(userID uuid.UUID, network string) uuid.UUID {
+	return uuid.NewSHA1(userID, []byte(network))
+}
+
+// stepUpAttemptKey names the counter of one account's password step-ups. It
+// lives in the account's namespace beside the network counters, and no
+// network is spelled "step-up", so it collides with none of them.
+func stepUpAttemptKey(userID uuid.UUID) uuid.UUID {
+	return uuid.NewSHA1(userID, []byte("step-up"))
 }

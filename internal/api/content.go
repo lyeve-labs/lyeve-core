@@ -365,7 +365,8 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 		ok   bool
 	}
 	decided := map[string]decision{}
-	gate := func(_ context.Context, target string) (func(map[string]any) map[string]any, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, bool) {
+		target := f.RelationTo
 		if d, seen := decided[target]; seen {
 			return d.mask, d.ok
 		}

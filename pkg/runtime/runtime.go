@@ -166,26 +166,20 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}
 
 	// GOMEMLIMIT + GC tuning
-	// Set a soft memory cap at 85% of the container limit so Go's GC triggers
-	// before the OOM killer. GOMEMLIMIT env var takes precedence when set.
+	// Set a soft memory cap at 85% of the memory limit the config found, so
+	// Go's GC triggers before the OOM killer. GOMEMLIMIT env var takes
+	// precedence when set.
 	if os.Getenv("GOMEMLIMIT") == "" && cfg.MemoryLimitBytes > 0 {
 		limit := int64(float64(cfg.MemoryLimitBytes) * 0.85)
 		debug.SetMemoryLimit(limit)
 	}
 
-	// GOMAXPROCS
-	// The memory limit above is read from the cgroup, and the CPU allowance
-	// has to be too, or the scheduler sizes itself for the host. Under a
-	// one-core quota Go would build a P and a garbage collection worker for
-	// every core the machine has, arrange that much parallel work, and leave
-	// the kernel to throttle the excess. That surfaces as latency spikes with
-	// nothing in the logs to attribute them to.
-	//
-	// GOMAXPROCS in the environment wins, the way GOMEMLIMIT does above.
-	if os.Getenv("GOMAXPROCS") == "" && cfg.CPUQuota > 0 && cfg.CPUQuota < goruntime.NumCPU() {
-		goruntime.GOMAXPROCS(cfg.CPUQuota)
-		slog.Info("sized the scheduler to the cgroup cpu allowance",
-			"gomaxprocs", cfg.CPUQuota, "host_cpus", goruntime.NumCPU())
+	// GOMAXPROCS: Go's default follows the cgroup's CPU limit while the
+	// process runs, and a call here would stop that, so the engine makes one
+	// only for an explicit CPU_QUOTA.
+	if n := schedulerProcs(os.Getenv("GOMAXPROCS"), cfg.CPUQuota); n > 0 {
+		goruntime.GOMAXPROCS(n)
+		slog.Info("sized the scheduler to CPU_QUOTA", "gomaxprocs", n)
 	}
 
 	// Goroutine Concurrency Engine
@@ -671,6 +665,13 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		WithTenantRegions(core.TenantRegionResolverProvider)
 	}); ok {
 		setter.WithTenantRegions(activator)
+	}
+	// A password reset removes passkeys through whichever running plugin
+	// stores them, asking the activator on each call.
+	if setter, ok := hostBase.(interface {
+		WithPasskeyRevokers(core.PasskeyRevokerProvider)
+	}); ok {
+		setter.WithPasskeyRevokers(activator)
 	}
 	// cfg.Plugins comes from LYEVE_PLUGINS.
 	activator.Resolve(mgr, strings.Join(cfg.Plugins, ","))
@@ -1268,6 +1269,9 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			// The admin port logs every key request, as the API port does.
 			api.WithAPIKeyAudit(apimw.APIKeyAudit(activator.APIKeyAuditLogFn(), trustedCIDRs)),
 			api.WithMFAStore(activator.MFAStore()),
+			// The engine host, not the holder read once here: it asks the
+			// activator at each reset and warns when no plugin stores passkeys.
+			api.WithPasskeyRevoker(hostBase.(core.PasskeyRevoker)),
 			api.WithLockoutBackend(lockoutBackend),
 			api.WithRefreshTokenStore(refreshTokenStore),
 			api.WithDeviceRiskAssessor(activator.RiskAssessor()),
@@ -1680,4 +1684,15 @@ func attachSessionPools(ctx context.Context, host core.Host, engine, dsn string)
 		setter.WithLockDB(locks)
 	}
 	return nil
+}
+
+// schedulerProcs returns the thread count to pass to runtime.GOMAXPROCS, or 0
+// to leave the scheduler alone. GOMAXPROCS in the environment is read by the
+// runtime itself and wins. CPU_QUOTA comes next. Without either, Go's default
+// applies.
+func schedulerProcs(gomaxprocsEnv string, cpuQuota int) int {
+	if gomaxprocsEnv != "" || cpuQuota <= 0 {
+		return 0
+	}
+	return cpuQuota
 }

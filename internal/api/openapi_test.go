@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
@@ -86,6 +87,9 @@ func testConfig() *config.Config {
 		JWTExpirySecs:    3600,
 		MaxBodyBytes:     10 << 20,
 		MaxJSONBodyBytes: 1 << 20,
+		// The defaults config.Load sets for the public delivery lifetimes.
+		DeliveryMaxAge:       60 * time.Second,
+		DeliverySharedMaxAge: 300 * time.Second,
 		// Rate limiting and IP allowlist disabled to keep router simple.
 	}
 }

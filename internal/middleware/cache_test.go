@@ -85,7 +85,7 @@ func TestCachePolicyBuildCacheControl(t *testing.T) {
 func TestDefaultContentPolicy(t *testing.T) {
 	assert.Equal(t, 60*time.Second, DefaultContentPolicy.MaxAge)
 	assert.Equal(t, 600*time.Second, DefaultContentPolicy.StaleWhileRevalidate)
-	assert.True(t, DefaultContentPolicy.Public)
+	assert.False(t, DefaultContentPolicy.Public, "every content read carries a credential, so none is public")
 }
 
 func TestDefaultDashboardPolicy(t *testing.T) {
@@ -643,4 +643,23 @@ func TestEtagMatch(t *testing.T) {
 			assert.Equal(t, tt.want, etagMatch(tt.etag, tt.ifNoneMatch))
 		})
 	}
+}
+
+// s-maxage is what a shared cache reads in place of max-age, so a public
+// policy can keep a short browser lifetime and a longer one at the edge. It
+// is written only on a public response, because a private one is never in a
+// shared cache.
+func TestCachePolicy_SharedMaxAgeIsWritten(t *testing.T) {
+	public := CachePolicy{
+		MaxAge:               60 * time.Second,
+		SharedMaxAge:         300 * time.Second,
+		StaleWhileRevalidate: 60 * time.Second,
+		StaleIfError:         600 * time.Second,
+		Public:               true,
+	}
+	assert.Equal(t, "public, max-age=60, s-maxage=300, stale-while-revalidate=60, stale-if-error=600", public.buildCacheControl())
+
+	private := public
+	private.Public = false
+	assert.Equal(t, "private, max-age=60, stale-while-revalidate=60, stale-if-error=600", private.buildCacheControl())
 }

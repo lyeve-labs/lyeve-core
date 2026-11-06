@@ -138,7 +138,7 @@ func TestClientAddress(t *testing.T) {
 	})
 }
 
-// The admin console computes the same value in TypeScript. This vector is
+// The console computes the same value in TypeScript. This vector is
 // asserted on both sides so the two implementations cannot drift apart.
 func TestConsoleSignature_KnownVector(t *testing.T) {
 	got := ConsoleSignature([]byte("0123456789abcdef0123456789abcdef"), "1800000000",

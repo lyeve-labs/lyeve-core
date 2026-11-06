@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/lyeve-labs/lyeve-core/internal/auth"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
+	"github.com/lyeve-labs/lyeve-core/internal/logging"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -74,6 +76,36 @@ func (h *engineHost) TenantRegionResolver() core.TenantRegionResolver {
 		return nil
 	}
 	return h.tenantRegions.TenantRegionResolver()
+}
+
+// WithPasskeyRevokers wires the source of the passkey revoker role. The
+// runtime passes the activator, which answers from the running plugin that
+// stores passkeys. Called once at boot, before any plugin starts.
+func (h *engineHost) WithPasskeyRevokers(src core.PasskeyRevokerProvider) {
+	h.passkeyRevokers = src
+}
+
+// RevokePasskeys implements core.PasskeyRevoker by asking the running plugin
+// that supplies passkey removal. With none running it removes nothing and
+// answers 0, because refusing would block every password reset on an install
+// that runs without passkeys. The warning says the passkeys a stopped plugin,
+// or a running one too old to supply the role, stored were left in place. It
+// is about the account, so it is filed under the account's tenant, read here
+// because a plugin's call carries only the account's id.
+func (h *engineHost) RevokePasskeys(ctx context.Context, userID uuid.UUID) (int, error) {
+	var r core.PasskeyRevoker
+	if h.passkeyRevokers != nil {
+		r = h.passkeyRevokers.PasskeyRevoker()
+	}
+	if r == nil {
+		tenant := ""
+		if account, err := db.NewUserStore(h.pool).GetByID(ctx, userID); err == nil {
+			tenant = account.TenantID
+		}
+		slog.WarnContext(logging.ContextAbout(ctx, tenant), "passkeys not removed: no running plugin supplies passkey removal", "user_id", userID.String())
+		return 0, nil
+	}
+	return r.RevokePasskeys(ctx, userID)
 }
 
 // EmailSender implements EmailSenderProvider. Returns the registered email
@@ -381,7 +413,7 @@ func (h *engineHost) SignSessionToken(ctx context.Context, userID uuid.UUID, ema
 			return "", err
 		}
 	}
-	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion)
+	return auth.Sign(h.cfg.JWTSecret, expiry, userID, email, roles, facts.tenantID, facts.tokenVersion, time.Now())
 }
 
 // homeRoles is the roles a session acting in the account's home tenant

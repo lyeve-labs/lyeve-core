@@ -157,6 +157,10 @@ var translations = map[Code]map[string]string{
 		"en": "The account cannot be enabled or deleted until its erasure is complete.",
 		"fr": "Le compte ne peut être ni réactivé ni supprimé avant la fin de son effacement.",
 	},
+	CodePasskeysNotRemoved: {
+		"en": "The passkeys could not be removed, so the password was not changed. Try again.",
+		"fr": "Les clés d'accès n'ont pas pu être supprimées, le mot de passe n'a donc pas été modifié. Réessayez.",
+	},
 
 	// Tenant features
 	CodeTenantFeatureWithheld: {

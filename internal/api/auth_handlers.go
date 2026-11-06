@@ -130,7 +130,7 @@ func (h *AuthHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	h.setupToken.Retire()
 	slog.Info("setup: first super admin created; the setup token no longer opens setup", "user_id", user.ID)
 
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, user.TenantID, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.Email, user.Roles, user.TenantID, user.TokenVersion, time.Now())
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -224,8 +224,10 @@ func hasControlChars(s string) bool {
 // Security properties:
 //   - Enumeration resistance: unknown emails receive a dummy bcrypt comparison
 //     against a constant hash, producing identical timing and error messages.
-//   - Account lockout: after MaxFailedAttempts consecutive failures from the
-//     same user (tracked by the LockoutChecker), returns HTTP 429.
+//   - Account lockout: after MaxFailedAttempts failures against one account
+//     from one network, or accountAttemptCeiling from every network together,
+//     the account answers as a wrong password does (tracked by the
+//     LockoutChecker).
 //   - MFA fail-closed: if mfaStore.IsEnabled errors, login is denied with a
 //     503 rather than issuing an unauthenticated session. The password may
 //     well be right, so the answer is not a credential failure.
@@ -295,39 +297,34 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	// same step that reads the count, so concurrent wrong passwords cannot all
 	// read a count under the limit and all be checked. A correct password
 	// gives back its own attempt below.
-	var reservation Reservation
-	if h.lockoutChecker != nil {
-		var reserved bool
-		var lerr error
-		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
-		if lerr != nil {
-			slog.Warn("lockout check failed, failing closed", "err", lerr, "user_id", user.ID)
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
-		if !reserved {
-			// The response above is deliberately indistinguishable from a wrong
-			// password, so a locked account is invisible to the caller. It must
-			// not be invisible to the operator as well: the lock lives in memory
-			// or a cache backend, nothing in the database reflects it, and the
-			// only outward sign is a 401 that reads as a bad credential. One
-			// line names it for the operator and changes no response.
-			slog.WarnContext(failedAttemptContext(r.Context(), user), "login refused: account is locked out",
-				"user_id", user.ID,
-				"failures", reservation.Count,
-				"max_attempts", h.MaxFailedAttempts,
-				"window", h.LockoutWindow,
-				"note", h.lockoutScopeNote())
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
+	lock, reserved, lerr := h.reservePasswordAttempt(r, user.ID)
+	if lerr != nil {
+		slog.Warn("lockout check failed, failing closed", "err", lerr, "user_id", user.ID)
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
+	}
+	if !reserved {
+		// The response above is deliberately indistinguishable from a wrong
+		// password, so a locked account is invisible to the caller. It must
+		// not be invisible to the operator as well: the lock lives in memory
+		// or a cache backend, nothing in the database reflects it, and the
+		// only outward sign is a 401 that reads as a bad credential. One
+		// line names it for the operator and changes no response.
+		slog.WarnContext(failedAttemptContext(r.Context(), user), "login refused: account is locked out",
+			"user_id", user.ID,
+			"failures", lock.failures,
+			"max_attempts", lock.limit,
+			"window", h.LockoutWindow,
+			"note", h.lockoutScopeNote())
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
 	}
 
 	if err := auth.VerifyPassword(h.passwordHashAlgo, user.PasswordHash, body.Password); err != nil {
 		// A failed password check has to reach the operator. Five of them in the
-		// window lock the account, and the refusal after that is
+		// window lock their network out of the account, and the refusal after that is
 		// indistinguishable from this one, so without this line a lockout
 		// investigation could see neither what locked the account nor what spent
 		// its attempts.
@@ -353,7 +350,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
+	h.releasePasswordAttempt(r.Context(), user.ID, lock)
 
 	// Account state enforcement (after password, before session)
 	// Answer exactly as a wrong password does. Collapsing disabled into
@@ -390,7 +387,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	h.warnIfTenantMissing(r.Context(), actingTenant, user.Email)
 
 	// Login: no MFA required, issue full session token
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
+	signedIn := time.Now()
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion, signedIn)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -410,7 +408,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	// Issue refresh token if store is configured.
 	if h.refreshTokenStore != nil {
-		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), user.ID.String(), actingTenant, user.TokenVersion, h.refreshTokenTTL)
+		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), user.ID.String(), actingTenant, user.TokenVersion, h.refreshTokenTTL, signedIn)
 		if err != nil {
 			slog.Error("failed to issue refresh token, continuing without", "err", err)
 		} else {
@@ -795,8 +793,10 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Issue a full session JWT with current user data.
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, liveEmail, liveRoles, liveTenantID, liveTokenVersion)
+	// Issue a full session JWT with current user data. The session begins
+	// now, when the second factor passed, not at the password step.
+	signedIn := time.Now()
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, userID, liveEmail, liveRoles, liveTenantID, liveTokenVersion, signedIn)
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -815,7 +815,7 @@ func (h *AuthHandler) MFAVerify(w http.ResponseWriter, r *http.Request) {
 
 	// Issue refresh token if store is configured.
 	if h.refreshTokenStore != nil {
-		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), userID.String(), liveTenantID, liveTokenVersion, h.refreshTokenTTL)
+		rt, err := h.refreshTokenStore.IssueForSession(r.Context(), userID.String(), liveTenantID, liveTokenVersion, h.refreshTokenTTL, signedIn)
 		if err != nil {
 			slog.Error("failed to issue refresh token in mfa-verify, continuing without", "err", err)
 		} else {

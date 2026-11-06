@@ -421,3 +421,39 @@ func TestScopedHost_TenantRolesNeedsItsGrant(t *testing.T) {
 		t.Fatalf("TenantRoles on a host without a reader: roles %v, err %v, want an outage", roles, err)
 	}
 }
+
+// revokingHost removes three passkeys for every account, the way the engine
+// host does through the plugin that stores them.
+type revokingHost struct {
+	*capturingHost
+	asked int
+}
+
+func (h *revokingHost) RevokePasskeys(context.Context, uuid.UUID) (int, error) {
+	h.asked++
+	return 3, nil
+}
+
+// Removing every passkey of an account locks its owner out of a passkey
+// sign-in, so it takes its own grant. Holding every other grant is not
+// enough.
+func TestScopedHost_RevokePasskeysNeedsTheRevokeGrant(t *testing.T) {
+	h := &revokingHost{capturingHost: newCapturingHost()}
+	denied := NewScopedHost(h, "webhook", CapAll&^CapPasskeyRevoke)
+	if n, err := denied.RevokePasskeys(context.Background(), uuid.New()); !errors.Is(err, ErrCapDenied) || n != 0 || h.asked != 0 {
+		t.Fatalf("RevokePasskeys = %d, %v, asked %d: want a denial before any removal", n, err, h.asked)
+	}
+	rec := requireOneDenial(t, h.capturingHost)
+	assertField(t, rec, "op", "RevokePasskeys")
+	assertField(t, rec, "capability", "CapPasskeyRevoke")
+
+	granted := NewScopedHost(h, "password-reset", CapDBWrite|CapRoutes|CapPasskeyRevoke)
+	if n, err := granted.RevokePasskeys(context.Background(), uuid.New()); err != nil || n != 3 || h.asked != 1 {
+		t.Fatalf("RevokePasskeys = %d, %v, asked %d: want the engine's answer, asked once", n, err, h.asked)
+	}
+
+	unwired := NewScopedHost(newCapturingHost(), "password-reset", CapPasskeyRevoke)
+	if _, err := unwired.RevokePasskeys(context.Background(), uuid.New()); !errors.Is(err, ErrServiceUnavailable) {
+		t.Fatalf("RevokePasskeys on a host without the role = %v, want an outage", err)
+	}
+}

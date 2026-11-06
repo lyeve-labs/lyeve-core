@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -847,17 +848,6 @@ func TestHTTPStatus_UnknownError(t *testing.T) {
 	got := httpStatus(context.Canceled)
 	if got != http.StatusServiceUnavailable {
 		t.Errorf("httpStatus(context.Canceled) = %d, want %d", got, http.StatusServiceUnavailable)
-	}
-}
-
-// etag helpers additional
-
-func TestEtagFor_DifferentInputs(t *testing.T) {
-	t.Parallel()
-	a := etagFor(map[string]any{"a": 1})
-	b := etagFor(map[string]any{"a": 2})
-	if a == b {
-		t.Error("different inputs should produce different etags")
 	}
 }
 
@@ -1871,7 +1861,7 @@ func TestNewAdminRouter_Smoke(t *testing.T) {
 	// Smoke-test that the router handles requests without panicking.
 	// /api/admin/health is behind requireAuth: inject a valid JWT.
 	// Token version 0 so tokenVersionCheck skips the DB lookup (fakeDB has nil QueryRow).
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "admin@test.com", []string{"admin"}, "", 0)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "admin@test.com", []string{"admin"}, "", 0, time.Time{})
 	if err != nil {
 		t.Fatalf("sign JWT: %v", err)
 	}
@@ -1906,7 +1896,7 @@ func TestNewAPIRouter_Smoke(t *testing.T) {
 	// Smoke test: health endpoint.
 	// /api/v1/health is behind requireAuth: inject a valid JWT.
 	// Token version 0 so tokenVersionCheck skips the DB lookup (fakeDB has nil QueryRow).
-	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "api@test.com", []string{"user"}, "", 0)
+	token, err := auth.Sign(cfg.JWTSecret, 3600, uuid.New(), "api@test.com", []string{"user"}, "", 0, time.Time{})
 	if err != nil {
 		t.Fatalf("sign JWT: %v", err)
 	}

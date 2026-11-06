@@ -244,6 +244,8 @@ func capName(c Capability) string {
 		return "CapStepUp"
 	case CapTenantRoles:
 		return "CapTenantRoles"
+	case CapPasskeyRevoke:
+		return "CapPasskeyRevoke"
 	default:
 		return fmt.Sprintf("Capability(%d)", uint32(c))
 	}
@@ -585,6 +587,20 @@ func (h *ScopedHost) CheckStepUp(r *http.Request, factor, answer string) error {
 		return c.CheckStepUp(r, factor, answer)
 	}
 	return fmt.Errorf("step-up checks are not available on this host: %w", ErrServiceUnavailable)
+}
+
+// RevokePasskeys forwards to inner if it implements PasskeyRevoker. Denied
+// without CapPasskeyRevoke, because removing an account's passkeys locks
+// its owner out of a passkey sign-in.
+func (h *ScopedHost) RevokePasskeys(ctx context.Context, userID uuid.UUID) (int, error) {
+	if !h.has(CapPasskeyRevoke) {
+		h.warnDenied("RevokePasskeys", "", CapPasskeyRevoke)
+		return 0, ErrCapDenied
+	}
+	if r, ok := h.inner.(PasskeyRevoker); ok {
+		return r.RevokePasskeys(ctx, userID)
+	}
+	return 0, fmt.Errorf("passkey removal is not available on this host: %w", ErrServiceUnavailable)
 }
 
 // TenantRoles forwards to inner if it implements TenantRolesReader. Denied
@@ -1178,6 +1194,7 @@ var SecretKeys = map[string]bool{
 	// Still verifies console signatures during a rotation, so it is as secret
 	// as the current key. The _key suffix rule does not reach it.
 	"admin_console_key_previous": true,
+	"lyeve_console_key_previous": true,
 }
 
 // OperatorOnlyKeys are settings that only the operator may set, through the
@@ -1210,6 +1227,10 @@ var OperatorOnlyKeys = map[string]bool{
 	"webhook_allowed_private_networks": true,
 	"smtp_allowed_private_networks":    true,
 	"lyeve_outbound_allow_cgnat":       true,
+	// How recent a sign-in lets a session add a first second factor without
+	// the password. A stolen session could otherwise widen it and enroll
+	// its own factor.
+	"mfa_recent_sign_in_secs": true,
 }
 
 // IsOperatorOnlyKey reports whether key may be set only by the operator. It

@@ -23,20 +23,18 @@ import (
 // POST /api/admin/auth/logout
 // Body: {"refresh_token": "..."} (optional, best-effort revocation)
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	// Extract family ID from the refresh_token body for revocation.
+	// The refresh_token body names the session to end.
 	var body struct {
 		RefreshToken string `json:"refresh_token"`
 	}
 	_ = jsonpool.DecodeJSON(r.Body, &body) // best-effort. Revocation is fire-and-forget
 
-	if body.RefreshToken != "" && h.refreshTokenStore != nil {
-		familyID, _, err := parseTokenForFamily(body.RefreshToken)
-		if err == nil {
-			// Fire-and-forget: the cookie is cleared regardless.
-			if err := h.refreshTokenStore.RevokeFamily(r.Context(), familyID); err != nil {
-				slog.Warn("failed to revoke refresh token family on logout",
-					"err", err, "family_id", familyID)
-			}
+	// Only the caller's own token revokes its family: the store checks the
+	// token's hash and the family's owner, so naming a family is not enough.
+	if claims := claimsFromCtx(r); body.RefreshToken != "" && h.refreshTokenStore != nil && claims != nil {
+		// Fire-and-forget: the cookie is cleared regardless.
+		if err := h.refreshTokenStore.RevokeOwnFamily(r.Context(), body.RefreshToken, claims.UserID); err != nil {
+			slog.Warn("failed to revoke refresh token family on logout", "err", err)
 		}
 	}
 
@@ -64,12 +62,6 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respond(w, http.StatusOK, map[string]string{"message": "logged out"})
-}
-
-// parseTokenForFamily extracts the family ID from an opaque refresh token.
-// This is a lightweight parse (no Redis access) used for logout revocation.
-func parseTokenForFamily(token string) (familyID string, _ string, err error) {
-	return auth.RefreshTokenFamilyID(token)
 }
 
 // Me returns the currently authenticated user.
@@ -140,33 +132,28 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 	// passwords cannot all read a count under the limit and all be checked.
 	// The public rate limiter bounds throughput, not attempts, so this count is
 	// what limits guessing on this endpoint.
-	var reservation Reservation
-	if h.lockoutChecker != nil {
-		var reserved bool
-		var lerr error
-		reservation, reserved, lerr = h.lockoutChecker.ReserveAttempt(r.Context(), user.ID, h.MaxFailedAttempts)
-		if lerr != nil {
-			slog.Warn("lockout check failed in Token, failing closed", "err", lerr, "user_id", user.ID)
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
-		if !reserved {
-			// Answer as the admin path does: 401 with the ordinary invalid
-			// credentials code, and a dummy compare so the timing matches. Only
-			// an account that exists can be locked, so a status of its own, a
-			// code of its own, or a fast answer all tell a caller the address is
-			// real. TestToken_EnumerationTiming_Unit measures exactly that.
-			slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
-				"user_id", user.ID,
-				"failures", reservation.Count,
-				"max_attempts", h.MaxFailedAttempts,
-				"window", h.LockoutWindow,
-				"note", h.lockoutScopeNote())
-			_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
-			respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
-			return
-		}
+	lock, reserved, lerr := h.reservePasswordAttempt(r, user.ID)
+	if lerr != nil {
+		slog.Warn("lockout check failed in Token, failing closed", "err", lerr, "user_id", user.ID)
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
+	}
+	if !reserved {
+		// Answer as the admin path does: 401 with the ordinary invalid
+		// credentials code, and a dummy compare so the timing matches. Only
+		// an account that exists can be locked, so a status of its own, a
+		// code of its own, or a fast answer all tell a caller the address is
+		// real. TestToken_EnumerationTiming_Unit measures exactly that.
+		slog.WarnContext(failedAttemptContext(r.Context(), user), "token login refused: account is locked out",
+			"user_id", user.ID,
+			"failures", lock.failures,
+			"max_attempts", lock.limit,
+			"window", h.LockoutWindow,
+			"note", h.lockoutScopeNote())
+		_ = auth.VerifyPassword(h.passwordHashAlgo, auth.DummyBcryptHash, body.Password) // err suppressed: timing-attack mitigation, result intentionally discarded
+		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
+		return
 	}
 
 	if err := auth.VerifyPassword(h.passwordHashAlgo, user.PasswordHash, body.Password); err != nil {
@@ -186,7 +173,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusUnauthorized, i18n.CodeInvalidCredentials, nil)
 		return
 	}
-	h.releasePasswordAttempt(r.Context(), user.ID, reservation)
+	h.releasePasswordAttempt(r.Context(), user.ID, lock)
 
 	if !h.respondIfPasswordSignInRefused(w, r, user) {
 		return
@@ -206,7 +193,7 @@ func (h *AuthHandler) Token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
+	token, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion, time.Now())
 	if err != nil {
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)
 		return
@@ -394,7 +381,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion)
+	accessToken, err := auth.Sign(h.jwtSecret, h.expirySecs, user.ID, user.SignInEmail(), actingRoles, actingTenant, user.TokenVersion, rotated.AuthTime)
 	if err != nil {
 		restore()
 		respondErrCode(w, r, http.StatusInternalServerError, i18n.CodeTokenSignFailed, nil)

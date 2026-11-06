@@ -344,8 +344,9 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	}, super...))
 	set("/api/admin/users/{id}/password", "put", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Set a user's password; every session the account held ends", Security: both,
-		Parameters: []openAPIParameter{id}, RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object", "example": map[string]any{"password": "a-new-password-of-twelve"}}}}},
-		Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "404": err404, "422": map[string]any{"description": "Password policy not met"}},
+		Description: "remove_passkeys defaults to true, which removes the account's passkeys before the password changes when a running plugin supplies passkey removal. When they cannot be removed the answer is 503 and the password is not changed.",
+		Parameters:  []openAPIParameter{id}, RequestBody: &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object", "example": map[string]any{"password": "a-new-password-of-twelve", "remove_passkeys": true}}}}},
+		Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "404": err404, "409": map[string]any{"description": "The account signs in through a trusted issuer and has no password"}, "422": map[string]any{"description": "Password policy not met"}, "503": map[string]any{"description": "The passkeys could not be removed, so the password was not changed"}},
 	}, super...))
 	set("/api/admin/users/{id}", "delete", requiringRoles(&openAPIOperation{
 		Tags: []string{"Admin / Users"}, Summary: "Delete a user", Security: both,
@@ -396,7 +397,7 @@ func documentAdminGaps(paths map[string]openAPIPath) {
 	set("/api/admin/debug/goroutines", "get", requiringRoles(&openAPIOperation{
 		Tags: goroutineTag, Summary: "Tracked goroutines", Description: "The tracker snapshot: tracked and runtime totals, counts by source name, and by_owner, one row per plugin or the engine with its live count and the age of its oldest goroutine, so a leak names who started it.", Security: both,
 		Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
-	}, admins...))
+	}, super...))
 	set("/robots.txt", "get", &openAPIOperation{
 		Tags: []string{"Admin / System"}, Summary: "Refuses every crawler", Description: "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
 		Responses: map[string]any{"200": openAPIResponse{
@@ -668,4 +669,41 @@ func pathParams(pattern string) []openAPIParameter {
 		}
 	}
 	return out
+}
+
+// documentDelivery writes the two public delivery reads. They take no
+// credential, so they carry no security requirement, and a request that
+// sends one is refused.
+func documentDelivery(paths map[string]openAPIPath) {
+	const tag = "Content API / Delivery"
+	schema := openAPIParameter{Name: "schema", In: "path", Required: true, Description: "A collection its tenant marked for public delivery, spelled as it is stored.", Schema: map[string]any{"type": "string"}}
+	id := openAPIParameter{Name: "id", In: "path", Required: true, Description: "Record id, in lower case with hyphens. Any other spelling answers 404.", Schema: map[string]any{"type": "string", "format": "uuid"}}
+	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.", Schema: map[string]any{"type": "string"}}
+	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.", Schema: map[string]any{"type": "integer", "minimum": 0, "maximum": deliveryMaxDepth}}
+	const served = "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused."
+	responses := map[string]any{
+		"200": map[string]any{"description": "OK"},
+		"304": map[string]any{"description": "Not modified"},
+		"400": map[string]any{"description": "A parameter outside the grammar, or a request that carries a credential"},
+		"404": map[string]any{"description": "No such record, or a collection that is not marked for public delivery"},
+		"429": map[string]any{"description": "Too many requests from this address"},
+		"503": map[string]any{"description": "The collection's definition or a related record could not be read"},
+	}
+	paths["/api/v1/delivery/{schema}"] = openAPIPath{
+		"get": {
+			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+			Parameters: []openAPIParameter{schema,
+				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
+				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
+				populate, depth},
+			Responses: responses,
+		},
+	}
+	paths["/api/v1/delivery/{schema}/{id}"] = openAPIPath{
+		"get": {
+			Tags: []string{tag}, Summary: "Get a published record", Description: served,
+			Parameters: []openAPIParameter{schema, id, populate, depth},
+			Responses:  responses,
+		},
+	}
 }

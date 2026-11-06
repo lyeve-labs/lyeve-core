@@ -300,7 +300,7 @@ jobs:
   # The kernel binary is the one program a lone checkout of this repository can
   # run, and compiling it proves only that it links. This boots it on a real
   # Postgres and walks the first run an operator makes: the probes, setup,
-  # sign-in and the entitlements the admin console reads. The script is the one
+  # sign-in and the entitlements the console reads. The script is the one
   # a contributor runs by hand, so a red job here reproduces locally.
   #
   # It runs wherever the Postgres shard runs, and not on a push to dev, for the
