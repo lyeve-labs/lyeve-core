@@ -1,6 +1,8 @@
 package schemaimport
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,6 +73,12 @@ func TestJSONSchemaImporters_MapNumberTypes(t *testing.T) {
 		{name: "json schema uint64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","format":"uint64"}`), want: "integer", wantNote: "past the int64 range"},
 		{name: "json schema maximum past int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","maximum":9223372036854775808}`), want: "integer", wantNote: "past the int64 range"},
 		{name: "json schema minimum past int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","minimum":-1e19}`), want: "integer", wantNote: "past the int64 range"},
+		{name: "json schema exclusive maximum past int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","exclusiveMaximum":9223372036854775809}`), want: "integer", wantNote: "past the int64 range"},
+		{name: "json schema exclusive minimum past int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","exclusiveMinimum":-9223372036854775810}`), want: "integer", wantNote: "past the int64 range"},
+		{name: "json schema exclusive bounds inside int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","exclusiveMinimum":-9223372036854775808,"exclusiveMaximum":9223372036854775808}`), want: "integer"},
+		{name: "draft 4 exclusive maximum at the int64 end", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","maximum":9223372036854775808,"exclusiveMaximum":true}`), want: "integer"},
+		{name: "draft 4 exclusive minimum past int64", convert: FromJSONSchema, input: jsonSchema(`{"type":"integer","minimum":-9223372036854775810,"exclusiveMinimum":true}`), want: "integer", wantNote: "past the int64 range"},
+		{name: "openapi 3.0 exclusive maximum at the int64 end", convert: FromOpenAPI, input: openAPI(`{"type":"integer","maximum":9223372036854775808,"exclusiveMaximum":true}`), want: "integer"},
 		{name: "json schema nullable integer", convert: FromJSONSchema, input: jsonSchema(`{"type":["integer","null"]}`), want: "integer"},
 		{name: "json schema number", convert: FromJSONSchema, input: jsonSchema(`{"type":"number"}`), want: "number"},
 		{name: "openapi integer", convert: FromOpenAPI, input: openAPI(`{"type":"integer","format":"int64"}`), want: "integer"},
@@ -256,6 +264,36 @@ func TestFromOpenAPI_RejectsADocumentWithNoComponents(t *testing.T) {
 	_, err := FromOpenAPI([]byte(`{"openapi":"3.0.0","paths":{}}`))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no component schemas")
+}
+
+// A bound is read as the integers it admits. Through the importers a number
+// outside the int64 and uint64 ranges passes a YAML decoder that holds it as a
+// float64, so the edges below are fed to pastInt64 as written.
+func TestPastInt64(t *testing.T) {
+	tests := []struct {
+		bound     string
+		exclusive bool
+		upper     bool
+		want      bool
+	}{
+		{"9223372036854775807", false, true, false},
+		{"9223372036854775808", false, true, true},
+		{"9223372036854775808", true, true, false},
+		{"9223372036854775808.5", true, true, true},
+		{"9223372036854775807.5", true, true, false},
+		{"-9223372036854775808", false, false, false},
+		{"-9223372036854775809", false, false, true},
+		{"-9223372036854775809", true, false, false},
+		{"-9223372036854775809.5", true, false, true},
+		{"9223372036854775807", true, false, true},
+		{"true", true, true, false},
+		{"", false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("%s exclusive=%v upper=%v", tt.bound, tt.exclusive, tt.upper), func(t *testing.T) {
+			assert.Equal(t, tt.want, pastInt64(json.RawMessage(tt.bound), tt.exclusive, tt.upper))
+		})
+	}
 }
 
 func TestPrimaryType(t *testing.T) {

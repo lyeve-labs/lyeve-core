@@ -42,6 +42,11 @@ type jsonSchemaDoc struct {
 	Minimum     json.RawMessage          `json:"minimum"`
 	Maximum     json.RawMessage          `json:"maximum"`
 
+	// A number in JSON Schema 2019 and later and in OpenAPI 3.1. In draft 4
+	// and OpenAPI 3.0, a boolean that makes minimum or maximum exclusive.
+	ExclusiveMinimum json.RawMessage `json:"exclusiveMinimum"`
+	ExclusiveMaximum json.RawMessage `json:"exclusiveMaximum"`
+
 	ContentMediaType string `json:"contentMediaType"`
 
 	// Composition keywords. Only the "nullable via anyOf" shape is understood.
@@ -225,7 +230,7 @@ func jsonSchemaField(conv *Conversion, schema, prop string, p jsonSchemaDoc, kno
 	case "integer":
 		f := domain.SchemaField{FieldType: "integer"}
 		f.Default = exactDefault(conv, schema, prop, f, p.Default)
-		if p.Format == "uint64" || pastInt64(p.Minimum) || pastInt64(p.Maximum) {
+		if p.Format == "uint64" || boundsPastInt64(p) {
 			conv.note(schema, prop, "imported as integer: the source allows values past the int64 range, which this field refuses")
 		}
 		return f, true
@@ -340,17 +345,41 @@ func primaryType(t any) string {
 	return ""
 }
 
-// decodeToJSON reads YAML or JSON into canonical JSON bytes.
-// pastInt64 reports whether a numeric bound lies outside the int64 range. A
-// bound that is not a number reads as no bound.
-func pastInt64(bound json.RawMessage) bool {
+// boundsPastInt64 reports whether the bounds of an integer property admit a
+// value outside the int64 range, in either form of the exclusive keywords.
+func boundsPastInt64(p jsonSchemaDoc) bool {
+	minExclusive := strings.TrimSpace(string(p.ExclusiveMinimum)) == "true"
+	maxExclusive := strings.TrimSpace(string(p.ExclusiveMaximum)) == "true"
+	return pastInt64(p.Minimum, minExclusive, false) || pastInt64(p.Maximum, maxExclusive, true) ||
+		pastInt64(p.ExclusiveMinimum, true, false) || pastInt64(p.ExclusiveMaximum, true, true)
+}
+
+// pastInt64 reports whether the integers a bound admits reach outside the
+// int64 range. A bound that is not a number reads as no bound. An exclusive
+// bound is first moved to the nearest integer it admits, because an
+// exclusive maximum of 2^63 admits nothing past the int64 maximum.
+func pastInt64(bound json.RawMessage, exclusive, upper bool) bool {
 	if len(bound) == 0 {
 		return false
 	}
 	r, ok := new(big.Rat).SetString(string(bound))
-	return ok && (r.Cmp(new(big.Rat).SetInt64(math.MaxInt64)) > 0 || r.Cmp(new(big.Rat).SetInt64(math.MinInt64)) < 0)
+	if !ok {
+		return false
+	}
+	if exclusive {
+		// Div floors here, because a big.Rat's denominator is positive.
+		n := new(big.Int).Div(r.Num(), r.Denom())
+		if !upper {
+			n.Add(n, big.NewInt(1))
+		} else if r.IsInt() {
+			n.Sub(n, big.NewInt(1))
+		}
+		r.SetInt(n)
+	}
+	return r.Cmp(new(big.Rat).SetInt64(math.MaxInt64)) > 0 || r.Cmp(new(big.Rat).SetInt64(math.MinInt64)) < 0
 }
 
+// decodeToJSON reads YAML or JSON into canonical JSON bytes.
 func decodeToJSON(data []byte) (json.RawMessage, error) {
 	var tree any
 	if err := yaml.Unmarshal(data, &tree); err != nil {
