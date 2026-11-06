@@ -29,3 +29,13 @@ func TestSettingDocs_ArePlainTextUnderTheirResolvedNames(t *testing.T) {
 		}
 	}
 }
+
+// The generated setup token goes to standard error, outside the log, so the
+// setting's description must not send the operator to the log for it.
+func TestDescribeSetting_SetupTokenNamesStandardError(t *testing.T) {
+	d, ok := DescribeSetting("LYEVE_SETUP_TOKEN")
+	assert.True(t, ok)
+	assert.Contains(t, d.Description, "to its standard error at startup")
+	assert.NotContains(t, d.Description, "log")
+	assert.NotContains(t, d.Default, "log")
+}
