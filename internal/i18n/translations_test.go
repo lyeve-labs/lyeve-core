@@ -51,6 +51,13 @@ func TestCodeError(t *testing.T) {
 		msg := CodePasswordTooShort.Error(en, map[string]any{"min": 12})
 		assert.Equal(t, "Password must be at least 12 characters.", msg)
 	})
+
+	// The generated token goes to standard error, outside the log, so the
+	// refusal must not send the reader to the log for it.
+	t.Run("setup token refusal names standard error", func(t *testing.T) {
+		assert.Equal(t, "A valid setup token is required. Use LYEVE_SETUP_TOKEN, or the token the engine printed to its standard error at startup.", CodeSetupTokenInvalid.Error(en, nil))
+		assert.Equal(t, "Un jeton de configuration valide est requis. Utilisez LYEVE_SETUP_TOKEN, ou le jeton que le moteur a écrit sur sa sortie d'erreur standard au démarrage.", CodeSetupTokenInvalid.Error(fr, nil))
+	})
 }
 
 func TestLoad(t *testing.T) {

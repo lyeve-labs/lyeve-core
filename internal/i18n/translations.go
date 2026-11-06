@@ -48,8 +48,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Le moteur est en mode configuration et ne sert rien tant que sa configuration n'est pas complète. Ouvrez l'administration pour voir quoi définir.",
 	},
 	CodeSetupTokenInvalid: {
-		"en": "A valid setup token is required. Use LYEVE_SETUP_TOKEN, or the token the engine printed to its log at startup.",
-		"fr": "Un jeton de configuration valide est requis. Utilisez LYEVE_SETUP_TOKEN, ou le jeton que le moteur a écrit dans son journal au démarrage.",
+		"en": "A valid setup token is required. Use LYEVE_SETUP_TOKEN, or the token the engine printed to its standard error at startup.",
+		"fr": "Un jeton de configuration valide est requis. Utilisez LYEVE_SETUP_TOKEN, ou le jeton que le moteur a écrit sur sa sortie d'erreur standard au démarrage.",
 	},
 	CodePasswordTooShort: {
 		"en": "Password must be at least {min} characters.",
