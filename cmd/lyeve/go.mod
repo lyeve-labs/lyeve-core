@@ -26,6 +26,8 @@ replace github.com/lyeve-labs/lyeve-plugin-apikey => ../../../lyeve-plugin-apike
 
 replace github.com/lyeve-labs/lyeve-plugin-audit => ../../../lyeve-plugin-audit
 
+replace github.com/lyeve-labs/lyeve-plugin-builder => ../../../lyeve-plugin-builder
+
 replace github.com/lyeve-labs/lyeve-plugin-bulk-import => ../../../lyeve-plugin-bulk-import
 
 replace github.com/lyeve-labs/lyeve-plugin-cache => ../../../lyeve-plugin-cache
@@ -100,8 +102,6 @@ replace github.com/lyeve-labs/lyeve-plugin-scim => ../../../lyeve-plugin-scim
 
 replace github.com/lyeve-labs/lyeve-plugin-search => ../../../lyeve-plugin-search
 
-replace github.com/lyeve-labs/lyeve-plugin-site-builder => ../../../lyeve-plugin-site-builder
-
 replace github.com/lyeve-labs/lyeve-plugin-storage => ../../../lyeve-plugin-storage
 
 replace github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring => ../../../lyeve-plugin-synthetic-monitoring
@@ -126,6 +126,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-apikey v0.9.0
 	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-builder v0.0.0
 	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-cache v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-captcha v0.8.0
@@ -165,7 +166,6 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-schema v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-scim v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-search v0.7.1
-	github.com/lyeve-labs/lyeve-plugin-site-builder v0.0.0
 	github.com/lyeve-labs/lyeve-plugin-storage v0.8.1
 	github.com/lyeve-labs/lyeve-plugin-synthetic-monitoring v0.6.0
 	github.com/lyeve-labs/lyeve-plugin-telemetry v0.6.0
