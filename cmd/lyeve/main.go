@@ -80,12 +80,12 @@ var expectedPlugins = []string{
 	"ab-testing", "data-export",
 	"synthetic-monitoring",
 	"email", "graphql", "grpc", "multitenant", "webhook",
-	"ai", "analytics", "apianalytics", "apikey", "audit", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
+	"ai", "analytics", "apianalytics", "apikey", "audit", "builder", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
 	"flow", "goroutine-engine", "idempotency", "profiler",
 	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "permissions", "pii-mask", "query-monitor",
 	"rate-limit", "realtime", "recommendations", "request-capture", "review", "usage",
 	"saml",
-	"schema", "scim", "search", "site-builder", "storage", "telemetry", "waf",
+	"schema", "scim", "search", "storage", "telemetry", "waf",
 	"data-residency",
 }
 
