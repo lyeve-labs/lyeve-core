@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.60.1] - 2026-11-06
+
+### Security
+
+- The engine requires klauspost/compress v1.20.2, which fixes a panic on a crafted two-block frame (GO-2026-6865). The 0.60.0 release build stopped at its vulnerability check on this advisory, so 0.60.0 has a tag and no published image. Run 0.60.1 in its place.
+
 ## [0.60.0] - 2026-11-09
 
 ### Security
