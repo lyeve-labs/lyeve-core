@@ -316,8 +316,8 @@ var translations = map[Code]map[string]string{
 		"fr": "La validation inter-champs a échoué : {rule}.",
 	},
 	CodeSchemaValidationPrecision: {
-		"en": "The field {field} holds at most {precision} digits, {scale} of them after the decimal point.",
-		"fr": "Le champ {field} accepte au plus {precision} chiffres, dont {scale} après la virgule.",
+		"en": "The field {field} has a precision of {precision} and a scale of {scale}, so it cannot hold this value.",
+		"fr": "Le champ {field} a une précision de {precision} et une échelle de {scale} : il ne peut pas contenir cette valeur.",
 	},
 }
 

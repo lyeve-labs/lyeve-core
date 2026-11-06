@@ -56,21 +56,22 @@ func TestLocalizeValidation_LeavesTheEnginesParametersAlone(t *testing.T) {
 
 // The schema engine refuses a decimal with more digits than its field holds
 // under the precision code, and the catalog words it from the field's
-// precision and scale in the caller's locale. A scale of 0 or 1 reads as
-// French grammar asks.
+// precision and scale in the caller's locale. Both are named as values, so a
+// precision of 1 or a scale of 0 leaves no plural to agree with.
 func TestLocalizeValidation_PrecisionIsRenderedInTheLocale(t *testing.T) {
 	tests := []struct {
-		name   string
-		locale Locale
-		scale  int
-		want   string
+		name      string
+		locale    Locale
+		precision int
+		scale     int
+		want      string
 	}{
-		{"en", LocaleEN, 2, "The field price holds at most 5 digits, 2 of them after the decimal point."},
-		{"fr", LocaleFR, 2, "Le champ price accepte au plus 5 chiffres, dont 2 après la virgule."},
-		{"fr scale 0", LocaleFR, 0, "Le champ price accepte au plus 5 chiffres, dont 0 après la virgule."},
-		{"fr scale 1", LocaleFR, 1, "Le champ price accepte au plus 5 chiffres, dont 1 après la virgule."},
-		{"fr-CA", Locale("fr-CA"), 2, "Le champ price accepte au plus 5 chiffres, dont 2 après la virgule."},
-		{"ja", Locale("ja"), 2, "The field price holds at most 5 digits, 2 of them after the decimal point."},
+		{"en", LocaleEN, 5, 2, "The field price has a precision of 5 and a scale of 2, so it cannot hold this value."},
+		{"en precision 1 scale 0", LocaleEN, 1, 0, "The field price has a precision of 1 and a scale of 0, so it cannot hold this value."},
+		{"fr", LocaleFR, 5, 2, "Le champ price a une précision de 5 et une échelle de 2 : il ne peut pas contenir cette valeur."},
+		{"fr precision 1 scale 0", LocaleFR, 1, 0, "Le champ price a une précision de 1 et une échelle de 0 : il ne peut pas contenir cette valeur."},
+		{"fr-CA", Locale("fr-CA"), 5, 2, "Le champ price a une précision de 5 et une échelle de 2 : il ne peut pas contenir cette valeur."},
+		{"ja", Locale("ja"), 5, 2, "The field price has a precision of 5 and a scale of 2, so it cannot hold this value."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -80,7 +81,7 @@ func TestLocalizeValidation_PrecisionIsRenderedInTheLocale(t *testing.T) {
 				Rule:    "precision",
 				Value:   "123456.7",
 				Message: "the schema engine's own sentence",
-				Params:  map[string]any{"field": "price", "precision": 5, "scale": tt.scale},
+				Params:  map[string]any{"field": "price", "precision": tt.precision, "scale": tt.scale},
 			}}
 			got := LocalizeValidation(tt.locale, errs)
 			require.Len(t, got, 1)
