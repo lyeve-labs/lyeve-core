@@ -315,6 +315,10 @@ var translations = map[Code]map[string]string{
 		"en": "Cross-field validation failed: {rule}.",
 		"fr": "La validation inter-champs a échoué : {rule}.",
 	},
+	CodeSchemaValidationPrecision: {
+		"en": "The field {field} has a precision of {precision} and a scale of {scale}, so it cannot hold this value.",
+		"fr": "Le champ {field} a une précision de {precision} et une échelle de {scale} : il ne peut pas contenir cette valeur.",
+	},
 }
 
 // Known reports whether the catalog holds a message for code.
