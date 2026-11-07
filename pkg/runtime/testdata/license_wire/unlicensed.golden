@@ -2400,11 +2400,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -2575,11 +2587,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -2810,11 +2834,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -3295,6 +3331,15 @@ body (json, newline):
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a collection that is not marked and a field the collection does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -3364,6 +3409,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a collection that is not marked and a field the collection does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -3669,11 +3723,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -3844,11 +3910,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -4079,11 +4157,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -4564,6 +4654,15 @@ body (json, newline):
               "minimum": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a collection that is not marked and a field the collection does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4633,6 +4732,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a collection that is not marked and a field the collection does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],

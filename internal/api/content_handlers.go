@@ -29,8 +29,13 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
+	hidden, maskOK := h.hiddenFor(w, r, schemaName)
 	if !maskOK {
+		return
+	}
+	mask := hidden.Apply
+	fields, ok := h.readFields(w, r, schemaName, hidden)
+	if !ok {
 		return
 	}
 
@@ -82,6 +87,7 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		item.Data = mask(item.Data)
 		h.runAfterResponse(r, schemaName, "list", item.Data)
+		item.Data = fields.apply(item.Data)
 	}
 
 	respond(w, http.StatusOK, items)
@@ -97,8 +103,13 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
+	hidden, maskOK := h.hiddenFor(w, r, schemaName)
 	if !maskOK {
+		return
+	}
+	mask := hidden.Apply
+	fields, ok := h.readFields(w, r, schemaName, hidden)
+	if !ok {
 		return
 	}
 
@@ -134,7 +145,7 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.runAfterResponse(r, schemaName, "get", item.Data)
-	item.Data = mask(item.Data)
+	item.Data = fields.apply(mask(item.Data))
 	respond(w, http.StatusOK, item)
 }
 
@@ -399,8 +410,13 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 	if !h.checkPermission(w, r, schemaName, "read") {
 		return
 	}
-	mask, maskOK := h.maskFor(w, r, schemaName)
+	hidden, maskOK := h.hiddenFor(w, r, schemaName)
 	if !maskOK {
+		return
+	}
+	mask := hidden.Apply
+	fields, ok := h.readFields(w, r, schemaName, hidden)
+	if !ok {
 		return
 	}
 
@@ -437,6 +453,7 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 		}
 		item.Data = mask(item.Data)
 		h.runAfterResponse(r, schemaName, "list", item.Data)
+		item.Data = fields.apply(item.Data)
 	}
 
 	respond(w, http.StatusOK, map[string]any{

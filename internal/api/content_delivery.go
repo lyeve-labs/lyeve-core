@@ -154,15 +154,18 @@ type deliveryQuery struct {
 	offset   int
 	filters  map[string]string
 	populate domain.PopulateConfig
+	fields   []string
 }
 
 // parseDeliveryQuery holds the query to the delivery grammar, answering 400
 // and returning false for anything outside it: an unknown or repeated
 // parameter, a number out of range or not written plainly, more than four
 // filters or eight populate paths, a populate path past two segments or with
-// a wildcard or a field mask, or a filter value over 255 characters. A read by
-// id takes populate and depth only. Whether each path names a relation
-// delivery follows is checked against the definition, by deliveryPaths.
+// a wildcard or a field mask, a filter value over 255 characters, or a name in
+// fields that deliveryFieldNames refuses. A read by id takes populate, depth
+// and fields only. Whether
+// each path names a relation delivery follows is checked against the
+// definition, by deliveryPaths, and each name in fields by resolveFields.
 func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deliveryQuery, bool) {
 	q := deliveryQuery{limit: contentListDefaultLimit, filters: map[string]string{}}
 	values, err := url.ParseQuery(r.URL.RawQuery)
@@ -200,6 +203,12 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 				return refuse("invalid query parameter: depth")
 			}
 			q.populate.MaxDepth = n
+		case key == "fields":
+			names, ok := deliveryFieldNames(v)
+			if !ok {
+				return refuse(fieldsRefused)
+			}
+			q.fields = names
 		case list && key == "limit":
 			n, ok := plainInt(v, contentListMinLimit, contentListMaxLimit)
 			if !ok {
@@ -222,6 +231,22 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 		}
 	}
 	return q, true
+}
+
+// deliveryFieldNames reads a fields value under the delivery grammar. A name
+// that is empty or padded with space, a name given twice and a name every
+// entry carries anyway are refused, because each would be a second URL for
+// one body. The order stays free, as populate's does.
+func deliveryFieldNames(v string) ([]string, bool) {
+	names := strings.Split(v, ",")
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		if n == "" || strings.TrimSpace(n) != n || entryFields[n] || seen[n] {
+			return nil, false
+		}
+		seen[n] = true
+	}
+	return names, true
 }
 
 // plainInt reads v as a whole number from min to max, written the way
@@ -505,6 +530,11 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 	if !h.deliveryPaths(w, r, d, sc, q.populate.Paths) {
 		return
 	}
+	fields, ok := resolveFields(sc, hidden, q.fields)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fieldsRefused)
+		return
+	}
 	if !h.deliveryBeforeRequest(w, r, sc.Name, "list") {
 		return
 	}
@@ -519,6 +549,7 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 	for _, item := range items {
 		item.Data = hidden.Apply(item.Data)
 		h.runAfterResponse(r, sc.Name, "list", item.Data)
+		item.Data = fields.apply(item.Data)
 	}
 	respond(w, http.StatusOK, items)
 }
@@ -547,6 +578,11 @@ func (h *ContentHandler) DeliveryGet(w http.ResponseWriter, r *http.Request) {
 	if !h.deliveryPaths(w, r, d, sc, q.populate.Paths) {
 		return
 	}
+	fields, ok := resolveFields(sc, hidden, q.fields)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fieldsRefused)
+		return
+	}
 	if !h.deliveryBeforeRequest(w, r, sc.Name, "get") {
 		return
 	}
@@ -567,5 +603,6 @@ func (h *ContentHandler) DeliveryGet(w http.ResponseWriter, r *http.Request) {
 	}
 	item.Data = hidden.Apply(item.Data)
 	h.runAfterResponse(r, sc.Name, "get", item.Data)
+	item.Data = fields.apply(item.Data)
 	respond(w, http.StatusOK, item)
 }
