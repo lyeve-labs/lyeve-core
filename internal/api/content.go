@@ -303,10 +303,20 @@ func (h *ContentHandler) authorize(r *http.Request, schema, action string) error
 // kernel's role-only checker is one of those: a mask only ever comes from a
 // rule, so an install with no rule store hides nothing.
 func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema string) (func(map[string]any) map[string]any, bool) {
-	mask, err := h.fieldMask(r, schema)
+	hidden, ok := h.hiddenFor(w, r, schema)
+	if !ok {
+		return nil, false
+	}
+	return hidden.Apply, true
+}
+
+// hiddenFor is maskFor returning the hidden fields themselves, for a read
+// that checks names against the mask as well as applying it.
+func (h *ContentHandler) hiddenFor(w http.ResponseWriter, r *http.Request, schema string) (core.HiddenFields, bool) {
+	hidden, err := h.hiddenFields(r, schema)
 	switch {
 	case err == nil:
-		return mask, true
+		return hidden, true
 	case errors.Is(err, errNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 	default:

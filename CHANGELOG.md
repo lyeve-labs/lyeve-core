@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Content reads take `fields`, a comma-separated list of the fields each entry's data returns, on the content list, the cursor list, a read by id and both delivery reads. A relation field keeps both its stored column and its populated record, and every entry still carries `id`, `created_at` and `updated_at`. A name the caller cannot read answers 400, whether the type has no such field or a mask hides it.
+
 ### Changed
 
 - The message catalog words the refusal of a decimal value with more digits than its field holds, in English and French, from the field's precision and scale.

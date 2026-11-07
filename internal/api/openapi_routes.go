@@ -94,6 +94,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, or * for all.", Schema: map[string]any{"type": "string"}}
 	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
+	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the collection has no such field or a field mask hides it, answers 400.", Schema: map[string]any{"type": "string"}}
+	err400 := map[string]any{"description": "A query parameter that cannot be read"}
 	err503Locale := map[string]any{"description": "The translations could not be read"}
 	err422 := map[string]any{"description": "Validation failed"}
 	err503Rules := map[string]any{"description": "The content rules could not be checked, so nothing was stored"}
@@ -105,8 +107,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0}},
-				populate, depth, locale},
-			Responses: map[string]any{"200": ok200, "401": err401, "404": err404, "503": err503Locale},
+				populate, depth, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
 		},
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
@@ -121,8 +123,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "cursor", In: "query", Description: "The cursor from the previous page; empty for the first page.", Schema: map[string]any{"type": "string"}},
 				{Name: "limit", In: "query", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
-				locale},
-			Responses: map[string]any{"200": ok200, "401": err401, "404": err404, "503": err503Locale},
+				locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
 		},
 	}
 	paths[base+"/stream"] = openAPIPath{
@@ -149,8 +151,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	paths[base+"/{id}"] = openAPIPath{
 		"get": {
 			Tags: []string{tag}, Summary: "Get a record", Security: bearer,
-			Parameters: []openAPIParameter{schema, id, populate, depth, locale},
-			Responses:  map[string]any{"200": ok200, "401": err401, "404": err404, "503": err503Locale},
+			Parameters: []openAPIParameter{schema, id, populate, depth, locale, fields},
+			Responses:  map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
 		},
 		"put": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Update a record", Security: bearer,
@@ -680,6 +682,7 @@ func documentDelivery(paths map[string]openAPIPath) {
 	id := openAPIParameter{Name: "id", In: "path", Required: true, Description: "Record id, in lower case with hyphens. Any other spelling answers 404.", Schema: map[string]any{"type": "string", "format": "uuid"}}
 	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.", Schema: map[string]any{"type": "string"}}
 	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.", Schema: map[string]any{"type": "integer", "minimum": 0, "maximum": deliveryMaxDepth}}
+	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a collection that is not marked and a field the collection does not have are refused alike.", Schema: map[string]any{"type": "string"}}
 	const served = "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused."
 	responses := map[string]any{
 		"200": map[string]any{"description": "OK"},
@@ -695,14 +698,14 @@ func documentDelivery(paths map[string]openAPIPath) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
-				populate, depth},
+				populate, depth, fields},
 			Responses: responses,
 		},
 	}
 	paths["/api/v1/delivery/{schema}/{id}"] = openAPIPath{
 		"get": {
 			Tags: []string{tag}, Summary: "Get a published record", Description: served,
-			Parameters: []openAPIParameter{schema, id, populate, depth},
+			Parameters: []openAPIParameter{schema, id, populate, depth, fields},
 			Responses:  responses,
 		},
 	}
