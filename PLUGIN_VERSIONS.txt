@@ -17,14 +17,14 @@
 #
 # Generated 2026-11-05T17:25:54Z from origin default branches.
 
-lyeve-libs = ba1ced5c86f77fe8e4c701cf958baa5b8b76bce6
+lyeve-libs = 091ad711f32f95dd93d88951012ffb765cc04d5f
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = d72c27ece0d0db7c843037c98a8e0437aa0f6683
 lyeve-plugin-analytics = 67d8c9fd07a63d77adb641407665b310a672a541
 lyeve-plugin-apianalytics = 76b4e12bedfbb3e8d14c41e11d7c139835850f31
 lyeve-plugin-apikey = 288825a3a2cc1eea8b30d495c70d875b64ebb018
 lyeve-plugin-audit = fd03590861515a94463c4c604ccac464e862c408
-lyeve-plugin-builder = 5fe73d32fc9a349f921a69f4a11a6b160000b84e
+lyeve-plugin-builder = 7ca462cfacd20f55ebb6f953b091dff2afbceb65
 lyeve-plugin-bulk-import = 8c3ba1e1535ee9637ac71b08cae73186b03787d0
 lyeve-plugin-cache = a217b94b596446db4de6773feaba8e75c8d25a05
 lyeve-plugin-captcha = a959d00a9475d63d52d9d72aa0a318e742c528e2
