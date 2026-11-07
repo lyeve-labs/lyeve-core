@@ -10,8 +10,10 @@ import (
 
 // Content is a single record belonging to a schema.
 type Content struct {
-	ID         uuid.UUID      `json:"id"`
-	SchemaName string         `json:"schema_name"`
+	ID uuid.UUID `json:"id"`
+	// SchemaName is the content type the entry belongs to. Every route that
+	// serves an entry names its type in the path, so the JSON leaves it out.
+	SchemaName string         `json:"-"`
 	Data       map[string]any `json:"data"`
 	CreatedAt  time.Time      `json:"created_at"`
 	UpdatedAt  time.Time      `json:"updated_at"`

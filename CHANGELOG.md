@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - The message catalog words the refusal of a decimal value with more digits than its field holds, in English and French, from the field's precision and scale.
 
+### Removed
+
+- A content entry no longer carries `schema_name`. Every route that serves an entry names its content type in the path, and on the relations route the relation field's definition names the type it points at. A client that read the key takes the type from the path it called.
+
 ### Fixed
 
 - A content list filter on a number field compares by value on every database and keeps every digit of a plain decimal, so 10 and 10.0 find the same entries and share one cached page. A filter value that is not a finite number below 10^28 now answers 400. Before, PostgreSQL and SQL Server answered such a value with 422, and MySQL compared it as 0 and returned the entries holding 0.
