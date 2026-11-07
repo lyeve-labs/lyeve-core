@@ -17,13 +17,14 @@
 #
 # Generated 2026-11-05T17:25:54Z from origin default branches.
 
-lyeve-libs = 98f10d4fc4fd8115a6eb9eed0a22fdfa3aee5458
+lyeve-libs = 091ad711f32f95dd93d88951012ffb765cc04d5f
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = d72c27ece0d0db7c843037c98a8e0437aa0f6683
 lyeve-plugin-analytics = 67d8c9fd07a63d77adb641407665b310a672a541
 lyeve-plugin-apianalytics = 76b4e12bedfbb3e8d14c41e11d7c139835850f31
 lyeve-plugin-apikey = 288825a3a2cc1eea8b30d495c70d875b64ebb018
 lyeve-plugin-audit = fd03590861515a94463c4c604ccac464e862c408
+lyeve-plugin-builder = 7ca462cfacd20f55ebb6f953b091dff2afbceb65
 lyeve-plugin-bulk-import = 8c3ba1e1535ee9637ac71b08cae73186b03787d0
 lyeve-plugin-cache = a217b94b596446db4de6773feaba8e75c8d25a05
 lyeve-plugin-captcha = a959d00a9475d63d52d9d72aa0a318e742c528e2
@@ -60,7 +61,7 @@ lyeve-plugin-recommendations = 2de0f15a368b73a7e630ab59f80a4bd43b757ee4
 lyeve-plugin-request-capture = 77cbe6561a6066d277fe3e7402236f49d22a61f6
 lyeve-plugin-review = 5ecaa17582b0e3621ba97583b93458d3639a6a52
 lyeve-plugin-saml = 3153a83077d0f1c65431fc658f8f1246e65940fe
-lyeve-plugin-schema = d71d8ad78fc6a257db916d471e1c53833556f19d
+lyeve-plugin-schema = a54d25b30a988641eb6b357a52ce09ce84ac5e8d
 lyeve-plugin-scim = d08fa4015d2703e7d745bd4c2f563dfc483866f6
 lyeve-plugin-search = 83c85289fd744f9dd1400cf1358fb548b42f5f92
 lyeve-plugin-storage = fa7a4e75c9ee451740f759123f37467480bc50aa
