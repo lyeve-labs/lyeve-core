@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - The message catalog words the refusal of a decimal value with more digits than its field holds, in English and French, from the field's precision and scale.
+- A schema import from Strapi, Contentful, JSON Schema or OpenAPI maps a whole-number type to an integer field, and a Strapi decimal to a decimal field of 18 digits with 2 after the point, which the conversion report names. Before, both imported as number. A Strapi float, a Contentful number and every WordPress field import as before. A default is kept with every digit the source wrote, and one the new field cannot hold is dropped and named in the report. The report also names a JSON Schema integer whose range reaches past 64 bits. Importing the same source again over fields first imported as number now plans a retype, which answers 409 when stored rows do not fit the new type.
 
 ### Removed
 

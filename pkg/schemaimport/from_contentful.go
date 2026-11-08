@@ -160,7 +160,9 @@ func contentfulFieldType(conv *Conversion, schema string, f contentfulField, kno
 		return domain.SchemaField{FieldType: "rich_text"}, true
 	case "RichText":
 		return domain.SchemaField{FieldType: "json"}, true
-	case "Integer", "Number":
+	case "Integer":
+		return domain.SchemaField{FieldType: "integer"}, true
+	case "Number":
 		return domain.SchemaField{FieldType: "number"}, true
 	case "Boolean":
 		return domain.SchemaField{FieldType: "boolean"}, true

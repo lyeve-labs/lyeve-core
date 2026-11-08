@@ -3,6 +3,8 @@ package schemaimport
 import (
 	"encoding/json"
 	"fmt"
+	"math"
+	"math/big"
 	"sort"
 	"strings"
 
@@ -36,7 +38,14 @@ type jsonSchemaDoc struct {
 	Enum        []any                    `json:"enum"`
 	Items       *jsonSchemaDoc           `json:"items"`
 	MaxLength   *int                     `json:"maxLength"`
-	Default     any                      `json:"default"`
+	Default     json.RawMessage          `json:"default"`
+	Minimum     json.RawMessage          `json:"minimum"`
+	Maximum     json.RawMessage          `json:"maximum"`
+
+	// A number in JSON Schema 2019 and later and in OpenAPI 3.1. In draft 4
+	// and OpenAPI 3.0, a boolean that makes minimum or maximum exclusive.
+	ExclusiveMinimum json.RawMessage `json:"exclusiveMinimum"`
+	ExclusiveMaximum json.RawMessage `json:"exclusiveMaximum"`
 
 	ContentMediaType string `json:"contentMediaType"`
 
@@ -217,11 +226,18 @@ func jsonSchemaField(conv *Conversion, schema, prop string, p jsonSchemaDoc, kno
 
 	switch primaryType(p.Type) {
 	case "string":
-		return domain.SchemaField{FieldType: stringFieldType(p), Default: p.Default}, true
-	case "integer", "number":
-		return domain.SchemaField{FieldType: "number", Default: p.Default}, true
+		return domain.SchemaField{FieldType: stringFieldType(p), Default: sourceDefault(p.Default)}, true
+	case "integer":
+		f := domain.SchemaField{FieldType: "integer"}
+		f.Default = exactDefault(conv, schema, prop, f, p.Default)
+		if p.Format == "uint64" || boundsPastInt64(p) {
+			conv.note(schema, prop, "imported as integer: the source allows values past the int64 range, which this field refuses")
+		}
+		return f, true
+	case "number":
+		return domain.SchemaField{FieldType: "number", Default: sourceDefault(p.Default)}, true
 	case "boolean":
-		return domain.SchemaField{FieldType: "boolean", Default: p.Default}, true
+		return domain.SchemaField{FieldType: "boolean", Default: sourceDefault(p.Default)}, true
 	case "array":
 		if p.Items != nil {
 			if target := refTarget(p.Items.Ref); target != "" {
@@ -327,6 +343,40 @@ func primaryType(t any) string {
 		}
 	}
 	return ""
+}
+
+// boundsPastInt64 reports whether the bounds of an integer property admit a
+// value outside the int64 range, in either form of the exclusive keywords.
+func boundsPastInt64(p jsonSchemaDoc) bool {
+	minExclusive := strings.TrimSpace(string(p.ExclusiveMinimum)) == "true"
+	maxExclusive := strings.TrimSpace(string(p.ExclusiveMaximum)) == "true"
+	return pastInt64(p.Minimum, minExclusive, false) || pastInt64(p.Maximum, maxExclusive, true) ||
+		pastInt64(p.ExclusiveMinimum, true, false) || pastInt64(p.ExclusiveMaximum, true, true)
+}
+
+// pastInt64 reports whether the integers a bound admits reach outside the
+// int64 range. A bound that is not a number reads as no bound. An exclusive
+// bound is first moved to the nearest integer it admits, because an
+// exclusive maximum of 2^63 admits nothing past the int64 maximum.
+func pastInt64(bound json.RawMessage, exclusive, upper bool) bool {
+	if len(bound) == 0 {
+		return false
+	}
+	r, ok := new(big.Rat).SetString(string(bound))
+	if !ok {
+		return false
+	}
+	if exclusive {
+		// Div floors here, because a big.Rat's denominator is positive.
+		n := new(big.Int).Div(r.Num(), r.Denom())
+		if !upper {
+			n.Add(n, big.NewInt(1))
+		} else if r.IsInt() {
+			n.Sub(n, big.NewInt(1))
+		}
+		r.SetInt(n)
+	}
+	return r.Cmp(new(big.Rat).SetInt64(math.MaxInt64)) > 0 || r.Cmp(new(big.Rat).SetInt64(math.MinInt64)) < 0
 }
 
 // decodeToJSON reads YAML or JSON into canonical JSON bytes.
