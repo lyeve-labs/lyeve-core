@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - The message catalog words the refusal of a decimal value with more digits than its field holds, in English and French, from the field's precision and scale.
 - A schema import from Strapi, Contentful, JSON Schema or OpenAPI maps a whole-number type to an integer field, and a Strapi decimal to a decimal field of 18 digits with 2 after the point, which the conversion report names. Before, both imported as number. A Strapi float, a Contentful number and every WordPress field import as before. A default is kept with every digit the source wrote, and one the new field cannot hold is dropped and named in the report. The report also names a JSON Schema integer whose range reaches past 64 bits. Importing the same source again over fields first imported as number now plans a retype, which answers 409 when stored rows do not fit the new type.
+- The API's messages call what a tenant defines with fields a content type, where they said schema, and call the server the engine, where they said this instance. The French translations follow. Routes, JSON keys, error codes and stored values keep their names.
+- The API reference served at /api/openapi.json describes content types and the engine in the same words. Operation ids, paths and parameter names do not change.
+- Through the plugin releases this engine pins: the schema plugin adds the integer and decimal field types, and GraphQL, gRPC, flows and review stage conditions read and write both with every digit.
+- Through the plugin releases this engine pins: every plugin's messages name content types and the engine in the same words as the engine's own.
 
 ### Removed
 
@@ -23,6 +27,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - A content list filter on a number field compares by value on every database and keeps every digit of a plain decimal, so 10 and 10.0 find the same entries and share one cached page. A filter value that is not a finite number below 10^28 now answers 400. Before, PostgreSQL and SQL Server answered such a value with 422, and MySQL compared it as 0 and returned the entries holding 0.
 - A content list filter that names a has-one, has-many or many-to-many relation answers 400, as a filter on any other unknown name does. Those relations keep their rows in another table, and the filter reached the database as a column that does not exist, which answered 503.
+- The refusal of a wrong setup token, in English and French, and the description of the setup token setting name standard error, where the generated token is written since 0.58.0. Before, they sent the reader to the log, where the token no longer appears.
+
+### Security
+
+- Through the plugin releases this engine pins: a flow's event.publish node can no longer change a content entry through the console's adoption of its event, and checks the event type its template resolves to. An email step escapes a text body before it is sent as HTML.
+- Through the plugin releases this engine pins: reading an uploaded workbook in a bulk import no longer panics on a crafted pivot table (GO-2026-6695), and the private module and the message broker require klauspost/compress v1.20.2 (GO-2026-6865).
 
 ## [0.60.2] - 2026-11-06
 
