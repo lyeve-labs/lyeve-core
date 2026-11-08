@@ -407,7 +407,7 @@ func TestStreamEndReason_NamesTheRefusal(t *testing.T) {
 		want string
 	}{
 		{errNoCaller, "authentication required"},
-		{errSchemaNotAllowed, "schema not allowed for this credential"},
+		{errSchemaNotAllowed, "content type not allowed for this credential"},
 		{errScopeDenied, "insufficient scope"},
 		{fmt.Errorf("permission check notes: %w", errPermissionDenied), "permission denied"},
 		{errors.New("dial tcp 10.0.0.5:5432: connection refused"), "access could not be checked"},

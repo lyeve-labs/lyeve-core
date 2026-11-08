@@ -174,7 +174,7 @@ func (h *ContentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scErr != nil {
-		storeError(w, r, scErr, "failed to load schema for validation")
+		storeError(w, r, scErr, "failed to load content type for validation")
 		return
 	}
 	if err := coerceNumbers(sc, input.Data); err != nil {
@@ -240,7 +240,7 @@ func (h *ContentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scErr != nil {
-		storeError(w, r, scErr, "failed to load schema for validation")
+		storeError(w, r, scErr, "failed to load content type for validation")
 		return
 	}
 	input.Data = withoutStatus(input.Data)
@@ -356,7 +356,7 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scErr != nil {
-		storeError(w, r, scErr, "failed to load schema for validation")
+		storeError(w, r, scErr, "failed to load content type for validation")
 		return
 	}
 
@@ -612,7 +612,7 @@ func storeError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	// letting the absence read as a missing content type or an empty page.
 	if errors.Is(err, core.ErrNoSchemaEngine) {
 		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
-			"no schema engine is installed, so this install cannot serve content")
+			"no schema engine is installed, so the engine cannot serve content")
 		return
 	}
 	status := httpStatus(err)

@@ -111,7 +111,7 @@ func (h *ContentHandler) readFields(w http.ResponseWriter, r *http.Request, sche
 		err = domain.ErrNotFound
 	}
 	if err != nil {
-		storeError(w, r, err, "failed to load schema")
+		storeError(w, r, err, "failed to load content type")
 		return nil, false
 	}
 	fields, ok := resolveFields(sc, hidden, names)

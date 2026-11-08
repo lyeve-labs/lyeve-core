@@ -112,12 +112,12 @@ var translations = map[Code]map[string]string{
 		"fr": "Cette session a été révoquée.",
 	},
 	CodeRefreshNotEnabled: {
-		"en": "Refresh tokens are not enabled on this server.",
-		"fr": "Les jetons de rafraîchissement ne sont pas activés sur ce serveur.",
+		"en": "Refresh tokens are not enabled on this engine.",
+		"fr": "Les jetons de rafraîchissement ne sont pas activés sur ce moteur.",
 	},
 	CodeMFANotAvailable: {
-		"en": "Multi-factor authentication is not available on this server.",
-		"fr": "L'authentification multi-facteurs n'est pas disponible sur ce serveur.",
+		"en": "Multi-factor authentication is not available on this engine.",
+		"fr": "L'authentification multi-facteurs n'est pas disponible sur ce moteur.",
 	},
 	CodeAccountLocked: {
 		"en": "This account has been temporarily locked due to too many failed login attempts. Please try again later.",
@@ -168,8 +168,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Cette fonctionnalité n'est pas disponible pour ce locataire.",
 	},
 	CodeTenantFeatureUnknown: {
-		"en": "{name} is not a plugin this instance serves.",
-		"fr": "{name} n'est pas un plugin servi par cette instance.",
+		"en": "{name} is not a plugin this engine serves.",
+		"fr": "{name} n'est pas un plugin servi par ce moteur.",
 	},
 	CodeTenantSlugInvalid: {
 		"en": "The tenant must be a slug: a lower-case letter, then letters, digits or underscores.",
@@ -178,8 +178,8 @@ var translations = map[Code]map[string]string{
 
 	// Schema
 	CodeSchemaNotFound: {
-		"en": "The requested schema was not found.",
-		"fr": "Le schéma demandé est introuvable.",
+		"en": "The requested content type was not found.",
+		"fr": "Le type de contenu demandé est introuvable.",
 	},
 	CodeMigrationFailed: {
 		"en": "The database migration failed. Check the server logs for details.",

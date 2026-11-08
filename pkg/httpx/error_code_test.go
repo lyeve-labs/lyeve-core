@@ -49,7 +49,7 @@ func TestErrorCode_WritesTheLocalizedEnvelope(t *testing.T) {
 // not hold is its own message rather than a blank one.
 func TestErrorCode_InterpolatesAndFallsBack(t *testing.T) {
 	_, env := errorCodeResponse(t, i18n.LocaleEN, "", http.StatusUnprocessableEntity, string(i18n.CodeTenantFeatureUnknown), map[string]any{"name": "<search>"})
-	assert.Equal(t, "<search> is not a plugin this instance serves.", env.Error)
+	assert.Equal(t, "<search> is not a plugin this engine serves.", env.Error)
 	assert.Empty(t, env.RequestID)
 
 	_, env = errorCodeResponse(t, i18n.LocaleEN, "", http.StatusConflict, "WIDGET_BUSY", nil)
