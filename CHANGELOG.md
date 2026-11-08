@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: deleting a retention policy that does not exist answers 404 and records no audit entry, where it answered 204 and recorded one.
 - Through the plugin releases this engine pins: reading a tenant backup job, run or restore test schedule, triggering a backup and triggering a restore test answer a database failure with 503, where each answered 404 as if the record did not exist.
 - Through the plugin releases this engine pins: updating or deleting a tenant backup job or restore test schedule that does not exist answers 404, where an update or a schedule delete answered 503 and a job delete answered 204.
+- Through the plugin releases this engine pins: a flow run that starts while the engine shuts down, such as a child that a `flow.call` node started without waiting, is refused and recorded as failed. Before, it kept running after the shutdown had closed the connections it used, and the shutdown's wait for running flows could panic.
 
 ### Security
 
