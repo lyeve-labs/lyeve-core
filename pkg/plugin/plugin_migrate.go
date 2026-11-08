@@ -312,7 +312,7 @@ func lostRecordHint(tableName, dialect, version string) string {
 	}
 	return fmt.Sprintf(
 		" (the schema already holds what this migration creates."+
-			" Either the migration is wrong, or this install lost its record of it."+
+			" Either the migration is wrong, or this engine lost its record of it."+
 			" After confirming the schema already has this change, record it with: %s)",
 		repair)
 }

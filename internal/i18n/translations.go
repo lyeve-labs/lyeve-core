@@ -182,8 +182,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Le type de contenu demandé est introuvable.",
 	},
 	CodeMigrationFailed: {
-		"en": "The database migration failed. Check the server logs for details.",
-		"fr": "La migration de base de données a échoué. Consultez les journaux du serveur pour plus de détails.",
+		"en": "The database migration failed. Check the engine's logs for details.",
+		"fr": "La migration de base de données a échoué. Consultez les journaux du moteur pour plus de détails.",
 	},
 
 	// Content
