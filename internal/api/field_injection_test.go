@@ -155,7 +155,7 @@ func TestBuildOpenAPIDoc_ManyCollectionsAreCounted(t *testing.T) {
 	if _, has := p.Schema["enum"]; has {
 		t.Error("enum present past the cap")
 	}
-	if !strings.Contains(p.Description, strconv.Itoa(len(names))+" collections") {
+	if !strings.Contains(p.Description, strconv.Itoa(len(names))+" content types") {
 		t.Errorf("description = %q, want the count", p.Description)
 	}
 }

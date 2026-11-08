@@ -80,7 +80,7 @@ func FromStrapi(data []byte) (*Conversion, error) {
 		// is the same shape. The difference is a rule the admin enforces, not a
 		// column.
 		if src.Kind == "singleType" {
-			conv.note(Identifier(name), "", "imported as a collection: this engine has no single-type constraint, so limit it to one entry in the admin")
+			conv.note(Identifier(name), "", "imported as an ordinary content type: this engine has no single-type constraint, so limit it to one entry in the console")
 		}
 
 		b := newBuilder(conv, name, src.Info.DisplayName)
