@@ -28,6 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - A content list filter on a number field compares by value on every database and keeps every digit of a plain decimal, so 10 and 10.0 find the same entries and share one cached page. A filter value that is not a finite number below 10^28 now answers 400. Before, PostgreSQL and SQL Server answered such a value with 422, and MySQL compared it as 0 and returned the entries holding 0.
 - A content list filter that names a has-one, has-many or many-to-many relation answers 400, as a filter on any other unknown name does. Those relations keep their rows in another table, and the filter reached the database as a column that does not exist, which answered 503.
 - The refusal of a wrong setup token, in English and French, and the description of the setup token setting name standard error, where the generated token is written since 0.58.0. Before, they sent the reader to the log, where the token no longer appears.
+- Through the plugin releases this engine pins: reading or downloading a tenant backup archive by an id that is not a UUID answers 404 on PostgreSQL, where it answered 503.
+- Through the plugin releases this engine pins: deleting a retention policy that does not exist answers 404 and records no audit entry, where it answered 204 and recorded one.
 
 ### Security
 
