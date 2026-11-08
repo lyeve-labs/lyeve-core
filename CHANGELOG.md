@@ -30,6 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The refusal of a wrong setup token, in English and French, and the description of the setup token setting name standard error, where the generated token is written since 0.58.0. Before, they sent the reader to the log, where the token no longer appears.
 - Through the plugin releases this engine pins: reading or downloading a tenant backup archive by an id that is not a UUID answers 404 on PostgreSQL, where it answered 503.
 - Through the plugin releases this engine pins: deleting a retention policy that does not exist answers 404 and records no audit entry, where it answered 204 and recorded one.
+- Through the plugin releases this engine pins: reading a tenant backup job, run or restore test schedule, triggering a backup and triggering a restore test answer a database failure with 503, where each answered 404 as if the record did not exist.
+- Through the plugin releases this engine pins: updating or deleting a tenant backup job or restore test schedule that does not exist answers 404, where an update or a schedule delete answered 503 and a job delete answered 204.
 
 ### Security
 
