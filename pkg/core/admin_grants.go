@@ -42,14 +42,14 @@ var adminGrantCatalog = []AdminGrantInfo{
 	{AdminGrantContentWrite, "Create, update, publish and delete content entries."},
 	{AdminGrantMediaRead, "List and download media files."},
 	{AdminGrantMediaWrite, "Upload, replace and delete media files."},
-	{AdminGrantSchemasRead, "Read schema definitions, their row counts and the schema export."},
+	{AdminGrantSchemasRead, "Read content type definitions, their row counts and the content type export."},
 	{AdminGrantFlowsRead, "Read flows and their runs."},
 	{AdminGrantFlowsWrite, "Create, change, activate and delete flows."},
 	{AdminGrantWebhooksRead, "Read webhooks and their deliveries."},
 	{AdminGrantWebhooksWrite, "Test webhooks, retry deliveries, set the retry policy and work the dead-letter queue."},
 	{AdminGrantJobsRead, "Read scheduled jobs and their runs."},
 	{AdminGrantJobsWrite, "Create, change, trigger and delete scheduled jobs."},
-	{AdminGrantLogsRead, "Read and export the instance logs."},
+	{AdminGrantLogsRead, "Read and export the engine logs."},
 	{AdminGrantAuditRead, "Read and export the audit log."},
 }
 

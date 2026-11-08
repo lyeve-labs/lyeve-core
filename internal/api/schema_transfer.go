@@ -88,7 +88,7 @@ type schemaImportResponse struct {
 const bundleTooLarge = "content type definitions are too large"
 
 // schemaNeedsTenant answers an import that names no tenant.
-const schemaNeedsTenant = "schema definitions belong to a tenant, and the request names none"
+const schemaNeedsTenant = "content type definitions belong to a tenant, and the request names none"
 
 // schemaImportHandler reads a bundle, or a definition from another system, and
 // reports or applies what it would change.
@@ -172,7 +172,7 @@ func schemaImportHandler(host core.Host) http.HandlerFunc {
 			// satisfied, which is what the operator has to fix. The names are
 			// the upload's own.
 			httpx.ErrorReq(w, r, http.StatusConflict,
-				"the import references content types that are neither in the upload nor on this instance: "+strings.Join(blocked, ", "))
+				"the import references content types that are neither in the upload nor on this engine: "+strings.Join(blocked, ", "))
 			return
 		}
 		if err != nil {

@@ -140,7 +140,7 @@ func (h *deviceLoginHandler) Start(w http.ResponseWriter, r *http.Request) {
 	uri, err := h.verificationURI()
 	if err != nil {
 		slog.WarnContext(logging.WithoutTenant(ctx), "device login refused: the console URL is unset", "err", err)
-		httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "Device sign-in is not configured on this install.")
+		httpx.ErrorReq(w, r, http.StatusServiceUnavailable, "Device sign-in is not configured on this engine.")
 		return
 	}
 	now := h.now().UTC().Truncate(time.Microsecond)

@@ -128,7 +128,7 @@ func (h *DSARHandler) Export(w http.ResponseWriter, r *http.Request) {
 			// Refuse rather than answer from one tenant: a caller who asked for
 			// every tenant must never silently receive one.
 			httpx.ErrorReq(w, r, http.StatusBadRequest,
-				"cross-tenant export is not available on this install")
+				"cross-tenant export is not available on this engine")
 			return
 		}
 		var tenants []string
