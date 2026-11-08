@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - A content list filter on a number field compares by value on every database and keeps every digit of a plain decimal, so 10 and 10.0 find the same entries and share one cached page. A filter value that is not a finite number below 10^28 now answers 400. Before, PostgreSQL and SQL Server answered such a value with 422, and MySQL compared it as 0 and returned the entries holding 0.
+- A content list filter that names a has-one, has-many or many-to-many relation answers 400, as a filter on any other unknown name does. Those relations keep their rows in another table, and the filter reached the database as a column that does not exist, which answered 503.
 
 ## [0.60.2] - 2026-11-06
 

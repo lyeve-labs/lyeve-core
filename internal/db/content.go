@@ -568,6 +568,12 @@ func (s *ContentStore) listPlanFor(tenantID, schemaName string, sc *domain.Schem
 		"deleted_at": true,
 	}
 	for _, f := range sc.Fields {
+		// A to-many relation holds no column on this table, so a filter
+		// naming it is an unknown key rather than SQL naming a column that
+		// does not exist.
+		if isVirtualRelationField(f) {
+			continue
+		}
 		allowed[fieldColumn(f)] = true
 	}
 	p := &listPlan{
