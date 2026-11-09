@@ -119,6 +119,10 @@ type engineHost struct {
 	// returns nil until then.
 	apiRoutes atomic.Pointer[apiRoutesBox]
 
+	// Wired by WithRuntimeTuning. Nil-safe: RuntimeTuning() returns nil
+	// until then.
+	runtimeTuning atomic.Pointer[runtimeTuningBox]
+
 	// Wired by RegisterPermissionChecker (the plugin that owns the rules, in
 	// its Start, cleared in its Stop). PermissionChecker() never returns nil:
 	// while this is nil it answers core.RoleOnlyPermissionChecker.
@@ -248,6 +252,7 @@ var (
 	_ core.MetricsGathererProvider          = (*engineHost)(nil)
 	_ core.MetricsGathererRegistrar         = (*engineHost)(nil)
 	_ core.GoroutineTunablesProvider        = (*engineHost)(nil)
+	_ core.RuntimeTuningProvider            = (*engineHost)(nil)
 	_ core.LogRingProvider                  = (*engineHost)(nil)
 	_ core.EngineRateLimitsProvider         = (*engineHost)(nil)
 	_ core.APIRoutesProvider                = (*engineHost)(nil)
@@ -396,6 +401,27 @@ func (h *engineHost) DistLock(name string) *engine.DistLock {
 // GoroutineTunables implements GoroutineTunablesProvider over the scaling
 // primitives this host was built with.
 func (h *engineHost) GoroutineTunables() core.GoroutineTunables { return core.NewGoroutineTunables(h) }
+
+// WithRuntimeTuning wires the runtime settings role, which the runtime builds
+// once the database pool and the replicas' relay exist. Atomic because the
+// stateless boot and the full boot wire it at different points.
+func (h *engineHost) WithRuntimeTuning(t core.RuntimeTuning) {
+	if t == nil {
+		return
+	}
+	h.runtimeTuning.Store(&runtimeTuningBox{t: t})
+}
+
+// RuntimeTuning implements RuntimeTuningProvider. It answers nil until the
+// runtime wires the role.
+func (h *engineHost) RuntimeTuning() core.RuntimeTuning {
+	if b := h.runtimeTuning.Load(); b != nil {
+		return b.t
+	}
+	return nil
+}
+
+type runtimeTuningBox struct{ t core.RuntimeTuning }
 
 // WithEngineRateLimits hands the host the limits the engine enforces for the
 // routes the routers mount. The runtime computes them from the same parse and

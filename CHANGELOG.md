@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A plugin can read and change the engine's runtime settings through the host role `core.RuntimeTuning`: the scheduler's thread count, Go's soft memory limit, the garbage collector's target and the size of the primary database pool. Each setting reports the value in force, where it came from (the environment, the configuration file, a value set through the role, the container's limit, the machine, the default, or a change made on the running engine another way), and whether it follows the container or the machine. A change applies at once and lasts until the engine restarts. A value set by `GOMAXPROCS`, `CPU_QUOTA`, `GOMEMLIMIT`, `MEMORY_LIMIT_BYTES`, `GOGC` or `DATABASE_MAX_CONNECTIONS` is pinned, and a change to it is refused with the variable's name. `LYEVE_OVERRIDABLE` opens `CPU_QUOTA`, `MEMORY_LIMIT_BYTES` and `DATABASE_MAX_CONNECTIONS` as it opens any key the engine reads, and the other three stay pinned because Go reads them itself. Removing the soft memory limit is refused while the garbage collector is off, by the rule the garbage collector endpoint applies. A byte limit above the container's or the machine's memory is capped at it, and a limit at or above that memory counts as no limit. Without a limit below it, a garbage collector target above `core.MaxGCPercent` (1000) is refused as well as a negative one, and removing the limit is refused while the target is above it. A pool resize through the role takes `core.MinDatabaseConns` (5) connections or more, and a pool size set by `DATABASE_MAX_CONNECTIONS` stays as the deployment set it. A pool resize runs the boot's check against the database's connection limit again and returns its warning. The role also reports the facts a choice depends on, each known or unknown with a reason: the container's CPU and memory limits, the machine's CPUs and memory, the database's connection limit, open connections and CPUs, the number of replicas and whether a shared cache backend is in use. An unknown fact also carries its reason as a `core.FactReason` constant, and a missing database grant names the grant.
+- A cluster transport can report how many replicas are running by implementing `cluster.Roster`, and `Relay.Replicas` answers that count, or this replica alone as not known without such a transport.
+- While the engine runs, it reads the container's CPU and memory limits again every second. Go's soft memory limit follows a changed limit while it is automatic or a share of the limit, and the scheduler follows the CPU limit while its thread count is automatic. A variable or a fixed value set through the role stops each.
+
+### Changed
+
+- Under a CPU limit of one core or less on a machine with two or more CPUs, the engine runs its scheduler on one thread, where Go's default gives two. Measured under a one-core limit, two threads served no better than one. Above one core the engine leaves Go's default. `GOMAXPROCS` and `CPU_QUOTA` still win.
+- The boot's warning that the pool claims a large share of the database's connections reads the limit an ordinary account can use: PostgreSQL's `max_connections` less its reserved slots, and SQL Server's `user connections` option, with no warning where that option leaves the limit to SQL Server.
+- `POST /api/admin/debug/gc-config` refuses a `gogc` above 1000 with 422 unless a memory limit below the container's or the machine's memory is set, because the heap could then outgrow the machine. A memory limit at or above that memory no longer counts as one when it refuses a negative `gogc`.
+
 ## [0.61.0] - 2026-11-11
 
 ### Added

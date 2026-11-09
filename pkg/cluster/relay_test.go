@@ -310,3 +310,45 @@ func TestCoalescer_NilIsInert(t *testing.T) {
 	var c *cluster.Coalescer
 	c.Mark("x")
 }
+
+// rosterTransport is a transport that also counts the replicas, as one that
+// keeps a heartbeat per replica does.
+type rosterTransport struct {
+	*memTransport
+	count int
+	err   error
+}
+
+func (t rosterTransport) Replicas(context.Context) (int, error) { return t.count, t.err }
+
+// Only a transport with a roster can count the replicas. Without one the
+// relay reports this replica alone and says the count is not known, so a
+// caller never mistakes a single-instance answer for a measured one.
+func TestRelay_Replicas(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport cluster.Transport
+		wantN     int
+		wantKnown bool
+	}{
+		{name: "no transport", wantN: 1, wantKnown: false},
+		{name: "a transport without a roster", transport: newMemTransport(&board{}), wantN: 1, wantKnown: false},
+		{name: "a roster", transport: rosterTransport{memTransport: newMemTransport(&board{}), count: 3}, wantN: 3, wantKnown: true},
+		{name: "a roster that fails", transport: rosterTransport{memTransport: newMemTransport(&board{}), err: errors.New("store unreachable")}, wantN: 1, wantKnown: false},
+		{name: "a roster that counts none", transport: rosterTransport{memTransport: newMemTransport(&board{}), count: 0}, wantN: 1, wantKnown: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			r := cluster.NewRelay("replica-a", nil)
+			if tt.transport != nil {
+				r.Attach(ctx, tt.transport)
+			}
+			n, known := r.Replicas(ctx)
+			if n != tt.wantN || known != tt.wantKnown {
+				t.Errorf("Replicas() = %d, %v, want %d, %v", n, known, tt.wantN, tt.wantKnown)
+			}
+		})
+	}
+}

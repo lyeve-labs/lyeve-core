@@ -65,7 +65,7 @@ var capPolicy = map[string]core.Capability{
 	"error-tracking":       core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"events":               core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
 	"flow":                 core.CapDBRead | core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapFlowRegistry,
-	"goroutine-engine":     core.CapRoutes,
+	"goroutine-engine":     core.CapRawDB | core.CapRoutes,
 	"graphql":              core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes,
 	"grpc":                 core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapConfigSecret | core.CapSessionKey,
 	"idempotency":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
