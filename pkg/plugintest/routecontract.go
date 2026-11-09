@@ -135,8 +135,8 @@ var paramLocations = map[string]bool{"path": true, "query": true, "header": true
 // docFaults reports what in a route's Doc would publish a document a client
 // cannot use: a parameter in no place OpenAPI knows, a path parameter the
 // pattern does not hold, a response under a number that is not an HTTP
-// status, or a response media type the document leaves out, lists twice or
-// has no success response to put on.
+// status, a response media type the document leaves out, lists twice or
+// has no success response to put on, or an effect the document leaves out.
 func docFaults(pattern string, d *core.RouteDoc) []string {
 	segments := map[string]bool{}
 	for _, seg := range strings.Split(pattern, "/") {
@@ -175,8 +175,46 @@ func docFaults(pattern string, d *core.RouteDoc) []string {
 	if len(d.ResponseMediaTypes) > 0 && !documentsASuccessBody(d.Responses) {
 		out = append(out, "documents response media types, and none of its responses is a success that carries a body, so the document shows them nowhere")
 	}
+	if d.Effect != "" && !d.Effect.Valid() {
+		out = append(out, fmt.Sprintf("documents effect %q, which is not read, draft, write, delete or outbound, so the document leaves it out", d.Effect))
+	}
 	sort.Strings(out)
 	return out
+}
+
+// RequireRouteDescriptions holds a plugin's count of undescribed routes to
+// undescribed. A route is described when its Doc names an operation id and
+// one of the five effects, which is what a client or a model needs to call it
+// by name and to know whether it changes data. Above the count a route was
+// added without a description. Below it the count has to come down to the
+// new number, so it only falls. Two routes sharing an operation id fail too,
+// because the document keeps the id on the first and drops it from the other.
+func RequireRouteDescriptions(t T, routes []core.RouteDecl, undescribed int) {
+	t.Helper()
+	owner := map[string]string{}
+	var missing []string
+	for _, r := range routes {
+		route := r.Method + " " + r.Pattern
+		var d core.RouteDoc
+		if r.Doc != nil {
+			d = *r.Doc
+		}
+		if d.OperationID != "" {
+			if first, taken := owner[d.OperationID]; taken {
+				t.Errorf("%s and %s share the operation id %q", first, route, d.OperationID)
+			}
+			owner[d.OperationID] = route
+		}
+		if d.OperationID == "" || !d.Effect.Valid() {
+			missing = append(missing, route)
+		}
+	}
+	switch {
+	case len(missing) > undescribed:
+		t.Errorf("%d routes have no operation id or no effect, more than the %d allowed. Describe the new ones among: %s", len(missing), undescribed, strings.Join(missing, ", "))
+	case len(missing) < undescribed:
+		t.Errorf("%d routes have no operation id or no effect, fewer than the %d allowed. Lower the count to %d", len(missing), undescribed, len(missing))
+	}
 }
 
 // documentsASuccessBody reports whether a Doc's responses hold a 2xx that

@@ -72,6 +72,7 @@ func TestAssertRouteContract_EachRuleFires(t *testing.T) {
 		{"doc media type not type/subtype", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "csv"}}}}, "not type/subtype"},
 		{"doc media type twice", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}, {MediaType: "text/csv; charset=utf-8"}}}}, "twice"},
 		{"doc media types with no body", core.RouteDecl{Method: "DELETE", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Responses: map[int]string{204: "Deleted", 404: "Not found"}, ResponseMediaTypes: []core.RouteMediaType{{MediaType: "text/csv"}}}}, "carries a body"},
+		{"doc effect unknown", core.RouteDecl{Method: "GET", Pattern: "/api/x", Handler: ok, Group: core.GroupAdmin, Doc: &core.RouteDoc{Effect: "harmless"}}, "not read, draft, write, delete or outbound"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -131,5 +132,46 @@ func TestAssertRouteContract_RefusesAGrantOnASessionOnlyRoute(t *testing.T) {
 	})
 	if !strings.Contains(other.joined(), "session only") {
 		t.Errorf("expected a session-only complaint, got:\n%s", other.joined())
+	}
+}
+
+func TestRequireRouteDescriptions_HoldsTheCount(t *testing.T) {
+	described := core.RouteDecl{Method: "GET", Pattern: "/api/admin/widgets", Handler: ok, Group: core.GroupAdmin,
+		Doc: &core.RouteDoc{OperationID: "listWidgets", Effect: core.EffectRead}}
+	noEffect := core.RouteDecl{Method: "POST", Pattern: "/api/admin/widgets", Handler: ok, Group: core.GroupAdmin,
+		Doc: &core.RouteDoc{OperationID: "createWidget"}}
+	unknownEffect := core.RouteDecl{Method: "PUT", Pattern: "/api/admin/widgets/{id}", Handler: ok, Group: core.GroupAdmin,
+		Doc: &core.RouteDoc{OperationID: "updateWidget", Effect: "harmless"}}
+	noDoc := core.RouteDecl{Method: "DELETE", Pattern: "/api/admin/widgets/{id}", Handler: ok, Group: core.GroupAdmin}
+	routes := []core.RouteDecl{described, noEffect, unknownEffect, noDoc}
+
+	r := &recordingT{}
+	RequireRouteDescriptions(r, routes, 3)
+	if len(r.errs) != 0 {
+		t.Fatalf("three undescribed routes against a count of three: %v", r.errs)
+	}
+
+	r = &recordingT{}
+	RequireRouteDescriptions(r, routes, 2)
+	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "more than the 2 allowed") || !strings.Contains(r.errs[0], "DELETE /api/admin/widgets/{id}") {
+		t.Errorf("a route added without a description: %v", r.errs)
+	}
+
+	r = &recordingT{}
+	RequireRouteDescriptions(r, routes, 5)
+	if len(r.errs) != 1 || !strings.Contains(r.errs[0], "Lower the count to 3") {
+		t.Errorf("a count left above the routes it counts: %v", r.errs)
+	}
+}
+
+func TestRequireRouteDescriptions_RefusesASharedOperationID(t *testing.T) {
+	doc := func(id string) *core.RouteDoc { return &core.RouteDoc{OperationID: id, Effect: core.EffectRead} }
+	r := &recordingT{}
+	RequireRouteDescriptions(r, []core.RouteDecl{
+		{Method: "GET", Pattern: "/api/admin/widgets", Handler: ok, Group: core.GroupAdmin, Doc: doc("listWidgets")},
+		{Method: "GET", Pattern: "/api/admin/widgets/archive", Handler: ok, Group: core.GroupAdmin, Doc: doc("listWidgets")},
+	}, 0)
+	if len(r.errs) != 1 || !strings.Contains(r.errs[0], `share the operation id "listWidgets"`) {
+		t.Errorf("two routes named alike: %v", r.errs)
 	}
 }

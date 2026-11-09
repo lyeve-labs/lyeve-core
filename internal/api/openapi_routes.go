@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,6 +54,24 @@ func requiringRoles(op *openAPIOperation, roles ...string) *openAPIOperation {
 	return op
 }
 
+// xEffect is what calling the route does to the engine's data, one of the
+// values core.Effect names. An operation without it states nothing, and a
+// caller has to assume it changes data.
+const xEffect = "x-effect"
+
+// describing names the operation and records its effect. An effect that is
+// not one of the five is left out rather than published.
+func describing(op *openAPIOperation, id string, effect core.Effect) *openAPIOperation {
+	op.OperationID = id
+	if effect.Valid() {
+		if op.Extensions == nil {
+			op.Extensions = map[string]any{}
+		}
+		op.Extensions[xEffect] = effect
+	}
+	return op
+}
+
 func schemaPathParam(collections []string) openAPIParameter {
 	p := openAPIParameter{
 		Name:        "schema",
@@ -95,6 +114,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
 	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.", Schema: map[string]any{"type": "string"}}
+	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
 	err400 := map[string]any{"description": "A query parameter that cannot be read"}
 	err503Locale := map[string]any{"description": "The translations could not be read"}
 	err422 := map[string]any{"description": "Validation failed"}
@@ -107,8 +127,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0}},
-				populate, depth, locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
+				filters, populate, depth, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
@@ -205,6 +225,112 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema, id},
 			Responses:  map[string]any{"200": ok200, "401": err401, "404": err404},
 		}, writers...),
+	}
+}
+
+// engineOperation names one of the engine's own operations and states its
+// effect.
+type engineOperation struct {
+	method, path, id string
+	effect           core.Effect
+}
+
+// engineOperations is every operation the engine documents itself. Signing in
+// counts as a write, because it starts a session. An audit entry or a rate
+// limit counter a handler records on the side does not make it a write.
+var engineOperations = []engineOperation{
+	{"get", "/api/v1/content/{schema}", "listContent", core.EffectRead},
+	{"post", "/api/v1/content/{schema}", "createContent", core.EffectWrite},
+	{"get", "/api/v1/content/{schema}/cursor", "listContentByCursor", core.EffectRead},
+	{"get", "/api/v1/content/{schema}/stream", "streamContentChanges", core.EffectRead},
+	{"post", "/api/v1/content/{schema}/bulk", "createContentInBulk", core.EffectWrite},
+	{"get", "/api/v1/content/{schema}/{id}", "getContent", core.EffectRead},
+	{"put", "/api/v1/content/{schema}/{id}", "updateContent", core.EffectWrite},
+	{"delete", "/api/v1/content/{schema}/{id}", "deleteContent", core.EffectDelete},
+	{"get", "/api/v1/content/{schema}/{id}/relations/{field}", "listContentRelations", core.EffectRead},
+	{"put", "/api/v1/content/{schema}/{id}/relations/{field}", "replaceContentRelations", core.EffectWrite},
+	{"get", "/api/v1/content/{schema}/{id}/revisions", "listContentRevisions", core.EffectRead},
+	{"put", "/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore", "restoreContentRevision", core.EffectWrite},
+	{"put", "/api/v1/content/{schema}/{id}/publish", "publishContent", core.EffectWrite},
+	{"put", "/api/v1/content/{schema}/{id}/unpublish", "unpublishContent", core.EffectWrite},
+	{"get", "/api/v1/delivery/{schema}", "listDeliveredContent", core.EffectRead},
+	{"get", "/api/v1/delivery/{schema}/{id}", "getDeliveredContent", core.EffectRead},
+	{"get", "/api/v1/schemas", "listContentTypes", core.EffectRead},
+	{"get", "/api/v1/schemas/{name}", "getContentType", core.EffectRead},
+	{"post", "/api/v1/auth/token", "createAccessToken", core.EffectWrite},
+	{"get", "/api/v1/health", "getHealth", core.EffectRead},
+	{"get", "/api/v1/ready", "getReadiness", core.EffectRead},
+	{"get", "/.well-known/jwks.json", "getSigningKeys", core.EffectRead},
+	{"get", "/robots.txt", "getRobotsTxt", core.EffectRead},
+
+	{"get", "/api/admin/setup", "getSetupStatus", core.EffectRead},
+	{"post", "/api/admin/setup", "completeSetup", core.EffectWrite},
+	{"get", "/api/admin/auth/sign-in-routes", "listSignInRoutes", core.EffectRead},
+	{"post", "/api/admin/auth/login", "signIn", core.EffectWrite},
+	{"post", "/api/admin/auth/logout", "signOut", core.EffectWrite},
+	{"post", "/api/admin/auth/mfa-verify", "verifyMFAChallenge", core.EffectWrite},
+	{"post", "/api/admin/auth/refresh", "refreshSession", core.EffectWrite},
+	{"get", "/api/admin/auth/me", "getCurrentUser", core.EffectRead},
+	{"get", "/api/admin/auth/memberships", "listMemberships", core.EffectRead},
+	{"get", "/api/admin/auth/provider-window", "getProviderWindow", core.EffectRead},
+	{"put", "/api/admin/auth/provider-window", "setProviderWindow", core.EffectWrite},
+	{"post", "/api/admin/auth/device", "startDeviceSignIn", core.EffectWrite},
+	{"post", "/api/admin/auth/device/token", "exchangeDeviceCode", core.EffectWrite},
+	{"get", "/api/admin/auth/device/{user_code}", "getDeviceSignIn", core.EffectRead},
+	{"post", "/api/admin/auth/device/{user_code}/approve", "approveDeviceSignIn", core.EffectWrite},
+	{"post", "/api/admin/auth/device/{user_code}/deny", "denyDeviceSignIn", core.EffectWrite},
+
+	{"get", "/api/admin/users", "listUsers", core.EffectRead},
+	{"post", "/api/admin/users", "createUser", core.EffectWrite},
+	{"delete", "/api/admin/users/{id}", "deleteUser", core.EffectDelete},
+	{"put", "/api/admin/users/{id}/password", "setUserPassword", core.EffectWrite},
+	{"put", "/api/admin/users/{id}/roles", "setUserRoles", core.EffectWrite},
+	{"put", "/api/admin/users/{id}/state", "setUserState", core.EffectWrite},
+	{"get", "/api/admin/admin-tokens", "listAdminTokens", core.EffectRead},
+	{"post", "/api/admin/admin-tokens", "createAdminToken", core.EffectWrite},
+	{"get", "/api/admin/admin-tokens/grants", "listAdminTokenGrants", core.EffectRead},
+	{"post", "/api/admin/admin-tokens/{id}/rotate", "rotateAdminToken", core.EffectWrite},
+	{"delete", "/api/admin/admin-tokens/{id}", "revokeAdminToken", core.EffectDelete},
+	{"get", "/api/admin/admin-tokens/{id}/requests", "listAdminTokenRequests", core.EffectRead},
+	{"get", "/api/admin/api-key-scopes", "listApiKeyScopes", core.EffectRead},
+
+	{"get", "/api/admin/schemas/export", "exportContentTypes", core.EffectRead},
+	{"post", "/api/admin/schemas/import", "importContentTypes", core.EffectWrite},
+	{"post", "/api/admin/gdpr/export", "exportSubjectData", core.EffectRead},
+	{"post", "/api/admin/gdpr/erase", "eraseSubjectData", core.EffectDelete},
+	{"post", "/api/admin/gdpr/subject-digests", "listSubjectDigests", core.EffectRead},
+
+	{"get", "/api/admin/config", "getConfig", core.EffectRead},
+	{"put", "/api/admin/config", "updateConfig", core.EffectWrite},
+	{"get", "/api/admin/plugins/status", "listPluginStatus", core.EffectRead},
+	{"get", "/api/admin/plugins/running", "listRunningPlugins", core.EffectRead},
+	{"get", "/api/admin/plugins/{name}/config", "getPluginConfig", core.EffectRead},
+	{"put", "/api/admin/plugins/{name}/config", "updatePluginConfig", core.EffectWrite},
+	{"post", "/api/admin/plugins/{name}/config/reset", "resetPluginConfig", core.EffectDelete},
+	{"get", "/api/admin/plugins/{name}/schema", "getPluginConfigSchema", core.EffectRead},
+	{"get", "/api/admin/entitlements", "getEntitlements", core.EffectRead},
+	{"get", "/api/admin/license", "getLicense", core.EffectRead},
+	{"get", "/api/admin/tenant-features/{tenant}", "getTenantFeatures", core.EffectRead},
+	{"put", "/api/admin/tenant-features/{tenant}", "setTenantFeatures", core.EffectWrite},
+	{"get", "/api/admin/security/controls", "listSecurityControls", core.EffectRead},
+
+	{"get", "/api/admin/health", "getAdminHealth", core.EffectRead},
+	{"get", "/api/admin/ready", "getAdminReadiness", core.EffectRead},
+	{"get", "/api/admin/pool/health", "getPoolHealth", core.EffectRead},
+	{"get", "/api/admin/metrics", "getMetrics", core.EffectRead},
+	{"get", "/api/admin/debug/goroutines", "listGoroutines", core.EffectRead},
+	{"get", "/api/admin/openapi.json", "getOpenAPIDocument", core.EffectRead},
+	{"get", "/api/admin/openapi/admin.json", "getAdminOpenAPIDocument", core.EffectRead},
+	{"get", "/api/admin/openapi/public.json", "getPublicOpenAPIDocument", core.EffectRead},
+}
+
+// describeEngineOperations names the engine's operations and states their
+// effects. An operation of a family this engine does not mount is skipped.
+func describeEngineOperations(paths map[string]openAPIPath) {
+	for _, e := range engineOperations {
+		if op := paths[e.path][e.method]; op != nil {
+			describing(op, e.id, e.effect)
+		}
 	}
 }
 
@@ -451,28 +577,61 @@ func pluginStatusDescription() string {
 // and pattern. A route two owners declare is therefore described by the
 // declaration that carries a Doc.
 func documentPluginRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool) {
-	documentDeclaredRoutes(paths, plugins, owners, ungated, true)
-	documentDeclaredRoutes(paths, plugins, owners, ungated, false)
+	contested := contestedOperationIDs(paths, plugins, owners)
+	documentDeclaredRoutes(paths, plugins, owners, ungated, contested, true)
+	documentDeclaredRoutes(paths, plugins, owners, ungated, contested, false)
+}
+
+// contestedOperationIDs returns the operation ids no declared route may
+// carry: each id an operation in paths already holds, and each id more than
+// one declared route names. Plugins start in an order that can change between
+// boots, so an id that went to whichever route came first would move, and a
+// client generated from one boot's document would break on the next.
+func contestedOperationIDs(paths map[string]openAPIPath, sets ...[]plugin.PluginRoutes) map[string]bool {
+	contested := map[string]bool{}
+	for _, methods := range paths {
+		for _, op := range methods {
+			if op != nil && op.OperationID != "" {
+				contested[op.OperationID] = true
+			}
+		}
+	}
+	named := map[string]bool{}
+	for _, set := range sets {
+		for _, owner := range set {
+			for _, r := range owner.Routes {
+				if r.Doc == nil || r.Doc.OperationID == "" {
+					continue
+				}
+				if named[r.Doc.OperationID] {
+					contested[r.Doc.OperationID] = true
+				}
+				named[r.Doc.OperationID] = true
+			}
+		}
+	}
+	return contested
 }
 
 // documentDeclaredRoutes writes the declared routes that carry a Doc, or the
 // ones that carry none.
-func documentDeclaredRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool, withDoc bool) {
+func documentDeclaredRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool, contested map[string]bool, withDoc bool) {
 	for _, p := range plugins {
 		feature := ""
 		if ungated == nil || !ungated(p.Name) {
 			feature = p.Name
 		}
-		documentRouteSet(paths, p.Routes, "Plugin / "+p.Name, feature, withDoc)
+		documentRouteSet(paths, p.Routes, "Plugin / "+p.Name, feature, contested, withDoc)
 	}
 	for _, o := range owners {
-		documentRouteSet(paths, o.Routes, o.Name, "", withDoc)
+		documentRouteSet(paths, o.Routes, o.Name, "", contested, withDoc)
 	}
 }
 
 // documentRouteSet writes one owner's routes, those that carry a Doc or those
-// that carry none, under tag and feature.
-func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag, feature string, withDoc bool) {
+// that carry none, under tag and feature. A route naming a contested id is
+// written without it.
+func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag, feature string, contested map[string]bool, withDoc bool) {
 	for _, r := range routes {
 		method := strings.ToLower(r.Method)
 		if method == "" || r.Pattern == "" || (r.Doc != nil) != withDoc {
@@ -484,7 +643,11 @@ func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag
 		if paths[r.Pattern][method] != nil {
 			continue
 		}
-		paths[r.Pattern][method] = declaredRouteOperation(r, tag, feature)
+		op := declaredRouteOperation(r, tag, feature)
+		if contested[op.OperationID] {
+			op.OperationID = ""
+		}
+		paths[r.Pattern][method] = op
 	}
 }
 
@@ -531,11 +694,19 @@ func applyRouteDoc(op *openAPIOperation, pattern string, d *core.RouteDoc) {
 	if len(d.Params) > 0 {
 		op.Parameters = docParameters(pattern, d.Params)
 	}
-	if d.RequestExample != nil {
+	if d.RequestExample != nil || d.RequestSchema != nil {
+		schema := map[string]any{"type": "object"}
+		if d.RequestSchema != nil {
+			schema = maps.Clone(d.RequestSchema)
+		}
+		if d.RequestExample != nil {
+			schema["example"] = d.RequestExample
+		}
 		op.RequestBody = &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{
-			"application/json": {Schema: map[string]any{"type": "object", "example": d.RequestExample}},
+			"application/json": {Schema: schema},
 		}}
 	}
+	describing(op, d.OperationID, d.Effect)
 	if len(d.Responses) > 0 {
 		op.Responses = make(map[string]any, len(d.Responses))
 		for status, description := range d.Responses {
