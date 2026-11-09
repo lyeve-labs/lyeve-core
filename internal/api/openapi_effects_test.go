@@ -173,20 +173,32 @@ func TestOpenAPI_UnknownEffectIsLeftOut(t *testing.T) {
 	assert.False(t, has, "an effect that is not one of the five is not published")
 }
 
-// A plugin naming an id the engine or an earlier route holds is documented
-// without one, so the document never names two operations alike.
-func TestOpenAPI_TakenOperationIDIsLeftOff(t *testing.T) {
+// An id two plugins name, or one the engine holds, is left off every route
+// that names it, whichever plugin starts first, so the document never names
+// two operations alike and an id never moves from one route to another.
+func TestOpenAPI_ContestedOperationIDIsLeftOffEveryRoute(t *testing.T) {
 	ok := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	doc := widgetsDoc(
-		core.RouteDecl{Method: "GET", Pattern: "/api/admin/widgets", Handler: ok, Group: core.GroupAdmin,
-			Doc: &core.RouteDoc{OperationID: "listWidgets", Effect: core.EffectRead}},
-		core.RouteDecl{Method: "GET", Pattern: "/api/admin/widgets/archive", Handler: ok, Group: core.GroupAdmin,
-			Doc: &core.RouteDoc{OperationID: "listWidgets", Effect: core.EffectRead}},
-		core.RouteDecl{Method: "GET", Pattern: "/api/admin/widgets/content", Handler: ok, Group: core.GroupAdmin,
-			Doc: &core.RouteDoc{OperationID: "listContent", Effect: core.EffectRead}},
-	)
-	assert.Equal(t, "listWidgets", doc.Paths["/api/admin/widgets"]["get"].OperationID)
-	assert.Empty(t, doc.Paths["/api/admin/widgets/archive"]["get"].OperationID)
-	assert.Empty(t, doc.Paths["/api/admin/widgets/content"]["get"].OperationID)
-	assert.Equal(t, "listContent", doc.Paths["/api/v1/content/{schema}"]["get"].OperationID)
+	read := func(pattern, id string) core.RouteDecl {
+		return core.RouteDecl{Method: "GET", Pattern: pattern, Handler: ok, Group: core.GroupAdmin,
+			Doc: &core.RouteDoc{OperationID: id, Effect: core.EffectRead}}
+	}
+	widgets := plugin.PluginRoutes{Name: "widgets", Routes: []core.RouteDecl{
+		read("/api/admin/widgets", "listItems"),
+		read("/api/admin/widgets/content", "listContent"),
+		read("/api/admin/widgets/{id}", "getWidget"),
+	}}
+	gadgets := plugin.PluginRoutes{Name: "gadgets", Routes: []core.RouteDecl{
+		read("/api/admin/gadgets", "listItems"),
+	}}
+
+	for _, order := range [][]plugin.PluginRoutes{{widgets, gadgets}, {gadgets, widgets}} {
+		paths := buildOpenAPIDoc(nil, order, openAPIOptions{}).Paths
+		assert.Empty(t, paths["/api/admin/widgets"]["get"].OperationID)
+		assert.Empty(t, paths["/api/admin/gadgets"]["get"].OperationID)
+		assert.Empty(t, paths["/api/admin/widgets/content"]["get"].OperationID)
+		assert.Equal(t, "getWidget", paths["/api/admin/widgets/{id}"]["get"].OperationID)
+		assert.Equal(t, "listContent", paths["/api/v1/content/{schema}"]["get"].OperationID)
+		assert.Equal(t, core.EffectRead, paths["/api/admin/gadgets"]["get"].Extensions[xEffect],
+			"a route that loses its id keeps its effect")
+	}
 }

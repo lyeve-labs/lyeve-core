@@ -128,7 +128,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 				{Name: "limit", In: "query", Description: "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0}},
 				filters, populate, depth, locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
@@ -236,7 +236,8 @@ type engineOperation struct {
 }
 
 // engineOperations is every operation the engine documents itself. Signing in
-// counts as a write, because it starts a session.
+// counts as a write, because it starts a session. An audit entry or a rate
+// limit counter a handler records on the side does not make it a write.
 var engineOperations = []engineOperation{
 	{"get", "/api/v1/content/{schema}", "listContent", core.EffectRead},
 	{"post", "/api/v1/content/{schema}", "createContent", core.EffectWrite},
@@ -305,7 +306,7 @@ var engineOperations = []engineOperation{
 	{"get", "/api/admin/plugins/running", "listRunningPlugins", core.EffectRead},
 	{"get", "/api/admin/plugins/{name}/config", "getPluginConfig", core.EffectRead},
 	{"put", "/api/admin/plugins/{name}/config", "updatePluginConfig", core.EffectWrite},
-	{"post", "/api/admin/plugins/{name}/config/reset", "resetPluginConfig", core.EffectWrite},
+	{"post", "/api/admin/plugins/{name}/config/reset", "resetPluginConfig", core.EffectDelete},
 	{"get", "/api/admin/plugins/{name}/schema", "getPluginConfigSchema", core.EffectRead},
 	{"get", "/api/admin/entitlements", "getEntitlements", core.EffectRead},
 	{"get", "/api/admin/license", "getLicense", core.EffectRead},
@@ -576,28 +577,61 @@ func pluginStatusDescription() string {
 // and pattern. A route two owners declare is therefore described by the
 // declaration that carries a Doc.
 func documentPluginRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool) {
-	documentDeclaredRoutes(paths, plugins, owners, ungated, true)
-	documentDeclaredRoutes(paths, plugins, owners, ungated, false)
+	contested := contestedOperationIDs(paths, plugins, owners)
+	documentDeclaredRoutes(paths, plugins, owners, ungated, contested, true)
+	documentDeclaredRoutes(paths, plugins, owners, ungated, contested, false)
+}
+
+// contestedOperationIDs returns the operation ids no declared route may
+// carry: each id an operation in paths already holds, and each id more than
+// one declared route names. Plugins start in an order that can change between
+// boots, so an id that went to whichever route came first would move, and a
+// client generated from one boot's document would break on the next.
+func contestedOperationIDs(paths map[string]openAPIPath, sets ...[]plugin.PluginRoutes) map[string]bool {
+	contested := map[string]bool{}
+	for _, methods := range paths {
+		for _, op := range methods {
+			if op != nil && op.OperationID != "" {
+				contested[op.OperationID] = true
+			}
+		}
+	}
+	named := map[string]bool{}
+	for _, set := range sets {
+		for _, owner := range set {
+			for _, r := range owner.Routes {
+				if r.Doc == nil || r.Doc.OperationID == "" {
+					continue
+				}
+				if named[r.Doc.OperationID] {
+					contested[r.Doc.OperationID] = true
+				}
+				named[r.Doc.OperationID] = true
+			}
+		}
+	}
+	return contested
 }
 
 // documentDeclaredRoutes writes the declared routes that carry a Doc, or the
 // ones that carry none.
-func documentDeclaredRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool, withDoc bool) {
+func documentDeclaredRoutes(paths map[string]openAPIPath, plugins, owners []plugin.PluginRoutes, ungated func(string) bool, contested map[string]bool, withDoc bool) {
 	for _, p := range plugins {
 		feature := ""
 		if ungated == nil || !ungated(p.Name) {
 			feature = p.Name
 		}
-		documentRouteSet(paths, p.Routes, "Plugin / "+p.Name, feature, withDoc)
+		documentRouteSet(paths, p.Routes, "Plugin / "+p.Name, feature, contested, withDoc)
 	}
 	for _, o := range owners {
-		documentRouteSet(paths, o.Routes, o.Name, "", withDoc)
+		documentRouteSet(paths, o.Routes, o.Name, "", contested, withDoc)
 	}
 }
 
 // documentRouteSet writes one owner's routes, those that carry a Doc or those
-// that carry none, under tag and feature.
-func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag, feature string, withDoc bool) {
+// that carry none, under tag and feature. A route naming a contested id is
+// written without it.
+func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag, feature string, contested map[string]bool, withDoc bool) {
 	for _, r := range routes {
 		method := strings.ToLower(r.Method)
 		if method == "" || r.Pattern == "" || (r.Doc != nil) != withDoc {
@@ -610,23 +644,11 @@ func documentRouteSet(paths map[string]openAPIPath, routes []core.RouteDecl, tag
 			continue
 		}
 		op := declaredRouteOperation(r, tag, feature)
-		if op.OperationID != "" && operationIDTaken(paths, op.OperationID) {
+		if contested[op.OperationID] {
 			op.OperationID = ""
 		}
 		paths[r.Pattern][method] = op
 	}
-}
-
-// operationIDTaken reports whether an operation already in paths carries id.
-func operationIDTaken(paths map[string]openAPIPath, id string) bool {
-	for _, methods := range paths {
-		for _, op := range methods {
-			if op != nil && op.OperationID == id {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // declaredRouteOperation documents one declared route. The security, the

@@ -339,7 +339,9 @@ type RouteDoc struct {
 }
 
 // Effect says what calling a route does to the engine's data, so a client,
-// a reviewer or a model can tell a read from a change before sending it.
+// a reviewer or a model can tell a read from a change before sending it. It
+// describes what the handler itself does, not what a subscriber to the
+// events it publishes goes on to do.
 type Effect string
 
 const (
@@ -350,7 +352,8 @@ const (
 	EffectDraft Effect = "draft"
 	// EffectWrite changes data other callers read.
 	EffectWrite Effect = "write"
-	// EffectDelete removes data.
+	// EffectDelete removes data or ends it for good, such as a revoked
+	// token or an erased person, and nothing in the API undoes it.
 	EffectDelete Effect = "delete"
 	// EffectOutbound sends data out of the engine: an email, a webhook, a
 	// request to another service.
