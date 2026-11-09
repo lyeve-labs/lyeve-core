@@ -58,6 +58,18 @@ func TestParseBundle_RejectsAMisspelledKey(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestParseBundle_KeepsHelpTextAndNoAI(t *testing.T) {
+	// A bundle moves content types between instances, and one that dropped
+	// the No AI mark would hand an AI provider a field its owner kept away
+	// from them.
+	b, err := ParseBundle([]byte("schemas:\n  - name: a\n    fields:\n      - {name: f, field_type: text, help_text: Shown under the field., no_ai: true}\n"))
+	require.NoError(t, err)
+	require.Len(t, b.Schemas, 1)
+	require.Len(t, b.Schemas[0].Fields, 1)
+	assert.Equal(t, "Shown under the field.", b.Schemas[0].Fields[0].HelpText)
+	assert.True(t, b.Schemas[0].Fields[0].NoAI)
+}
+
 func TestParseBundle_RejectsDuplicateSchemas(t *testing.T) {
 	_, err := ParseBundle([]byte(`
 schemas:
