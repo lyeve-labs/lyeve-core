@@ -445,8 +445,9 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			}
 
 			// OpenAPI spec. The public half for admins, the admin half for super
-			// admins, and /openapi.json, which answers by role.
-			r.With(requireRole("admin", "super_admin")).Get("/openapi.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIByRole, specOptions))
+			// admins, and /openapi.json, which answers every signed-in role with
+			// the operations its roles may call.
+			r.Get("/openapi.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIByRole, specOptions))
 			r.With(requireRole("admin", "super_admin")).Get("/openapi/public.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIPublic, specOptions))
 			r.With(requireRole("super_admin")).Get("/openapi/admin.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIAdmin, specOptions))
 			// Reports whether each plugin is compiled, entitled and requested,
