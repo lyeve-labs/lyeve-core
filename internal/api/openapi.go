@@ -503,6 +503,9 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		documentAdminTokens(paths)
 	}
 	documentDeviceLogin(paths)
+	// The engine's ids go in before any plugin's, so a plugin naming one of
+	// them is the route documented without it.
+	describeEngineOperations(paths)
 	documentPluginRoutes(paths, plugins, opts.OwnerRoutes, opts.Ungated)
 	annotateAdminGrants(paths, append(plugins[:len(plugins):len(plugins)], opts.OwnerRoutes...))
 	return openAPIDoc{
