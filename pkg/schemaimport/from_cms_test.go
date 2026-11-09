@@ -10,14 +10,15 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 )
 
-// noteFor returns the message recorded against one field, or "".
+// noteFor joins the messages recorded against one field, or "".
 func noteFor(conv *Conversion, schema, field string) string {
+	var out []string
 	for _, n := range conv.Notes {
 		if n.Schema == schema && n.Field == field {
-			return n.Message
+			out = append(out, n.Message)
 		}
 	}
-	return ""
+	return strings.Join(out, "\n")
 }
 
 // schemaNotes joins the messages recorded against a schema rather than one
@@ -61,7 +62,7 @@ func TestFromStrapi_MapsAttributeTypes(t *testing.T) {
 
 	want := map[string]string{
 		"title": "text", "body": "rich_text", "contact": "email", "slug": "text",
-		"views": "number", "price": "number", "live": "boolean", "born": "date",
+		"views": "integer", "price": "decimal", "live": "boolean", "born": "date",
 		"seen": "datetime", "payload": "json", "cover": "media", "kind": "text",
 	}
 	for name, fieldType := range want {
@@ -70,6 +71,98 @@ func TestFromStrapi_MapsAttributeTypes(t *testing.T) {
 	assert.True(t, fieldByName(t, s, "title").Required)
 	assert.True(t, fieldByName(t, s, "slug").Unique, "a Strapi uid is a unique slug")
 	assert.Contains(t, noteFor(conv, "article", "kind"), "not enforced by the column")
+}
+
+// A source's number type maps to the field type that holds its values
+// exactly: whole numbers to integer and fixed-point decimals to decimal. A
+// float stays number. A Strapi decimal names no precision or scale, so it
+// takes the defaults and the report says so.
+func TestImporters_MapNumberTypes(t *testing.T) {
+	strapi := func(attrType string) string {
+		return `{"kind":"collectionType","info":{"singularName":"article"},
+		  "attributes":{"amount":{"type":"` + attrType + `"}}}`
+	}
+	contentful := func(fieldType string) string {
+		return `[{"sys":{"id":"article"},"fields":[{"id":"amount","type":"` + fieldType + `"}]}]`
+	}
+	wordpress := func(acfType string) string {
+		return `[{"key":"group_1","title":"Article Fields",
+		  "location":[[{"param":"post_type","operator":"==","value":"article"}]],
+		  "fields":[{"name":"amount","type":"` + acfType + `"}]}]`
+	}
+
+	tests := []struct {
+		name     string
+		convert  func([]byte) (*Conversion, error)
+		input    string
+		want     string
+		wantNote string
+	}{
+		{name: "strapi integer", convert: FromStrapi, input: strapi("integer"), want: "integer"},
+		{name: "strapi biginteger", convert: FromStrapi, input: strapi("biginteger"), want: "integer"},
+		{name: "strapi decimal", convert: FromStrapi, input: strapi("decimal"), want: "decimal", wantNote: "decimal(18,2)"},
+		{name: "strapi float", convert: FromStrapi, input: strapi("float"), want: "number"},
+		{name: "contentful Integer", convert: FromContentful, input: contentful("Integer"), want: "integer"},
+		{name: "contentful Number", convert: FromContentful, input: contentful("Number"), want: "number"},
+		{name: "wordpress number", convert: FromWordPress, input: wordpress("number"), want: "number"},
+		{name: "wordpress range", convert: FromWordPress, input: wordpress("range"), want: "number"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conv, err := tt.convert([]byte(tt.input))
+			require.NoError(t, err)
+
+			f := fieldByName(t, schemaByName(t, conv.Bundle, "article"), "amount")
+			assert.Equal(t, tt.want, f.FieldType)
+			if tt.want == "decimal" {
+				require.NotNil(t, f.Precision, "the importer names the precision")
+				require.NotNil(t, f.Scale, "the importer names the scale")
+				assert.Equal(t, 18, *f.Precision)
+				assert.Equal(t, 2, *f.Scale)
+			}
+			if tt.wantNote == "" {
+				assert.Empty(t, noteFor(conv, "article", "amount"))
+			} else {
+				assert.Contains(t, noteFor(conv, "article", "amount"), tt.wantNote)
+			}
+		})
+	}
+}
+
+// A default is read exactly and held to the field's new type. One that does
+// not fit is dropped and reported, because the schema engine refuses a
+// definition whose default it could not store, and one refused definition
+// fails the whole import.
+func TestFromStrapi_NumberDefaults(t *testing.T) {
+	tests := []struct {
+		name     string
+		attr     string
+		want     any
+		wantNote string
+	}{
+		{name: "biginteger past 2^53 keeps every digit", attr: `{"type":"biginteger","default":9007199254740993}`, want: int64(9007199254740993)},
+		{name: "integer default is an int64", attr: `{"type":"integer","default":5}`, want: int64(5)},
+		{name: "biginteger past int64 is dropped", attr: `{"type":"biginteger","default":9223372036854775808}`, wantNote: "default 9223372036854775808 dropped"},
+		{name: "integer with a fraction is dropped", attr: `{"type":"integer","default":1.5}`, wantNote: "default 1.5 dropped"},
+		{name: "decimal takes the field's scale", attr: `{"type":"decimal","default":19.9}`, want: "19.90"},
+		{name: "decimal with three fractional digits is dropped", attr: `{"type":"decimal","default":1.005}`, wantNote: "default 1.005 dropped"},
+		{name: "float keeps its default", attr: `{"type":"float","default":1.5}`, want: 1.5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conv, err := FromStrapi([]byte(`{"kind":"collectionType","info":{"singularName":"article"},
+			  "attributes":{"amount":` + tt.attr + `}}`))
+			require.NoError(t, err)
+
+			f := fieldByName(t, schemaByName(t, conv.Bundle, "article"), "amount")
+			assert.Equal(t, tt.want, f.Default)
+			if tt.wantNote == "" {
+				assert.NotContains(t, noteFor(conv, "article", "amount"), "default")
+			} else {
+				assert.Contains(t, noteFor(conv, "article", "amount"), tt.wantNote)
+			}
+		})
+	}
 }
 
 func TestFromStrapi_MapsRelationCardinality(t *testing.T) {
@@ -176,7 +269,7 @@ func TestFromContentful_MapsFieldTypes(t *testing.T) {
 
 	s := schemaByName(t, conv.Bundle, "article")
 	want := map[string]string{
-		"title": "text", "body": "rich_text", "rich": "json", "views": "number",
+		"title": "text", "body": "rich_text", "rich": "json", "views": "integer",
 		"score": "number", "live": "boolean", "seen": "datetime",
 		"meta": "json", "place": "json", "cover": "media",
 	}
@@ -265,7 +358,7 @@ func TestFromContentful_LocalizedMarksTheField(t *testing.T) {
 	assert.False(t, fieldByName(t, s, "slug").Localized)
 	assert.Contains(t, noteFor(conv, "article", "slug"), "unique")
 	assert.False(t, fieldByName(t, s, "rank").Localized)
-	assert.Contains(t, noteFor(conv, "article", "rank"), "number")
+	assert.Contains(t, noteFor(conv, "article", "rank"), "integer")
 }
 
 func TestFromContentful_OmittedFieldsAreSkipped(t *testing.T) {

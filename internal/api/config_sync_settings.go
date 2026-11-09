@@ -187,7 +187,7 @@ func planSettings(want, stored map[string]any, prune bool) core.ConfigPlan {
 		}
 		if res := resolver.Resolve(key); !res.Overridable {
 			plan.Problems = append(plan.Problems, core.ConfigProblem{Key: key,
-				Message: "this instance takes the setting from its environment or configuration file, so a bundle cannot change it: leave it out of the export, or let the admin layer own it here"})
+				Message: "this engine takes the setting from its environment or configuration file, so a bundle cannot change it: leave it out of the export, or let the admin layer own it here"})
 			continue
 		}
 		cur, ok := stored[key]

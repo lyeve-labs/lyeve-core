@@ -267,7 +267,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 				Security:    bothAuth,
 				Parameters:  tenantParam,
 				RequestBody: jsonBody(map[string]any{"withheld": []any{"widgets"}}),
-				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "422": map[string]any{"description": "A name that is not a plugin this instance serves"}},
+				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "422": map[string]any{"description": "A name that is not a plugin this engine serves"}},
 			},
 		}
 	}
@@ -369,7 +369,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 			Tags:    []string{"Admin / Content Types"},
 			Summary: "Import content types from a bundle or another system",
 			Description: "Reports what would change. Nothing is written unless apply=true, because " +
-				"the statements a schema change generates include destructive ones.",
+				"the statements a content type change generates include destructive ones.",
 			Security: bothAuth,
 			Parameters: []openAPIParameter{
 				{Name: "from", In: "query", Schema: map[string]any{
@@ -438,7 +438,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"get": {Tags: []string{"System"}, Summary: "Liveness probe - is the process alive?", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Database unreachable"}}},
 	}
 	paths["/api/admin/ready"] = openAPIPath{
-		"get": {Tags: []string{"System"}, Summary: "Readiness probe - is the server ready to serve traffic?", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Not ready"}}},
+		"get": {Tags: []string{"System"}, Summary: "Readiness probe: is the engine ready to serve traffic?", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "503": map[string]any{"description": "Not ready"}}},
 	}
 	paths["/api/admin/metrics"] = openAPIPath{
 		"get": requiringRoles(&openAPIOperation{
@@ -509,7 +509,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		OpenAPI: "3.1.0",
 		Info: openAPIInfo{
 			Title:       "LyEve API",
-			Description: "Headless CMS - Admin API (cookie + bearer) and Content API (bearer only).",
+			Description: "A self-hosted headless CMS: the Admin API (cookie or bearer) and the Content API (bearer only).",
 			Version:     "1.0.0",
 		},
 		Servers: []openAPIServer{

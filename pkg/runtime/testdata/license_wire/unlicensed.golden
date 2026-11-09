@@ -284,7 +284,7 @@ body (json, newline):
     }
   },
   "info": {
-    "description": "Headless CMS - Admin API (cookie + bearer) and Content API (bearer only).",
+    "description": "A self-hosted headless CMS: the Admin API (cookie or bearer) and the Content API (bearer only).",
     "title": "LyEve API",
     "version": "1.0.0"
   },
@@ -1660,7 +1660,7 @@ body (json, newline):
             "cookieAuth": []
           }
         ],
-        "summary": "Readiness probe - is the server ready to serve traffic?",
+        "summary": "Readiness probe: is the engine ready to serve traffic?",
         "tags": [
           "System"
         ]
@@ -1733,7 +1733,7 @@ body (json, newline):
     },
     "/api/admin/schemas/import": {
       "post": {
-        "description": "Reports what would change. Nothing is written unless apply=true, because the statements a schema change generates include destructive ones.",
+        "description": "Reports what would change. Nothing is written unless apply=true, because the statements a content type change generates include destructive ones.",
         "parameters": [
           {
             "in": "query",
@@ -2344,7 +2344,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2400,11 +2400,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -2429,7 +2441,7 @@ body (json, newline):
       "post": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2482,7 +2494,7 @@ body (json, newline):
       "post": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2539,7 +2551,7 @@ body (json, newline):
         "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2575,11 +2587,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -2604,10 +2628,10 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the content type, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the content type, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the content type, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2651,7 +2675,7 @@ body (json, newline):
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The collection the record belongs to.",
+                                "description": "The content type the record belongs to.",
                                 "type": "string"
                               }
                             },
@@ -2679,7 +2703,7 @@ body (json, newline):
                       "type": "string"
                     },
                     "event": {
-                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "description": "Absent on a change. Sent only on the last event, when the engine ends the stream.",
                       "enum": [
                         "error"
                       ],
@@ -2707,7 +2731,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream changes to the collection",
+        "summary": "Stream changes to the content type",
         "tags": [
           "Content API / Content"
         ]
@@ -2717,7 +2741,7 @@ body (json, newline):
       "delete": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2765,7 +2789,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2810,11 +2834,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -2839,7 +2875,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2905,7 +2941,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2955,7 +2991,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -2974,7 +3010,7 @@ body (json, newline):
             }
           },
           {
-            "description": "A relation field of the collection",
+            "description": "A relation field of the content type",
             "in": "path",
             "name": "field",
             "required": true,
@@ -3007,7 +3043,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3026,7 +3062,7 @@ body (json, newline):
             }
           },
           {
-            "description": "A relation field of the collection",
+            "description": "A relation field of the content type",
             "in": "path",
             "name": "field",
             "required": true,
@@ -3082,7 +3118,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3128,7 +3164,7 @@ body (json, newline):
         "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3194,7 +3230,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3242,10 +3278,10 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
         "parameters": [
           {
-            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3277,7 +3313,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked content type, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
             "in": "query",
             "name": "populate",
             "required": false,
@@ -3286,7 +3322,7 @@ body (json, newline):
             }
           },
           {
-            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "description": "How many levels of belongs_to relations into marked content types to resolve. Other relations are not resolved.",
             "in": "query",
             "name": "depth",
             "required": false,
@@ -3294,6 +3330,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a content type that is not marked and a field the content type does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -3308,13 +3353,13 @@ body (json, newline):
             "description": "A parameter outside the grammar, or a request that carries a credential"
           },
           "404": {
-            "description": "No such record, or a collection that is not marked for public delivery"
+            "description": "No such record, or a content type that is not marked for public delivery"
           },
           "429": {
             "description": "Too many requests from this address"
           },
           "503": {
-            "description": "The collection's definition or a related record could not be read"
+            "description": "The content type's definition or a related record could not be read"
           }
         },
         "summary": "List published records",
@@ -3325,10 +3370,10 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}/{id}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
         "parameters": [
           {
-            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3347,7 +3392,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked content type, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
             "in": "query",
             "name": "populate",
             "required": false,
@@ -3356,7 +3401,7 @@ body (json, newline):
             }
           },
           {
-            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "description": "How many levels of belongs_to relations into marked content types to resolve. Other relations are not resolved.",
             "in": "query",
             "name": "depth",
             "required": false,
@@ -3364,6 +3409,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a content type that is not marked and a field the content type does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -3378,13 +3432,13 @@ body (json, newline):
             "description": "A parameter outside the grammar, or a request that carries a credential"
           },
           "404": {
-            "description": "No such record, or a collection that is not marked for public delivery"
+            "description": "No such record, or a content type that is not marked for public delivery"
           },
           "429": {
             "description": "Too many requests from this address"
           },
           "503": {
-            "description": "The collection's definition or a related record could not be read"
+            "description": "The content type's definition or a related record could not be read"
           }
         },
         "summary": "Get a published record",
@@ -3450,9 +3504,9 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "List collections",
+        "summary": "List content types",
         "tags": [
-          "Content API / Schemas"
+          "Content API / Content Types"
         ]
       }
     },
@@ -3484,9 +3538,9 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Get a collection's definition",
+        "summary": "Get a content type's definition",
         "tags": [
-          "Content API / Schemas"
+          "Content API / Content Types"
         ]
       }
     },
@@ -3613,7 +3667,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3669,11 +3723,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -3698,7 +3764,7 @@ body (json, newline):
       "post": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3751,7 +3817,7 @@ body (json, newline):
       "post": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3808,7 +3874,7 @@ body (json, newline):
         "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3844,11 +3910,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -3873,10 +3951,10 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
-        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the collection, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the collection, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the collection, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
+        "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the content type, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the content type, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the content type, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -3920,7 +3998,7 @@ body (json, newline):
                                 "type": "string"
                               },
                               "schema": {
-                                "description": "The collection the record belongs to.",
+                                "description": "The content type the record belongs to.",
                                 "type": "string"
                               }
                             },
@@ -3948,7 +4026,7 @@ body (json, newline):
                       "type": "string"
                     },
                     "event": {
-                      "description": "Absent on a change. Sent only on the last event, when the server ends the stream.",
+                      "description": "Absent on a change. Sent only on the last event, when the engine ends the stream.",
                       "enum": [
                         "error"
                       ],
@@ -3976,7 +4054,7 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Stream changes to the collection",
+        "summary": "Stream changes to the content type",
         "tags": [
           "Content API / Content"
         ]
@@ -3986,7 +4064,7 @@ body (json, newline):
       "delete": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4034,7 +4112,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4079,11 +4157,23 @@ body (json, newline):
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "A query parameter that cannot be read"
           },
           "401": {
             "description": "Unauthorized"
@@ -4108,7 +4198,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4174,7 +4264,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4224,7 +4314,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4243,7 +4333,7 @@ body (json, newline):
             }
           },
           {
-            "description": "A relation field of the collection",
+            "description": "A relation field of the content type",
             "in": "path",
             "name": "field",
             "required": true,
@@ -4276,7 +4366,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4295,7 +4385,7 @@ body (json, newline):
             }
           },
           {
-            "description": "A relation field of the collection",
+            "description": "A relation field of the content type",
             "in": "path",
             "name": "field",
             "required": true,
@@ -4351,7 +4441,7 @@ body (json, newline):
       "get": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4397,7 +4487,7 @@ body (json, newline):
         "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4463,7 +4553,7 @@ body (json, newline):
       "put": {
         "parameters": [
           {
-            "description": "Collection name, as listed by GET /api/v1/schemas.",
+            "description": "Content type name, as listed by GET /api/v1/schemas.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4511,10 +4601,10 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
         "parameters": [
           {
-            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4546,7 +4636,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked content type, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
             "in": "query",
             "name": "populate",
             "required": false,
@@ -4555,7 +4645,7 @@ body (json, newline):
             }
           },
           {
-            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "description": "How many levels of belongs_to relations into marked content types to resolve. Other relations are not resolved.",
             "in": "query",
             "name": "depth",
             "required": false,
@@ -4563,6 +4653,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a content type that is not marked and a field the content type does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -4577,13 +4676,13 @@ body (json, newline):
             "description": "A parameter outside the grammar, or a request that carries a credential"
           },
           "404": {
-            "description": "No such record, or a collection that is not marked for public delivery"
+            "description": "No such record, or a content type that is not marked for public delivery"
           },
           "429": {
             "description": "Too many requests from this address"
           },
           "503": {
-            "description": "The collection's definition or a related record could not be read"
+            "description": "The content type's definition or a related record could not be read"
           }
         },
         "summary": "List published records",
@@ -4594,10 +4693,10 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}/{id}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into collections that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
         "parameters": [
           {
-            "description": "A collection its tenant marked for public delivery, spelled as it is stored.",
+            "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
             "in": "path",
             "name": "schema",
             "required": true,
@@ -4616,7 +4715,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked collection, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
+            "description": "Relation fields to resolve inline, comma-separated, at most 8, each a path of at most 2 dot-separated segments. Each segment names a belongs_to relation into a marked content type, and anything else, a wildcard or a field mask included, is refused. A related record that is not published reads as null.",
             "in": "query",
             "name": "populate",
             "required": false,
@@ -4625,7 +4724,7 @@ body (json, newline):
             }
           },
           {
-            "description": "How many levels of belongs_to relations into marked collections to resolve. Other relations are not resolved.",
+            "description": "How many levels of belongs_to relations into marked content types to resolve. Other relations are not resolved.",
             "in": "query",
             "name": "depth",
             "required": false,
@@ -4633,6 +4732,15 @@ body (json, newline):
               "maximum": 2,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at, so the list may not name them. Each name appears once, with no spaces around it. A field marked private, a relation into a content type that is not marked and a field the content type does not have are refused alike.",
+            "in": "query",
+            "name": "fields",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -4647,13 +4755,13 @@ body (json, newline):
             "description": "A parameter outside the grammar, or a request that carries a credential"
           },
           "404": {
-            "description": "No such record, or a collection that is not marked for public delivery"
+            "description": "No such record, or a content type that is not marked for public delivery"
           },
           "429": {
             "description": "Too many requests from this address"
           },
           "503": {
-            "description": "The collection's definition or a related record could not be read"
+            "description": "The content type's definition or a related record could not be read"
           }
         },
         "summary": "Get a published record",
@@ -4719,9 +4827,9 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "List collections",
+        "summary": "List content types",
         "tags": [
-          "Content API / Schemas"
+          "Content API / Content Types"
         ]
       }
     },
@@ -4753,9 +4861,9 @@ body (json, newline):
             "bearerAuth": []
           }
         ],
-        "summary": "Get a collection's definition",
+        "summary": "Get a content type's definition",
         "tags": [
-          "Content API / Schemas"
+          "Content API / Content Types"
         ]
       }
     },

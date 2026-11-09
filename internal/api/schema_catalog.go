@@ -48,7 +48,7 @@ func refuseCatalog(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, core.ErrNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 	case errors.Is(err, core.ErrSchemaNotAllowed):
-		httpx.ErrorReq(w, r, http.StatusForbidden, "schema not allowed for this credential")
+		httpx.ErrorReq(w, r, http.StatusForbidden, "content type not allowed for this credential")
 	case errors.Is(err, core.ErrScopeDenied):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "insufficient scope")
 	case errors.Is(err, core.ErrPermissionDenied):
@@ -68,7 +68,7 @@ type schemaDeprecation struct {
 
 var withLocalizationDeprecated = schemaDeprecation{
 	Option:  "with_localization",
-	Message: "with_localization is superseded by translations: content reads take a locale and a registered localizer merges the entry's translation. The _locale column stays where it exists and the flag is still accepted, but new schemas should not set it.",
+	Message: "with_localization is superseded by translations: content reads take a locale and a registered localizer merges the entry's translation. The _locale column stays where it exists and the flag is still accepted, but new content types should not set it.",
 }
 
 // schemaCatalogResponse is one content type as the content API states it.
@@ -93,7 +93,7 @@ func schemaCatalogEntry(sc *domain.Schema) schemaCatalogResponse {
 func (h *schemaCatalog) noEngine(w http.ResponseWriter, r *http.Request) bool {
 	if core.NoSchemaEngine(h.source) {
 		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
-			"this install has no schema engine, so it cannot describe content types")
+			"no schema engine is installed, so the engine cannot describe content types")
 		return true
 	}
 	return false
@@ -113,7 +113,7 @@ func (h *schemaCatalog) List(w http.ResponseWriter, r *http.Request) {
 	}
 	schemas, err := h.source.List(r.Context())
 	if err != nil {
-		httpx.StoreError(w, r, err, "failed to list schemas")
+		httpx.StoreError(w, r, err, "failed to list content types")
 		return
 	}
 	out := make([]schemaCatalogResponse, 0, len(schemas))
@@ -149,10 +149,10 @@ func (h *schemaCatalog) Get(w http.ResponseWriter, r *http.Request) {
 	sc, err := h.source.GetByName(r.Context(), name)
 	if err != nil {
 		if errors.Is(err, domain.ErrNotFound) {
-			httpx.ErrorReq(w, r, http.StatusNotFound, "schema not found")
+			httpx.ErrorReq(w, r, http.StatusNotFound, "content type not found")
 			return
 		}
-		httpx.StoreError(w, r, err, "failed to load schema")
+		httpx.StoreError(w, r, err, "failed to load content type")
 		return
 	}
 	respond(w, http.StatusOK, schemaCatalogEntry(sc))

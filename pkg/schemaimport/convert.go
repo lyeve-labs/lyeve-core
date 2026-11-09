@@ -1,6 +1,8 @@
 package schemaimport
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -8,6 +10,7 @@ import (
 	"unicode"
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Converting definitions written for another system.
@@ -209,3 +212,40 @@ func (b *builder) add(rawName string, f domain.SchemaField) string {
 }
 
 func (b *builder) done() domain.Schema { return b.schema }
+
+// sourceDefault decodes a source's default for a field that is not an
+// integer or a decimal, with numbers as float64.
+func sourceDefault(raw json.RawMessage) any {
+	var v any
+	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	return v
+}
+
+// exactDefault decodes a source's default for an integer or decimal field
+// with every digit it was written with, as the value the field stores. A
+// default the field cannot hold is dropped and reported, because the schema
+// engine refuses a definition whose default does not fit, and one refused
+// definition fails the whole import.
+func exactDefault(conv *Conversion, schema, field string, f domain.SchemaField, raw json.RawMessage) any {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var v any
+	if len(raw) == 0 || dec.Decode(&v) != nil || v == nil {
+		return nil
+	}
+	if f.FieldType == "integer" {
+		if n, err := core.IntegerValue(v); err == nil {
+			return n
+		}
+		conv.note(schema, field, "default %s dropped: an integer field holds whole numbers within the int64 range", raw)
+		return nil
+	}
+	precision, scale := core.DecimalSpec(f)
+	if d, err := core.DecimalValue(v, precision, scale); err == nil {
+		return d
+	}
+	conv.note(schema, field, "default %s dropped: it does not fit decimal(%d,%d)", raw, precision, scale)
+	return nil
+}

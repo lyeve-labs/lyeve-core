@@ -501,7 +501,7 @@ func streamEndReason(err error) string {
 	case errors.Is(err, errNoCaller):
 		return "authentication required"
 	case errors.Is(err, errSchemaNotAllowed):
-		return "schema not allowed for this credential"
+		return "content type not allowed for this credential"
 	case errors.Is(err, errScopeDenied):
 		return "insufficient scope"
 	case errors.Is(err, errPermissionDenied):

@@ -42,7 +42,7 @@ func TestSchemaImport_RequiresATenant(t *testing.T) {
 
 				require.Equal(t, http.StatusBadRequest, rec.Code, "query %q: %s", query, rec.Body.String())
 				msg, code := refusalOf(t, rec)
-				assert.Equal(t, "schema definitions belong to a tenant, and the request names none", msg)
+				assert.Equal(t, "content type definitions belong to a tenant, and the request names none", msg)
 				assert.Equal(t, "bad_request", code)
 				assert.Zero(t, src.n, "query %q: bytes read from a body already refused", query)
 			}

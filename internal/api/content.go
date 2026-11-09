@@ -168,18 +168,18 @@ func (h *ContentHandler) checkTransport(w http.ResponseWriter, r *http.Request, 
 		return true
 	}
 	if !s.Transports.Serves(core.TransportREST) {
-		httpx.ErrorReq(w, r, http.StatusNotFound, "schema not found")
+		httpx.ErrorReq(w, r, http.StatusNotFound, "content type not found")
 		return false
 	}
 	if contentMethodWrites(method) {
 		if !s.Transports.CanWrite(core.TransportREST) {
-			httpx.ErrorReq(w, r, http.StatusMethodNotAllowed, "schema is read-only over this transport")
+			httpx.ErrorReq(w, r, http.StatusMethodNotAllowed, "content type is read-only over this transport")
 			return false
 		}
 		return true
 	}
 	if !s.Transports.CanRead(core.TransportREST) {
-		httpx.ErrorReq(w, r, http.StatusMethodNotAllowed, "schema is write-only over this transport")
+		httpx.ErrorReq(w, r, http.StatusMethodNotAllowed, "content type is write-only over this transport")
 		return false
 	}
 	return true
@@ -264,7 +264,7 @@ func (h *ContentHandler) checkPermission(w http.ResponseWriter, r *http.Request,
 	case errors.Is(err, errNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 	case errors.Is(err, errSchemaNotAllowed):
-		httpx.ErrorReq(w, r, http.StatusForbidden, "schema not allowed for this credential")
+		httpx.ErrorReq(w, r, http.StatusForbidden, "content type not allowed for this credential")
 	case errors.Is(err, errScopeDenied):
 		httpx.ErrorReq(w, r, http.StatusForbidden, "insufficient scope")
 	case errors.Is(err, errPermissionDenied):
@@ -303,10 +303,20 @@ func (h *ContentHandler) authorize(r *http.Request, schema, action string) error
 // kernel's role-only checker is one of those: a mask only ever comes from a
 // rule, so an install with no rule store hides nothing.
 func (h *ContentHandler) maskFor(w http.ResponseWriter, r *http.Request, schema string) (func(map[string]any) map[string]any, bool) {
-	mask, err := h.fieldMask(r, schema)
+	hidden, ok := h.hiddenFor(w, r, schema)
+	if !ok {
+		return nil, false
+	}
+	return hidden.Apply, true
+}
+
+// hiddenFor is maskFor returning the hidden fields themselves, for a read
+// that checks names against the mask as well as applying it.
+func (h *ContentHandler) hiddenFor(w http.ResponseWriter, r *http.Request, schema string) (core.HiddenFields, bool) {
+	hidden, err := h.hiddenFields(r, schema)
 	switch {
 	case err == nil:
-		return mask, true
+		return hidden, true
 	case errors.Is(err, errNoCaller):
 		httpx.ErrorReq(w, r, http.StatusUnauthorized, "authentication required")
 	default:
@@ -460,7 +470,7 @@ func rulesUnavailable(w http.ResponseWriter, r *http.Request, err error) {
 	slog.ErrorContext(r.Context(), "content: content rules unavailable", "schema", chi.URLParam(r, "schema"), "err", err)
 	msg := "the content rules could not be checked, so the write was not stored"
 	if errors.Is(err, core.ErrNoContentRules) {
-		msg = "the schema engine supplies no content rules, so this install cannot accept content writes"
+		msg = "the schema engine supplies no content rules, so the engine cannot accept content writes"
 	}
 	httpx.ErrorReq(w, r, http.StatusServiceUnavailable, msg)
 }
@@ -477,7 +487,7 @@ func (h *ContentHandler) contentRules() core.ContentRules {
 func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Request, schemaName string) (*domain.Schema, bool) {
 	s, err := h.schemas.GetByName(r.Context(), schemaName)
 	if err != nil {
-		storeError(w, r, err, "failed to load schema for validation")
+		storeError(w, r, err, "failed to load content type for validation")
 		return nil, false
 	}
 	return s, true

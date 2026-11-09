@@ -48,8 +48,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Le moteur est en mode configuration et ne sert rien tant que sa configuration n'est pas complète. Ouvrez l'administration pour voir quoi définir.",
 	},
 	CodeSetupTokenInvalid: {
-		"en": "A valid setup token is required. Use LYEVE_SETUP_TOKEN, or the token the engine printed to its log at startup.",
-		"fr": "Un jeton de configuration valide est requis. Utilisez LYEVE_SETUP_TOKEN, ou le jeton que le moteur a écrit dans son journal au démarrage.",
+		"en": "A valid setup token is required. Use LYEVE_SETUP_TOKEN, or the token the engine printed to its standard error at startup.",
+		"fr": "Un jeton de configuration valide est requis. Utilisez LYEVE_SETUP_TOKEN, ou le jeton que le moteur a écrit sur sa sortie d'erreur standard au démarrage.",
 	},
 	CodePasswordTooShort: {
 		"en": "Password must be at least {min} characters.",
@@ -112,12 +112,12 @@ var translations = map[Code]map[string]string{
 		"fr": "Cette session a été révoquée.",
 	},
 	CodeRefreshNotEnabled: {
-		"en": "Refresh tokens are not enabled on this server.",
-		"fr": "Les jetons de rafraîchissement ne sont pas activés sur ce serveur.",
+		"en": "Refresh tokens are not enabled on this engine.",
+		"fr": "Les jetons de rafraîchissement ne sont pas activés sur ce moteur.",
 	},
 	CodeMFANotAvailable: {
-		"en": "Multi-factor authentication is not available on this server.",
-		"fr": "L'authentification multi-facteurs n'est pas disponible sur ce serveur.",
+		"en": "Multi-factor authentication is not available on this engine.",
+		"fr": "L'authentification multi-facteurs n'est pas disponible sur ce moteur.",
 	},
 	CodeAccountLocked: {
 		"en": "This account has been temporarily locked due to too many failed login attempts. Please try again later.",
@@ -168,8 +168,8 @@ var translations = map[Code]map[string]string{
 		"fr": "Cette fonctionnalité n'est pas disponible pour ce locataire.",
 	},
 	CodeTenantFeatureUnknown: {
-		"en": "{name} is not a plugin this instance serves.",
-		"fr": "{name} n'est pas un plugin servi par cette instance.",
+		"en": "{name} is not a plugin this engine serves.",
+		"fr": "{name} n'est pas un plugin servi par ce moteur.",
 	},
 	CodeTenantSlugInvalid: {
 		"en": "The tenant must be a slug: a lower-case letter, then letters, digits or underscores.",
@@ -178,12 +178,12 @@ var translations = map[Code]map[string]string{
 
 	// Schema
 	CodeSchemaNotFound: {
-		"en": "The requested schema was not found.",
-		"fr": "Le schéma demandé est introuvable.",
+		"en": "The requested content type was not found.",
+		"fr": "Le type de contenu demandé est introuvable.",
 	},
 	CodeMigrationFailed: {
-		"en": "The database migration failed. Check the server logs for details.",
-		"fr": "La migration de base de données a échoué. Consultez les journaux du serveur pour plus de détails.",
+		"en": "The database migration failed. Check the engine's logs for details.",
+		"fr": "La migration de base de données a échoué. Consultez les journaux du moteur pour plus de détails.",
 	},
 
 	// Content
@@ -314,6 +314,10 @@ var translations = map[Code]map[string]string{
 	CodeSchemaValidationCrossField: {
 		"en": "Cross-field validation failed: {rule}.",
 		"fr": "La validation inter-champs a échoué : {rule}.",
+	},
+	CodeSchemaValidationPrecision: {
+		"en": "The field {field} has a precision of {precision} and a scale of {scale}, so it cannot hold this value.",
+		"fr": "Le champ {field} a une précision de {precision} et une échelle de {scale} : il ne peut pas contenir cette valeur.",
 	},
 }
 

@@ -4,6 +4,44 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.61.0] - 2026-11-11
+
+### Added
+
+- Content reads take `fields`, a comma-separated list of the fields each entry's data returns, on the content list, the cursor list, a read by id and both delivery reads. A relation field keeps both its stored column and its populated record, and every entry still carries `id`, `created_at` and `updated_at`. A name the caller cannot read answers 400, whether the type has no such field or a mask hides it.
+
+### Changed
+
+- The message catalog words the refusal of a decimal value with more digits than its field holds, in English and French, from the field's precision and scale.
+- A schema import from Strapi, Contentful, JSON Schema or OpenAPI maps a whole-number type to an integer field, and a Strapi decimal to a decimal field of 18 digits with 2 after the point, which the conversion report names. Before, both imported as number. A Strapi float, a Contentful number and every WordPress field import as before. A default is kept with every digit the source wrote, and one the new field cannot hold is dropped and named in the report. The report also names a JSON Schema integer whose range reaches past 64 bits. Importing the same source again over fields first imported as number now plans a retype, which answers 409 when stored rows do not fit the new type.
+- The API's messages call what a tenant defines with fields a content type, where they said schema, and call the server the engine, where they said this instance. The French translations follow. Routes, JSON keys, error codes and stored values keep their names.
+- The API reference served at /api/openapi.json describes content types and the engine in the same words. Operation ids, paths and parameter names do not change.
+- Through the plugin releases this engine pins: the schema plugin adds the integer and decimal field types, and GraphQL, gRPC, flows and review stage conditions read and write both with every digit.
+- Through the plugin releases this engine pins: every plugin's messages name content types and the engine in the same words as the engine's own.
+
+### Removed
+
+- A content entry no longer carries `schema_name`. Every route that serves an entry names its content type in the path, and on the relations route the relation field's definition names the type it points at. A client that read the key takes the type from the path it called.
+
+### Fixed
+
+- A content list filter on a number field compares by value on every database and keeps every digit of a plain decimal, so 10 and 10.0 find the same entries and share one cached page. A filter value that is not a finite number below 10^28 now answers 400. Before, PostgreSQL and SQL Server answered such a value with 422, and MySQL compared it as 0 and returned the entries holding 0.
+- A content list filter that names a has-one, has-many or many-to-many relation answers 400, as a filter on any other unknown name does. Those relations keep their rows in another table, and the filter reached the database as a column that does not exist, which answered 503.
+- The refusal of a wrong setup token, in English and French, and the description of the setup token setting name standard error, where the generated token is written since 0.58.0. Before, they sent the reader to the log, where the token no longer appears.
+- Through the plugin releases this engine pins: reading or downloading a tenant backup archive by an id that is not a UUID answers 404 on PostgreSQL, where it answered 503.
+- Through the plugin releases this engine pins: deleting a retention policy that does not exist answers 404 and records no audit entry, where it answered 204 and recorded one.
+- Through the plugin releases this engine pins: reading a tenant backup job, run or restore test schedule, triggering a backup and triggering a restore test answer a database failure with 503, where each answered 404 as if the record did not exist.
+- Through the plugin releases this engine pins: updating or deleting a tenant backup job or restore test schedule that does not exist answers 404, where an update or a schedule delete answered 503 and a job delete answered 204.
+- Through the plugin releases this engine pins: a flow run that starts while the engine shuts down, such as a child that a `flow.call` node started without waiting, is refused and recorded as failed. Before, it kept running after the shutdown had closed the connections it used, and the shutdown's wait for running flows could panic.
+- Through the plugin releases this engine pins: updating a tenant backup job that is deleted while the update runs answers 404, where it answered 200 with the values the job had.
+- Through the plugin releases this engine pins: updating a tenant restore test schedule answers with the values it saved. When another request deleted the schedule in the meantime, a write that succeeded answered 404.
+- Through the plugin releases this engine pins: tenant, domain, membership, admin token, backup, cost, customization and migration answers, and the `cost.budget.exceeded` hook payload, give their timestamps in UTC on PostgreSQL when the engine runs with a `TZ` other than UTC. Before, they gave the engine's local offset, while the same instant read on MySQL or SQL Server, or answered by a write, was in UTC. Export file names are stamped in UTC too.
+
+### Security
+
+- Through the plugin releases this engine pins: a flow's event.publish node can no longer change a content entry through the console's adoption of its event, and checks the event type its template resolves to. An email step escapes a text body before it is sent as HTML.
+- Through the plugin releases this engine pins: reading an uploaded workbook in a bulk import no longer panics on a crafted pivot table (GO-2026-6695), and the private module and the message broker require klauspost/compress v1.20.2 (GO-2026-6865).
+
 ## [0.60.2] - 2026-11-06
 
 ### Security

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
 // Strapi content types.
@@ -35,16 +36,16 @@ type strapiSchema struct {
 }
 
 type strapiAttribute struct {
-	Type       string `json:"type"`
-	Required   bool   `json:"required"`
-	Unique     bool   `json:"unique"`
-	Default    any    `json:"default"`
-	Target     string `json:"target"`
-	Relation   string `json:"relation"`
-	TargetAttr string `json:"targetAttribute"`
-	Component  string `json:"component"`
-	Repeatable bool   `json:"repeatable"`
-	MaxLength  *int   `json:"maxLength"`
+	Type       string          `json:"type"`
+	Required   bool            `json:"required"`
+	Unique     bool            `json:"unique"`
+	Default    json.RawMessage `json:"default"`
+	Target     string          `json:"target"`
+	Relation   string          `json:"relation"`
+	TargetAttr string          `json:"targetAttribute"`
+	Component  string          `json:"component"`
+	Repeatable bool            `json:"repeatable"`
+	MaxLength  *int            `json:"maxLength"`
 }
 
 // FromStrapi converts one or more Strapi content-type schemas into a bundle.
@@ -80,7 +81,7 @@ func FromStrapi(data []byte) (*Conversion, error) {
 		// is the same shape. The difference is a rule the admin enforces, not a
 		// column.
 		if src.Kind == "singleType" {
-			conv.note(Identifier(name), "", "imported as a collection: this engine has no single-type constraint, so limit it to one entry in the admin")
+			conv.note(Identifier(name), "", "imported as an ordinary content type: this engine has no single-type constraint, so limit it to one entry in the console")
 		}
 
 		b := newBuilder(conv, name, src.Info.DisplayName)
@@ -134,7 +135,7 @@ func strapiTarget(uid string) string {
 }
 
 func strapiField(conv *Conversion, schema, attr string, a strapiAttribute, known map[string]string) (domain.SchemaField, bool) {
-	f := domain.SchemaField{Required: a.Required, Unique: a.Unique, Default: a.Default}
+	f := domain.SchemaField{Required: a.Required, Unique: a.Unique}
 
 	switch a.Type {
 	case "string":
@@ -152,7 +153,14 @@ func strapiField(conv *Conversion, schema, attr string, a strapiAttribute, known
 	case "password":
 		conv.note(schema, attr, "field dropped: passwords are not carried between systems")
 		return domain.SchemaField{}, false
-	case "integer", "biginteger", "float", "decimal":
+	case "integer", "biginteger":
+		f.FieldType = "integer"
+	case "decimal":
+		precision, scale := core.DecimalDefaultPrecision, core.DecimalDefaultScale
+		f.FieldType = "decimal"
+		f.Precision, f.Scale = &precision, &scale
+		conv.note(schema, attr, "stored as decimal(%d,%d): the Strapi definition names no precision or scale", precision, scale)
+	case "float":
 		f.FieldType = "number"
 	case "boolean":
 		f.FieldType = "boolean"
@@ -204,6 +212,11 @@ func strapiField(conv *Conversion, schema, attr string, a strapiAttribute, known
 	default:
 		f.FieldType = "json"
 		conv.note(schema, attr, "kept as json: unrecognized Strapi type %q", a.Type)
+	}
+	if f.FieldType == "integer" || f.FieldType == "decimal" {
+		f.Default = exactDefault(conv, schema, attr, f, a.Default)
+	} else {
+		f.Default = sourceDefault(a.Default)
 	}
 	return f, true
 }

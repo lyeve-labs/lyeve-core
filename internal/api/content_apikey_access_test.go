@@ -183,7 +183,7 @@ func TestContentHandler_APIKey_AccessRulesAndSchemas(t *testing.T) {
 					data, ok := e["data"].(map[string]any)
 					require.True(t, ok, "entry without data: %v", e)
 					assert.NotContains(t, data, "title", "masked field served")
-					if e["schema_name"] == "notes" || e["record_id"] != nil {
+					if strings.HasPrefix(tc.path, "/api/v1/content/notes") {
 						assert.Equal(t, "first", data["body"], "unmasked field lost")
 					}
 				}

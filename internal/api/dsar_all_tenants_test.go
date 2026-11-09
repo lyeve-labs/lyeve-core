@@ -35,7 +35,7 @@ func TestDSARExport_RefusesACrossTenantRequestItCannotAnswer(t *testing.T) {
 	}))
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
-	assert.Contains(t, rec.Body.String(), "cross-tenant export is not available on this install")
+	assert.Contains(t, rec.Body.String(), "cross-tenant export is not available on this engine")
 	assert.NotContains(t, rec.Body.String(), "plugins",
 		"a refusal must not also return a partial bundle")
 }

@@ -53,3 +53,41 @@ func TestLocalizeValidation_LeavesTheEnginesParametersAlone(t *testing.T) {
 	assert.Equal(t, map[string]any{"max": "5"}, params)
 	assert.Equal(t, "rating", got[0].Params["field"])
 }
+
+// The schema engine refuses a decimal with more digits than its field holds
+// under the precision code, and the catalog words it from the field's
+// precision and scale in the caller's locale. Both are named as values, so a
+// precision of 1 or a scale of 0 leaves no plural to agree with.
+func TestLocalizeValidation_PrecisionIsRenderedInTheLocale(t *testing.T) {
+	tests := []struct {
+		name      string
+		locale    Locale
+		precision int
+		scale     int
+		want      string
+	}{
+		{"en", LocaleEN, 5, 2, "The field price has a precision of 5 and a scale of 2, so it cannot hold this value."},
+		{"en precision 1 scale 0", LocaleEN, 1, 0, "The field price has a precision of 1 and a scale of 0, so it cannot hold this value."},
+		{"fr", LocaleFR, 5, 2, "Le champ price a une précision de 5 et une échelle de 2 : il ne peut pas contenir cette valeur."},
+		{"fr precision 1 scale 0", LocaleFR, 1, 0, "Le champ price a une précision de 1 et une échelle de 0 : il ne peut pas contenir cette valeur."},
+		{"fr-CA", Locale("fr-CA"), 5, 2, "Le champ price a une précision de 5 et une échelle de 2 : il ne peut pas contenir cette valeur."},
+		{"ja", Locale("ja"), 5, 2, "The field price has a precision of 5 and a scale of 2, so it cannot hold this value."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			errs := []core.SchemaValidationError{{
+				Field:   "price",
+				Code:    "SCHEMA_VALIDATION_PRECISION",
+				Rule:    "precision",
+				Value:   "123456.7",
+				Message: "the schema engine's own sentence",
+				Params:  map[string]any{"field": "price", "precision": tt.precision, "scale": tt.scale},
+			}}
+			got := LocalizeValidation(tt.locale, errs)
+			require.Len(t, got, 1)
+			assert.Equal(t, tt.want, got[0].Message)
+			assert.Equal(t, "SCHEMA_VALIDATION_PRECISION", got[0].Code)
+			assert.Equal(t, "precision", got[0].Rule)
+		})
+	}
+}
