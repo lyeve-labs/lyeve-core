@@ -254,21 +254,21 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	// them.
 	if opts.TenantFeatures {
 		paths["/api/admin/tenant-features/{tenant}"] = openAPIPath{
-			"get": {
+			"get": requiringRoles(&openAPIOperation{
 				Tags:       []string{"Admin / Tenant features"},
 				Summary:    "Plugins withheld from one tenant, and every plugin that could be",
 				Security:   bothAuth,
 				Parameters: tenantParam,
-				Responses:  map[string]any{"200": ok200, "400": err400, "401": err401},
-			},
-			"put": {
+				Responses:  map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403},
+			}, super...),
+			"put": requiringRoles(&openAPIOperation{
 				Tags:        []string{"Admin / Tenant features"},
 				Summary:     "Replace what is withheld from one tenant. The license stays the ceiling; an empty list gives the tenant all of it",
 				Security:    bothAuth,
 				Parameters:  tenantParam,
 				RequestBody: jsonBody(map[string]any{"withheld": []any{"widgets"}}),
-				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "422": map[string]any{"description": "A name that is not a plugin this engine serves"}},
-			},
+				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": map[string]any{"description": "A name that is not a plugin this engine serves"}},
+			}, super...),
 		}
 	}
 

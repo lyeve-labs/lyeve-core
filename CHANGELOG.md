@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The boot's warning that the pool claims a large share of the database's connections reads the limit an ordinary account can use: PostgreSQL's `max_connections` less its reserved slots, and SQL Server's `user connections` option, with no warning where that option leaves the limit to SQL Server.
 - `POST /api/admin/debug/gc-config` refuses a `gogc` above 1000 with 422 unless a memory limit below the container's or the machine's memory is set, because the heap could then outgrow the machine. A memory limit at or above that memory no longer counts as one when it refuses a negative `gogc`.
 
+### Fixed
+
+- The API reference names the `super_admin` role on both `/api/admin/tenant-features/{tenant}` operations, which only a super admin may call, and documents the 403 anyone else gets. They named no role, so a client read them as open to every signed-in caller.
+
 ## [0.61.0] - 2026-11-11
 
 ### Added
