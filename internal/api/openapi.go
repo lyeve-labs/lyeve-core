@@ -74,7 +74,7 @@ func openAPIHandler(schemas core.SchemaSource, plugins []plugin.PluginRoutes, do
 			filename = "cms-api-admin.json"
 		case openAPIByRole:
 			if !callerHasRole(r, "super_admin") {
-				doc = openAPIHalf(doc, false)
+				doc = openAPIForCaller(doc, func(role string) bool { return callerHasRole(r, role) })
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -102,6 +102,50 @@ func openAPIHalf(doc openAPIDoc, admin bool) openAPIDoc {
 		doc.Info.Description = "The content API, auth, and every route outside /api/admin."
 	}
 	return doc
+}
+
+// openAPIForCaller keeps every route outside /api/admin and, under it, the
+// operations the caller may call: those whose x-roles name a role holds
+// reports, and those that name none, which answer every signed-in role. An
+// operation only a super admin may call is left out for anyone else, so an
+// admin learns the shape of what it can call and nothing more.
+func openAPIForCaller(doc openAPIDoc, holds func(role string) bool) openAPIDoc {
+	kept := make(map[string]openAPIPath, len(doc.Paths))
+	for p, item := range doc.Paths {
+		if !isAdminPath(p) {
+			kept[p] = item
+			continue
+		}
+		ops := openAPIPath{}
+		for method, op := range item {
+			if callerMayCall(op, holds) {
+				ops[method] = op
+			}
+		}
+		if len(ops) > 0 {
+			kept[p] = ops
+		}
+	}
+	doc.Paths = kept
+	doc.Info.Title = "LyEve API"
+	doc.Info.Description = "The content API, auth, every route outside /api/admin, and the /api/admin operations the caller's role may call."
+	return doc
+}
+
+// callerMayCall reports whether an operation's x-roles leave it open to a
+// caller holding the roles holds reports. An operation that names no role
+// answers every signed-in role.
+func callerMayCall(op *openAPIOperation, holds func(role string) bool) bool {
+	roles, _ := op.Extensions[xRoles].([]string)
+	if len(roles) == 0 {
+		return true
+	}
+	for _, role := range roles {
+		if holds(role) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAdminPath(p string) bool {

@@ -85,8 +85,15 @@ func TestOpenAPISplit_TheAdminHalfIsForSuperAdminsOnly(t *testing.T) {
 
 	rr = get("/api/admin/openapi.json", admin)
 	require.Equal(t, http.StatusOK, rr.Code)
-	a, _ = openAPIPaths(t, rr)
-	assert.Zero(t, a, "the original path serves an admin the public half")
+	a, p = openAPIPaths(t, rr)
+	assert.Positive(t, a, "the original path serves an admin the admin operations its role may call")
+	assert.Positive(t, p, "and the public half")
+	var forAdmin struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &forAdmin))
+	assert.NotContains(t, forAdmin.Paths["/api/admin/users"], "get", "but no operation only a super admin may call")
+	assert.Contains(t, forAdmin.Paths["/api/admin/auth/provider-window"], "get")
 
 	rr = get("/api/admin/openapi.json", super)
 	require.Equal(t, http.StatusOK, rr.Code)
