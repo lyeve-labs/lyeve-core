@@ -507,7 +507,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "503": map[string]any{"description": "Pool unhealthy"}}}, admins...),
 	}
 	paths["/api/admin/openapi.json"] = openAPIPath{
-		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),
+		"get": {Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification as the caller may use it: the whole document for a super admin, and for any other signed-in role every route outside /api/admin and the /api/admin operations its role may call", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401}},
 	}
 	paths["/api/admin/openapi/public.json"] = openAPIPath{
 		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the content API and every route outside /api/admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),

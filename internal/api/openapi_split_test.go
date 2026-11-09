@@ -95,6 +95,20 @@ func TestOpenAPISplit_TheAdminHalfIsForSuperAdminsOnly(t *testing.T) {
 	assert.NotContains(t, forAdmin.Paths["/api/admin/users"], "get", "but no operation only a super admin may call")
 	assert.Contains(t, forAdmin.Paths["/api/admin/auth/provider-window"], "get")
 
+	// A role below admin reads the document too, cut to what it may call.
+	editor := seedUserToken(t, ctx, pool, cfg, "editor@test.com", "editor")
+	rr = get("/api/admin/openapi.json", editor)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var forEditor struct {
+		Paths map[string]map[string]json.RawMessage `json:"paths"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &forEditor))
+	assert.Contains(t, forEditor.Paths["/api/admin/auth/me"], "get", "an operation every signed-in role may call")
+	assert.NotContains(t, forEditor.Paths, "/api/admin/auth/provider-window", "an operation for admins")
+	assert.NotContains(t, forEditor.Paths["/api/admin/users"], "get")
+	rr = get("/api/admin/openapi/public.json", editor)
+	assert.Equal(t, http.StatusForbidden, rr.Code, "the two halves keep their roles")
+
 	rr = get("/api/admin/openapi.json", super)
 	require.Equal(t, http.StatusOK, rr.Code)
 	a, p = openAPIPaths(t, rr)

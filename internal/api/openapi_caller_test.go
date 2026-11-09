@@ -16,6 +16,7 @@ var roleFreeAdminOperations = []string{
 	"GET /api/admin/auth/sign-in-routes",
 	"GET /api/admin/health",
 	"GET /api/admin/license",
+	"GET /api/admin/openapi.json",
 	"GET /api/admin/plugins/running",
 	"GET /api/admin/ready",
 	"GET /api/admin/setup",

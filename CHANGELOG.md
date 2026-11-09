@@ -18,7 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Under a CPU limit of one core or less on a machine with two or more CPUs, the engine runs its scheduler on one thread, where Go's default gives two. Measured under a one-core limit, two threads served no better than one. Above one core the engine leaves Go's default. `GOMAXPROCS` and `CPU_QUOTA` still win.
 - The boot's warning that the pool claims a large share of the database's connections reads the limit an ordinary account can use: PostgreSQL's `max_connections` less its reserved slots, and SQL Server's `user connections` option, with no warning where that option leaves the limit to SQL Server.
-- `GET /api/admin/openapi.json` serves an admin the `/api/admin` operations whose `x-roles` name a role it holds, and those that name none, beside the public half it served before. An operation only a super admin may call stays out of it, and `/api/admin/openapi/admin.json` still answers super admins only.
+- `GET /api/admin/openapi.json` answers every signed-in role, where it answered admins and super admins. A caller below super admin reads every route outside `/api/admin` and the `/api/admin` operations whose `x-roles` name a role it holds or name none, where an admin read the public half alone. An operation only a super admin may call stays out of it, and `/api/admin/openapi/public.json` and `/api/admin/openapi/admin.json` keep their roles.
 - `POST /api/admin/debug/gc-config` refuses a `gogc` above 1000 with 422 unless a memory limit below the container's or the machine's memory is set, because the heap could then outgrow the machine. A memory limit at or above that memory no longer counts as one when it refuses a negative `gogc`.
 
 ### Fixed
