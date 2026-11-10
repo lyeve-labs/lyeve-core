@@ -19,7 +19,7 @@
 
 lyeve-libs = 5c1d97487d7ca335c1a4c4aaf04a26615614c984
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
-lyeve-plugin-ai = 42aaebaacf63ac162ca750648a26a4d2e68a0b32
+lyeve-plugin-ai = 71b41f8d0440d20e236b18295f280859f00870fb
 lyeve-plugin-analytics = 6516c7385f602802dbb970a45ba1e9a4bee32806
 lyeve-plugin-apianalytics = 76b4e12bedfbb3e8d14c41e11d7c139835850f31
 lyeve-plugin-apikey = 288825a3a2cc1eea8b30d495c70d875b64ebb018
