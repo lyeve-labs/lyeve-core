@@ -19,7 +19,7 @@
 
 lyeve-libs = 77ff2bd739a420f6138b8b96f0576ffbff26dadc
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
-lyeve-plugin-ai = fdc6e8726ba96a83bdc205c52ce8a58e988545c0
+lyeve-plugin-ai = 669650e0da4a1f38ebea058f6ef92967b42db87c
 lyeve-plugin-analytics = 6516c7385f602802dbb970a45ba1e9a4bee32806
 lyeve-plugin-apianalytics = 76b4e12bedfbb3e8d14c41e11d7c139835850f31
 lyeve-plugin-apikey = 288825a3a2cc1eea8b30d495c70d875b64ebb018
@@ -37,7 +37,7 @@ lyeve-plugin-device-fingerprint = 4109ecb216bbe08fdf393d67093c4e5ebdf8eb60
 lyeve-plugin-email = 7672d697f5baef461589aaea3e7be4936bd28881
 lyeve-plugin-error-tracking = ed17395ba8bf1b94991c255bf6e3278d40f2016a
 lyeve-plugin-events = 7050ae690833db4b40a780406135a6a1824e5760
-lyeve-plugin-flow = 435eb4809ede975d76e1c4205e1b2d92f995b41a
+lyeve-plugin-flow = 0eac9424465cd74a1bfd4db5e77690b10f8e981c
 lyeve-plugin-goroutine-engine = bcced994c55de692f9d88bc4d57241ade21d1efa
 lyeve-plugin-graphql = c59878fa3dfe40fe2c115a1a8bd6e0d4710841b3
 lyeve-plugin-grpc = 4e591448335638697c538d2a1cb29912c936bcec
