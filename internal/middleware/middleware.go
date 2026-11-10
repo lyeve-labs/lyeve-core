@@ -624,7 +624,10 @@ func ReadOnlyArchived(fn core.TenantArchivedFunc) func(http.Handler) http.Handle
 				return
 			}
 
-			archived, found := fn(r.Context(), slug)
+			// Never the read that takes the request's tenant connection. It
+			// runs before any handler, so a handler that streams a long
+			// answer to a write would hold that connection to the end.
+			archived, found := fn(db.WithoutTakingTenantConn(r.Context()), slug)
 			if !found || !archived {
 				next.ServeHTTP(w, r)
 				return
