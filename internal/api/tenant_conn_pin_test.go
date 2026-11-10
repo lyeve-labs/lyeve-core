@@ -30,14 +30,17 @@ import (
 const pinPoolSize = 4
 
 // pinRig is a multi-tenant API router served over HTTP on a small pool,
-// with a plugin route that streams until its client leaves and one that
-// reads once.
+// with a plugin route that streams until its client leaves, one that reads
+// once, and one that takes a write and touches no database.
 type pinRig struct {
 	srv    *httptest.Server
 	pool   db.DB
 	users  *db.UserStore
 	hooks  *hooks.Registry
 	secret string
+	// writes counts the requests the write route's handler ran for, and
+	// writesPinned those that found the request's tenant connection taken.
+	writes, writesPinned atomic.Int64
 }
 
 func newPinRig(t *testing.T, pool db.DB, opts ...RouterOption) *pinRig {
@@ -64,6 +67,14 @@ func newPinRig(t *testing.T, pool db.DB, opts ...RouterOption) *pinRig {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
+	rig := &pinRig{pool: pool, users: db.NewUserStore(pool), secret: cfg.JWTSecret}
+	write := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rig.writes.Add(1)
+		if lc := db.LazyTenantConnFromCtx(r.Context()); lc != nil && lc.Acquired() != nil {
+			rig.writesPinned.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	reg := hooks.NewRegistry()
 	router, err := NewAPIRouter(pool, cfg, reg, append([]RouterOption{WithLifetime(testLifetime(t)),
 		WithPluginRoutes([]plugin.PluginRoutes{{
@@ -71,12 +82,14 @@ func newPinRig(t *testing.T, pool db.DB, opts ...RouterOption) *pinRig {
 			Routes: []plugin.RouteDecl{
 				{Method: http.MethodGet, Pattern: "/api/v1/pin-probe/stream", Group: plugin.GroupAuth, Handler: stream},
 				{Method: http.MethodGet, Pattern: "/api/v1/pin-probe/read", Group: plugin.GroupAuth, Handler: read},
+				{Method: http.MethodPost, Pattern: "/api/v1/pin-probe/write", Group: plugin.GroupAuth, Handler: write},
 			},
 		}})}, opts...)...)
 	require.NoError(t, err)
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-	return &pinRig{srv: srv, pool: pool, users: db.NewUserStore(pool), hooks: reg, secret: cfg.JWTSecret}
+	rig.srv = httptest.NewServer(router)
+	t.Cleanup(rig.srv.Close)
+	rig.hooks = reg
+	return rig
 }
 
 // session creates a super admin in tenant and returns the user and a session
@@ -365,5 +378,66 @@ func TestContentStream_EndsWhenItsReadRuleIsWithdrawn(t *testing.T) {
 		assert.Equal(t, "event: error", next())
 		assert.Equal(t, `data: {"error":"permission denied"}`, next())
 		assert.Zero(t, rules.pinned.Load(), "the stream asked the rule on the request's tenant connection")
+	})
+}
+
+// archivedTable answers the archived check from a table in the test's own
+// database, read on the context the middleware hands it, as the tenant
+// registry does.
+func archivedTable(pool db.DB) core.TenantArchivedFunc {
+	return func(ctx context.Context, slug string) (bool, bool) {
+		row, err := pool.QueryRow(ctx, `SELECT archived FROM archived_probe WHERE slug = $1`, slug)
+		if err != nil {
+			return false, false
+		}
+		var archived int
+		if err := row.Scan(&archived); err != nil {
+			return false, false
+		}
+		return archived == 1, true
+	}
+}
+
+// post sends a POST with tok and returns the status.
+func (p *pinRig) post(t *testing.T, path, tok string) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.srv.URL+path, strings.NewReader(`{}`))
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", "application/json")
+	res, err := p.srv.Client().Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	return res.StatusCode
+}
+
+// The archived check runs before the handler of every write with a tenant,
+// and it read on the request's context, so it took the request's tenant
+// connection. A plugin route that streams a long answer to a POST then held
+// that connection to the end, and one that read on a fresh context waited for
+// a second. The check now borrows a connection for its read, so a handler
+// that touches no database finds none taken, and a write to an archived
+// tenant is still refused with 423 before the handler runs.
+func TestAPIRouter_ArchivedCheckTakesNoTenantConnection(t *testing.T) {
+	pinDialects(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		_, err := pool.Exec(ctx, `CREATE TABLE archived_probe (slug VARCHAR(64) NOT NULL, archived INT NOT NULL)`)
+		require.NoError(t, err)
+		_, err = pool.Exec(ctx, `INSERT INTO archived_probe (slug, archived) VALUES ($1, 0), ($2, 1)`, "pin_live", "pin_gone")
+		require.NoError(t, err)
+
+		rig := newPinRig(t, pool, WithArchivedChecker(archivedTable(pool)))
+		_, live := rig.session(t, "pin_live")
+		_, gone := rig.session(t, "pin_gone")
+
+		require.Equal(t, http.StatusOK, rig.post(t, "/api/v1/pin-probe/write", live))
+		require.Equal(t, int64(1), rig.writes.Load(), "the write route's handler did not run")
+		assert.Zero(t, rig.writesPinned.Load(), "the write's handler found the request's tenant connection already taken")
+		rig.requirePoolFree(t, "a write that touched no database")
+
+		assert.Equal(t, http.StatusLocked, rig.post(t, "/api/v1/pin-probe/write", gone), "a write to an archived tenant")
+		assert.Equal(t, int64(1), rig.writes.Load(), "the handler ran for a write to an archived tenant")
 	})
 }

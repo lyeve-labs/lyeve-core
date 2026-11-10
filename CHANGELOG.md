@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- On a multi-tenant install, a long request that changes data, such as a plugin route that streams its answer to a POST, no longer holds a database connection for its whole length. The check that refuses a write to an archived tenant took the request's connection before the handler ran, so a few such requests held the pool, and a handler that read again waited for a second connection. A write to an archived tenant is still refused with 423.
 - The API reference names the `super_admin` role on both `/api/admin/tenant-features/{tenant}` operations, which only a super admin may call, and documents the 403 anyone else gets. They named no role, so a client read them as open to every signed-in caller.
 
 ## [0.61.0] - 2026-11-11
