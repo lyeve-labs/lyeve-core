@@ -22,8 +22,10 @@ func (h migrationHost) MigrationDB() *sql.DB { return h.db }
 // reads and writes it through the migration handle, so its scoped host serves
 // that handle. Without it, every write answers that nothing was stored.
 func TestCapPolicy_GoroutineEngineReachesItsSettingsTable(t *testing.T) {
+	// The build's own table stays installed, as it does once the binary
+	// boots. A reset to nil would take it from every later test in the
+	// process that starts a plugin under it.
 	plugin.SetCapPolicy(capPolicy)
-	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
 	inner := migrationHost{Host: mockhost.New(t).Host(), db: new(sql.DB)}
 	sh := core.NewScopedHost(inner, "goroutine-engine", plugin.CapPolicy("goroutine-engine"))
