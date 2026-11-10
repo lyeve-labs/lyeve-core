@@ -45,9 +45,13 @@ func (b *tokenBucket) allow(rate float64, burst int) (allowed bool, remaining in
 
 // RateLimiter returns a per-IP token-bucket rate limiter. rate is sustained
 // requests/second. Burst is the initial token count. Exceeding clients
-// receive HTTP 429 with Retry-After and standard rate-limit headers.
+// receive HTTP 429 with Retry-After and standard rate-limit headers. A call
+// the engine made to itself counts in the bucket LoopbackCaller named for it.
 func RateLimiter(rate float64, burst int) func(http.Handler) http.Handler {
 	return perKeyRateLimiter(rate, burst, 0, func(r *http.Request) string {
+		if k := loopbackBucketFromCtx(r); k != "" {
+			return k
+		}
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			ip = r.RemoteAddr
@@ -58,9 +62,13 @@ func RateLimiter(rate float64, burst int) func(http.Handler) http.Handler {
 
 // PerTenantRateLimiter returns a per-tenant+IP token-bucket rate limiter.
 // Bucket key is "tenant:ip" when the context carries a tenant ID (set by
-// TenantHeader). Falls back to IP alone otherwise.
+// TenantHeader). Falls back to IP alone otherwise. A call the engine made to
+// itself counts in the bucket LoopbackCaller named for it.
 func PerTenantRateLimiter(rate float64, burst int) func(http.Handler) http.Handler {
 	return perKeyRateLimiter(rate, burst, 0, func(r *http.Request) string {
+		if k := loopbackBucketFromCtx(r); k != "" {
+			return k
+		}
 		ip, _, err := net.SplitHostPort(r.RemoteAddr)
 		if err != nil {
 			ip = r.RemoteAddr

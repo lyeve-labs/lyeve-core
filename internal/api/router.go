@@ -614,6 +614,12 @@ func applyBuiltinMiddleware(r *chi.Mux, cfg *config.Config, bodyOverrides map[st
 	// declared a larger one. Every other path keeps cfg.MaxBodyBytes.
 	r.Use(apimw.MaxBodySizeFor(cfg.MaxBodyBytes, bodyOverrides))
 
+	// A call the engine makes to itself on a person's behalf is counted by
+	// the tenant and credential it carries rather than by the engine's own
+	// address. Mounted whether or not a limiter is, so the mark is removed
+	// from every request before any handler or capture reads the headers.
+	r.Use(apimw.LoopbackCaller())
+
 	// Per-IP rate limiter (only when enabled via RATE_LIMIT_RPS > 0).
 	// Core ships an in-process token-bucket limiter only: it holds no Redis
 	// client. Distributed (shared-counter) rate limiting comes from a plugin,
