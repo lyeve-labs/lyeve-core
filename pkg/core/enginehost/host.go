@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/config"
 	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
+	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/licensing"
 )
@@ -401,6 +403,10 @@ func (h *engineHost) DistLock(name string) *engine.DistLock {
 // GoroutineTunables implements GoroutineTunablesProvider over the scaling
 // primitives this host was built with.
 func (h *engineHost) GoroutineTunables() core.GoroutineTunables { return core.NewGoroutineTunables(h) }
+
+// MarkLoopback implements core.LoopbackMarker with the mark the engine's
+// listeners recognize as their own process.
+func (h *engineHost) MarkLoopback(req *http.Request) { apimw.MarkLoopback(req) }
 
 // WithRuntimeTuning wires the runtime settings role, which the runtime builds
 // once the database pool and the replicas' relay exist. Atomic because the

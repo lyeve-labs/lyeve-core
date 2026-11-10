@@ -1063,6 +1063,25 @@ func (h *ScopedHost) GoroutineTunables() GoroutineTunables {
 	return nil
 }
 
+// LoopbackMarker is implemented by the engine host and forwarded by
+// ScopedHost. A plugin that calls the engine's own listener on a person's
+// behalf marks each request with it, so the engine counts the call against
+// the tenant and credential it carries. Unmarked, every such call arrives
+// from the engine's own address and all tenants share one rate limit bucket.
+type LoopbackMarker interface {
+	MarkLoopback(req *http.Request)
+}
+
+// MarkLoopback forwards to inner if it implements LoopbackMarker, and leaves
+// req unmarked otherwise. It needs no capability: the mark changes only which
+// rate limit bucket the request counts in, and the request still acts as the
+// credential it carries.
+func (h *ScopedHost) MarkLoopback(req *http.Request) {
+	if p, ok := h.inner.(LoopbackMarker); ok {
+		p.MarkLoopback(req)
+	}
+}
+
 // RuntimeTuning forwards to inner if it implements RuntimeTuningProvider,
 // and answers nil otherwise, so a plugin reports the settings as
 // unavailable. Like the goroutine tunables, the role needs no capability of
