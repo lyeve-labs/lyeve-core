@@ -22,6 +22,7 @@ import (
 	_ "github.com/lyeve-labs/lyeve-plugin-apianalytics/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-apikey/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-audit/plugin"
+	_ "github.com/lyeve-labs/lyeve-plugin-builder/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-bulk-import/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-cache/plugin"
 	_ "github.com/lyeve-labs/lyeve-plugin-captcha/plugin"
@@ -79,7 +80,7 @@ var expectedPlugins = []string{
 	"ab-testing", "data-export",
 	"synthetic-monitoring",
 	"email", "graphql", "grpc", "multitenant", "webhook",
-	"ai", "analytics", "apianalytics", "apikey", "audit", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
+	"ai", "analytics", "apianalytics", "apikey", "audit", "builder", "bulk-import", "cache", "captcha", "cluster", "content", "cron", "device-fingerprint", "error-tracking", "events",
 	"flow", "goroutine-engine", "idempotency", "profiler",
 	"logging", "localization", "magic-link", "media", "messagebroker", "mfa", "oauth", "password-reset", "permissions", "pii-mask", "query-monitor",
 	"rate-limit", "realtime", "recommendations", "request-capture", "review", "usage",

@@ -99,14 +99,15 @@ type stepUpHost struct{ core.Host }
 func (stepUpHost) CheckStepUp(*http.Request, string, string) error { return nil }
 
 // A step-up check spends the lockouts of the account the request's claims
-// name, so only the plugins that ask a person to confirm an action on their
-// own account reach it: analytics before an export, mfa before a first
-// second factor. Every other plugin of this build is refused.
-func TestCapPolicy_AnalyticsAndMFACheckStepUp(t *testing.T) {
+// name, so only the plugins that ask a person to confirm a sensitive action
+// reach it: analytics before a person's own export, mfa before a first
+// second factor, and builder before a person approves a builder
+// connection. Every other plugin of this build is refused.
+func TestCapPolicy_OnlyStepUpPluginsCheckStepUp(t *testing.T) {
 	plugin.SetCapPolicy(capPolicy)
 	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
-	askers := map[string]bool{"analytics": true, "mfa": true}
+	askers := map[string]bool{"analytics": true, "builder": true, "mfa": true}
 	inner := stepUpHost{mockhost.New(t).Host()}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil)
 	for _, name := range core.RegisteredPlugins() {

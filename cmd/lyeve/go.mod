@@ -26,6 +26,8 @@ replace github.com/lyeve-labs/lyeve-plugin-apikey => ../../../lyeve-plugin-apike
 
 replace github.com/lyeve-labs/lyeve-plugin-audit => ../../../lyeve-plugin-audit
 
+replace github.com/lyeve-labs/lyeve-plugin-builder => ../../../lyeve-plugin-builder
+
 replace github.com/lyeve-labs/lyeve-plugin-bulk-import => ../../../lyeve-plugin-bulk-import
 
 replace github.com/lyeve-labs/lyeve-plugin-cache => ../../../lyeve-plugin-cache
@@ -124,6 +126,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-apikey v0.9.0
 	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-builder v0.0.0
 	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-cache v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-captcha v0.8.0

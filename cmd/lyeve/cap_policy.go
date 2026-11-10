@@ -39,12 +39,16 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     serves every other secret and never this one.
 //   - core.CapStepUp, because the plugin asks the person at a session for
 //     the account's password or an authenticator code before a sensitive
-//     action: analytics, before it hands a person their own data export, and
+//     action: analytics, before it hands a person their own data export,
 //     mfa, before a session that did not sign in recently adds the account's
-//     first second factor.
+//     first second factor, and builder, before a person approves a
+//     builder connection.
 //   - core.CapPasskeyRevoke, because the plugin removes an account's
 //     passkeys: password-reset, at a reset, so a passkey added from a stolen
 //     session stops signing in once the password changes.
+//   - core.CapTenantRoles, because the plugin acts for a person long after
+//     their session ended and re-checks the roles they hold in the tenant
+//     on every call: builder, for each call a connection signs.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -52,6 +56,7 @@ var capPolicy = map[string]core.Capability{
 	"apianalytics":         core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"apikey":               core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"audit":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"builder":              core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapStepUp | core.CapTenantRoles,
 	"bulk-import":          core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapHooks | core.CapRoutes,
 	"cache":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"captcha":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,

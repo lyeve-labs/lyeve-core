@@ -15,15 +15,16 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-11-08T09:50:13Z from origin default branches.
+# Generated 2026-11-10T10:25:26Z from origin default branches.
 
-lyeve-libs = 5c1d97487d7ca335c1a4c4aaf04a26615614c984
+lyeve-libs = ae12e1ddfa134db3b6402027605afc8d21e9b1bb
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = 71b41f8d0440d20e236b18295f280859f00870fb
 lyeve-plugin-analytics = 6516c7385f602802dbb970a45ba1e9a4bee32806
 lyeve-plugin-apianalytics = 76b4e12bedfbb3e8d14c41e11d7c139835850f31
 lyeve-plugin-apikey = 288825a3a2cc1eea8b30d495c70d875b64ebb018
 lyeve-plugin-audit = 8f680e2f7522211a04ac4cba9ecacf487f2f7ae5
+lyeve-plugin-builder = c21480393fc27fe5984a23bc4dd3c42d84ba6235
 lyeve-plugin-bulk-import = ac521121fae470c4d6ade3bd6014204532aa8605
 lyeve-plugin-cache = a217b94b596446db4de6773feaba8e75c8d25a05
 lyeve-plugin-captcha = b4f6cea4042c5e8f188700127c752cccfd7ce421
@@ -36,7 +37,7 @@ lyeve-plugin-device-fingerprint = 4109ecb216bbe08fdf393d67093c4e5ebdf8eb60
 lyeve-plugin-email = 7672d697f5baef461589aaea3e7be4936bd28881
 lyeve-plugin-error-tracking = ed17395ba8bf1b94991c255bf6e3278d40f2016a
 lyeve-plugin-events = 7050ae690833db4b40a780406135a6a1824e5760
-lyeve-plugin-flow = 4c397fa2dedda8a7122f9da1d93b182670ad555e
+lyeve-plugin-flow = f9bde8ee88d744b73f1a9692205819946b5d5675
 lyeve-plugin-goroutine-engine = bcced994c55de692f9d88bc4d57241ade21d1efa
 lyeve-plugin-graphql = c59878fa3dfe40fe2c115a1a8bd6e0d4710841b3
 lyeve-plugin-grpc = 4e591448335638697c538d2a1cb29912c936bcec
