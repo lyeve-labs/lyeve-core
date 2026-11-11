@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Security
 
+- Requires Go 1.27.4, which fixes a crash of an HTTP/1 server through a header race in `http.MaxBytesReader` (GO-2026-6859). The engine serves every request through it, so a client could stop the engine on the earlier patch.
 - Through the plugin releases this engine pins: a flow node that sends its configuration to an AI provider (`ai.complete`, `ai.classify`, `ai.extract`, `ai.image` and `content.fill`) builds it without any field a content type marks private or No AI and with every secret masked, by its key name and by the value of every secret the run holds, so a prompt that prints a whole record or a secret variable no longer sends them. When the marks cannot be read, the node fails and sends nothing.
 
 ## [0.61.0] - 2026-11-11
