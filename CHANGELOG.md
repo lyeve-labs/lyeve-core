@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Through the plugin releases this engine pins: the AI plugin runs on every install. Without a license a tenant connects one AI provider and keeps transcripts for 30 days, whatever the retention setting says. The `ai-pro` capability lifts both limits and the MCP server's one agent. A provider past the limit answers 402 `cap_exceeded` with the pricing link. A license that carries `ai` is read as `ai-pro` for one minor release.
+- Through the plugin releases this engine pins: the MCP server starts on every install with no license, and its one connected agent per tenant holds until `ai-pro` lifts it. An administrator chooses which roles may connect a new agent while that limit holds, admins by default, and a super admin always may. An agent an administrator disconnects stays out until an administrator allows it again, unless the tenant turns that off. An agent already connected keeps working whatever its role. The list of AI providers now says how many a tenant may connect and carries the pricing link while the limit holds.
 
 ## [0.62.0] - 2026-11-11
 
