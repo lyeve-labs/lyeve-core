@@ -40,6 +40,19 @@ type MediaLibrary interface {
 	PublishMedia(ctx context.Context, id uuid.UUID, folder string) (MediaItem, error)
 }
 
+// MediaUploadLimiter is implemented by a MediaLibrary that reports its size
+// limit, so a caller can refuse a file that is too large before it reads the
+// whole body, and can tell a person the limit before they pick a file. It is
+// optional: a caller asserts it on the library it holds and keeps a limit of
+// its own when the library does not implement it.
+type MediaUploadLimiter interface {
+	// MaxUploadBytes is the most bytes one file may carry for the tenant on
+	// ctx: UploadMedia stores a file of exactly this size and refuses one
+	// byte more. A library with one limit for every tenant may ignore ctx.
+	// 0 or less reports no limit, and the caller keeps its own.
+	MaxUploadBytes(ctx context.Context) int64
+}
+
 // ErrMediaScanFailed is the refusal of a file the virus scan found infected.
 // It wraps ErrValidation, so a caller that tells the two apart checks for it
 // first.
