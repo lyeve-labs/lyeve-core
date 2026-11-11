@@ -28,8 +28,8 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     host role: permissions the permission checker, email the email sender,
 //     localization the content localizer, content the entry writer and the
 //     revision store, storage the storage backend, scim the user
-//     provisioner. Each is held by that one plugin, and the role's registrar
-//     refuses every other. The schema engine and the flow roles need
+//     provisioner, media the media library. Each is held by that one plugin,
+//     and the role's registrar refuses every other. The schema engine and the flow roles need
 //     core.CapSchema and core.CapFlowRegistry, which schema and flow hold.
 //   - core.CapSessionSign, because the plugin signs a user in: magic-link,
 //     mfa, oauth and saml. A session it signs acts as the account it names.
@@ -78,7 +78,7 @@ var capPolicy = map[string]core.Capability{
 	"logging":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
 	"mcp":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes,
-	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapMediaLibrary,
 	"messagebroker":        core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey | core.CapStepUp,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
