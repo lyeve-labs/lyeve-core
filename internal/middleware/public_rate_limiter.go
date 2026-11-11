@@ -307,7 +307,14 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 		// Loopback is not exempt: a proxy on the same host (the single-box
 		// deployment the docs recommend) makes every request arrive from
 		// 127.0.0.1, and exempting it would switch brute-force protection off.
-		ip := l.clientIP(r)
+		// A call the engine made to itself counts in the bucket LoopbackCaller
+		// named for its tenant and credential, as it does on the general
+		// limiter, credential routes included. Keyed by address, every
+		// tenant's calls would spend one bucket.
+		caller := l.clientIP(r)
+		if k := loopbackBucketFromCtx(r); k != "" {
+			caller = k
+		}
 		if isHealthPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
@@ -315,7 +322,7 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 
 		// Per-endpoint check.
 		if ok {
-			bucketKey := endpointKey + ":" + ip
+			bucketKey := endpointKey + ":" + caller
 			allowed, remaining, resetAt := l.check(bucketKey, cfg.Rate, cfg.Burst)
 			setPublicRateLimitHeaders(w, cfg.Burst, remaining, resetAt)
 			if !allowed {
@@ -326,7 +333,7 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 			// An operator's limit on a route on the general limit replaces
 			// the general limit there, so the global cap is not checked.
 			// Its bucket is its own: the general one is not spent either.
-			allowed, remaining, resetAt := l.check(customKey+":"+ip, custom.Rate, custom.Burst)
+			allowed, remaining, resetAt := l.check(customKey+":"+caller, custom.Rate, custom.Burst)
 			setPublicRateLimitHeaders(w, custom.Burst, remaining, resetAt)
 			if !allowed {
 				writePublicRateLimitResponse(w, custom.Burst, resetAt)
@@ -338,7 +345,7 @@ func (l *PublicEndpointRateLimiter) wrapHandler(method, pattern string, next htt
 
 		// Global aggregate check.
 		if l.global != nil {
-			globalKey := "__global__:" + ip
+			globalKey := "__global__:" + caller
 			allowed, remaining, resetAt := l.check(globalKey, l.global.Rate, l.global.Burst)
 			setPublicRateLimitHeaders(w, l.global.Burst, remaining, resetAt)
 			if !allowed {

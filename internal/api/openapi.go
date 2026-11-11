@@ -74,7 +74,7 @@ func openAPIHandler(schemas core.SchemaSource, plugins []plugin.PluginRoutes, do
 			filename = "cms-api-admin.json"
 		case openAPIByRole:
 			if !callerHasRole(r, "super_admin") {
-				doc = openAPIHalf(doc, false)
+				doc = openAPIForCaller(doc, func(role string) bool { return callerHasRole(r, role) })
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -102,6 +102,50 @@ func openAPIHalf(doc openAPIDoc, admin bool) openAPIDoc {
 		doc.Info.Description = "The content API, auth, and every route outside /api/admin."
 	}
 	return doc
+}
+
+// openAPIForCaller keeps every route outside /api/admin and, under it, the
+// operations the caller may call: those whose x-roles name a role holds
+// reports, and those that name none, which answer every signed-in role. An
+// operation only a super admin may call is left out for anyone else, so an
+// admin learns the shape of what it can call and nothing more.
+func openAPIForCaller(doc openAPIDoc, holds func(role string) bool) openAPIDoc {
+	kept := make(map[string]openAPIPath, len(doc.Paths))
+	for p, item := range doc.Paths {
+		if !isAdminPath(p) {
+			kept[p] = item
+			continue
+		}
+		ops := openAPIPath{}
+		for method, op := range item {
+			if callerMayCall(op, holds) {
+				ops[method] = op
+			}
+		}
+		if len(ops) > 0 {
+			kept[p] = ops
+		}
+	}
+	doc.Paths = kept
+	doc.Info.Title = "LyEve API"
+	doc.Info.Description = "The content API, auth, every route outside /api/admin, and the /api/admin operations the caller's role may call."
+	return doc
+}
+
+// callerMayCall reports whether an operation's x-roles leave it open to a
+// caller holding the roles holds reports. An operation that names no role
+// answers every signed-in role.
+func callerMayCall(op *openAPIOperation, holds func(role string) bool) bool {
+	roles, _ := op.Extensions[xRoles].([]string)
+	if len(roles) == 0 {
+		return true
+	}
+	for _, role := range roles {
+		if holds(role) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAdminPath(p string) bool {
@@ -254,21 +298,21 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	// them.
 	if opts.TenantFeatures {
 		paths["/api/admin/tenant-features/{tenant}"] = openAPIPath{
-			"get": {
+			"get": requiringRoles(&openAPIOperation{
 				Tags:       []string{"Admin / Tenant features"},
 				Summary:    "Plugins withheld from one tenant, and every plugin that could be",
 				Security:   bothAuth,
 				Parameters: tenantParam,
-				Responses:  map[string]any{"200": ok200, "400": err400, "401": err401},
-			},
-			"put": {
+				Responses:  map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403},
+			}, super...),
+			"put": requiringRoles(&openAPIOperation{
 				Tags:        []string{"Admin / Tenant features"},
 				Summary:     "Replace what is withheld from one tenant. The license stays the ceiling; an empty list gives the tenant all of it",
 				Security:    bothAuth,
 				Parameters:  tenantParam,
 				RequestBody: jsonBody(map[string]any{"withheld": []any{"widgets"}}),
-				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "422": map[string]any{"description": "A name that is not a plugin this engine serves"}},
-			},
+				Responses:   map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403, "422": map[string]any{"description": "A name that is not a plugin this engine serves"}},
+			}, super...),
 		}
 	}
 
@@ -463,7 +507,7 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)", Security: bothAuth, Responses: map[string]any{"200": ok200, "401": err401, "403": err403, "503": map[string]any{"description": "Pool unhealthy"}}}, admins...),
 	}
 	paths["/api/admin/openapi.json"] = openAPIPath{
-		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),
+		"get": {Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification as the caller may use it: the whole document for a super admin, and for any other signed-in role every route outside /api/admin and the /api/admin operations its role may call", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401}},
 	}
 	paths["/api/admin/openapi/public.json"] = openAPIPath{
 		"get": requiringRoles(&openAPIOperation{Tags: []string{"Admin / System"}, Summary: "OpenAPI 3.1 specification of the content API and every route outside /api/admin", Security: bothAuth, Responses: map[string]any{"200": map[string]any{"description": "OpenAPI 3.1 JSON"}, "401": err401, "403": err403}}, admins...),
@@ -503,6 +547,9 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 		documentAdminTokens(paths)
 	}
 	documentDeviceLogin(paths)
+	// The engine's ids go in before any plugin's, so a plugin naming one of
+	// them is the route documented without it.
+	describeEngineOperations(paths)
 	documentPluginRoutes(paths, plugins, opts.OwnerRoutes, opts.Ungated)
 	annotateAdminGrants(paths, append(plugins[:len(plugins):len(plugins)], opts.OwnerRoutes...))
 	return openAPIDoc{

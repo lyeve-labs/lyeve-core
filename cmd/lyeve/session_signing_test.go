@@ -28,8 +28,10 @@ func (signingHost) SignSessionToken(context.Context, uuid.UUID, string, []string
 // whatever its own registration declares, so the scoped host it is started
 // with signs. Every other plugin of this build is refused.
 func TestCapPolicy_OnlySignInPluginsSignSessions(t *testing.T) {
+	// The build's own table stays installed, as it does once the binary
+	// boots. A reset to nil would take it from every later test in the
+	// process that starts a plugin under it.
 	plugin.SetCapPolicy(capPolicy)
-	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
 	signIn := map[string]bool{"magic-link": true, "mfa": true, "oauth": true, "saml": true}
 	registered := core.RegisteredPlugins()
@@ -75,7 +77,6 @@ func (keyHost) Secrets(key string) ([]string, bool) {
 // that signs with HMAC.
 func TestCapPolicy_OnlySessionKeyReadersGetTheSigningSecret(t *testing.T) {
 	plugin.SetCapPolicy(capPolicy)
-	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
 	readers := map[string]bool{
 		"ai": true, "captcha": true, "email": true, "grpc": true, "magic-link": true, "mfa": true,
@@ -99,14 +100,14 @@ type stepUpHost struct{ core.Host }
 func (stepUpHost) CheckStepUp(*http.Request, string, string) error { return nil }
 
 // A step-up check spends the lockouts of the account the request's claims
-// name, so only the plugins that ask a person to confirm an action on their
-// own account reach it: analytics before an export, mfa before a first
-// second factor. Every other plugin of this build is refused.
-func TestCapPolicy_AnalyticsAndMFACheckStepUp(t *testing.T) {
+// name, so only the plugins that ask a person to confirm a sensitive action
+// reach it: analytics before a person's own export, mfa before a first
+// second factor, and builder before a person approves a builder
+// connection. Every other plugin of this build is refused.
+func TestCapPolicy_OnlyStepUpPluginsCheckStepUp(t *testing.T) {
 	plugin.SetCapPolicy(capPolicy)
-	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
-	askers := map[string]bool{"analytics": true, "mfa": true}
+	askers := map[string]bool{"analytics": true, "builder": true, "mfa": true}
 	inner := stepUpHost{mockhost.New(t).Host()}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/plugin-route", nil)
 	for _, name := range core.RegisteredPlugins() {
@@ -131,7 +132,6 @@ func (revokeHost) RevokePasskeys(context.Context, uuid.UUID) (int, error) { retu
 // of this build is refused.
 func TestCapPolicy_OnlyPasswordResetRevokesPasskeys(t *testing.T) {
 	plugin.SetCapPolicy(capPolicy)
-	t.Cleanup(func() { plugin.SetCapPolicy(nil) })
 
 	inner := revokeHost{mockhost.New(t).Host()}
 	for _, name := range core.RegisteredPlugins() {

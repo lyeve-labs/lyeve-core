@@ -6,7 +6,7 @@ module github.com/lyeve-labs/lyeve-core/cmd/lyeve
 
 // No toolchain directive: go mod tidy removes one that equals the go
 // directive below, so declaring it leaves this file permanently untidy.
-go 1.27.3
+go 1.27.4
 
 // Resolved from checkouts beside this repository. A go.work file can pin the
 // same paths.
@@ -25,6 +25,8 @@ replace github.com/lyeve-labs/lyeve-plugin-apianalytics => ../../../lyeve-plugin
 replace github.com/lyeve-labs/lyeve-plugin-apikey => ../../../lyeve-plugin-apikey
 
 replace github.com/lyeve-labs/lyeve-plugin-audit => ../../../lyeve-plugin-audit
+
+replace github.com/lyeve-labs/lyeve-plugin-builder => ../../../lyeve-plugin-builder
 
 replace github.com/lyeve-labs/lyeve-plugin-bulk-import => ../../../lyeve-plugin-bulk-import
 
@@ -124,6 +126,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-apianalytics v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-apikey v0.9.0
 	github.com/lyeve-labs/lyeve-plugin-audit v0.7.1
+	github.com/lyeve-labs/lyeve-plugin-builder v0.0.0
 	github.com/lyeve-labs/lyeve-plugin-bulk-import v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-cache v0.7.0
 	github.com/lyeve-labs/lyeve-plugin-captcha v0.8.0

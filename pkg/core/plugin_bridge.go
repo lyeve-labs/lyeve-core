@@ -311,8 +311,20 @@ type RouteDoc struct {
 	// documented, ahead of them.
 	Params []RouteParam
 	// RequestExample is a JSON body the route accepts, shown as the example
-	// of a required request body. Nil documents no body.
+	// of a required request body. Nil documents no body unless RequestSchema
+	// is set.
 	RequestExample any
+	// RequestSchema is the JSON Schema of the body the route accepts. Set,
+	// it documents a required body whether or not RequestExample is. Nil
+	// leaves the body an object.
+	RequestSchema map[string]any
+	// OperationID names the operation, so a generated client or a model can
+	// call it by name. It is unique in the document: a second route naming
+	// an id already taken is documented without one.
+	OperationID string
+	// Effect is what calling the route does to the engine's data. Empty
+	// leaves it unstated, and a caller has to assume the route changes data.
+	Effect Effect
 	// Responses maps each status the route answers to its description.
 	Responses map[int]string
 	// ResponseMediaTypes names what the route's success body is served as:
@@ -324,6 +336,37 @@ type RouteDoc struct {
 	// writes when Responses names none. Left empty, no response names a
 	// media type.
 	ResponseMediaTypes []RouteMediaType
+}
+
+// Effect says what calling a route does to the engine's data, so a client,
+// a reviewer or a model can tell a read from a change before sending it. It
+// describes what the handler itself does, not what a subscriber to the
+// events it publishes goes on to do.
+type Effect string
+
+const (
+	// EffectRead changes nothing.
+	EffectRead Effect = "read"
+	// EffectDraft writes something no one else sees until a person
+	// publishes or applies it.
+	EffectDraft Effect = "draft"
+	// EffectWrite changes data other callers read.
+	EffectWrite Effect = "write"
+	// EffectDelete removes data or ends it for good, such as a revoked
+	// token or an erased person, and nothing in the API undoes it.
+	EffectDelete Effect = "delete"
+	// EffectOutbound sends data out of the engine: an email, a webhook, a
+	// request to another service.
+	EffectOutbound Effect = "outbound"
+)
+
+// Valid reports whether e is one of the five effects.
+func (e Effect) Valid() bool {
+	switch e {
+	case EffectRead, EffectDraft, EffectWrite, EffectDelete, EffectOutbound:
+		return true
+	}
+	return false
 }
 
 // RouteMediaType is one media type a route's success body is served as.

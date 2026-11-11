@@ -90,6 +90,15 @@ type SchemaField struct {
 	// field. The credentialed content routes are unaffected. It generates
 	// no DDL.
 	Private bool `json:"private,omitempty"`
+
+	// HelpText tells a person what to put in the field. A form that edits
+	// the content type shows it under the field, and an assistant that
+	// fills the field follows it. It generates no DDL.
+	HelpText string `json:"help_text,omitempty"`
+
+	// NoAI keeps the field away from every AI provider: an assistant never
+	// reads its value and never fills it. It generates no DDL.
+	NoAI bool `json:"no_ai,omitempty"`
 }
 
 // ValidationRule is a single field-level constraint.

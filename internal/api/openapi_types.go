@@ -67,11 +67,15 @@ func (o openAPIOperation) MarshalJSON() ([]byte, error) {
 }
 
 type openAPIParameter struct {
-	Name        string         `json:"name"`
-	In          string         `json:"in"` // path | query | header
-	Required    bool           `json:"required"`
-	Description string         `json:"description,omitempty"`
-	Schema      map[string]any `json:"schema,omitempty"`
+	Name        string `json:"name"`
+	In          string `json:"in"` // path | query | header
+	Required    bool   `json:"required"`
+	Description string `json:"description,omitempty"`
+	// Style and Explode say how an object parameter is spelled in the
+	// query: deepObject with explode is name[key]=value.
+	Style   string         `json:"style,omitempty"`
+	Explode bool           `json:"explode,omitempty"`
+	Schema  map[string]any `json:"schema,omitempty"`
 }
 
 type openAPIRequestBody struct {

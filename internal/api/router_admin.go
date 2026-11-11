@@ -2,15 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
-	runtimedebug "runtime/debug"
-	rtmetrics "runtime/metrics"
 	"strings"
 	"time"
 
@@ -21,6 +19,7 @@ import (
 	"github.com/lyeve-labs/lyeve-core/internal/debug"
 	"github.com/lyeve-labs/lyeve-core/internal/metrics"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
+	"github.com/lyeve-labs/lyeve-core/internal/runtimetune"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/engine"
 	"github.com/lyeve-labs/lyeve-core/pkg/httpx"
@@ -446,8 +445,9 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 			}
 
 			// OpenAPI spec. The public half for admins, the admin half for super
-			// admins, and /openapi.json, which answers by role.
-			r.With(requireRole("admin", "super_admin")).Get("/openapi.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIByRole, specOptions))
+			// admins, and /openapi.json, which answers every signed-in role with
+			// the operations its roles may call.
+			r.Get("/openapi.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIByRole, specOptions))
 			r.With(requireRole("admin", "super_admin")).Get("/openapi/public.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIPublic, specOptions))
 			r.With(requireRole("super_admin")).Get("/openapi/admin.json", openAPIHandler(adminSchemas, o.pluginRoutes, o.endpointDocs, openAPIAdmin, specOptions))
 			// Reports whether each plugin is compiled, entitled and requested,
@@ -528,7 +528,7 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 
 			// GC config: the collector percentage and the memory limit in force.
 			r.With(requireRole("admin", "super_admin")).Get("/debug/gc-config", func(w http.ResponseWriter, r *http.Request) {
-				gogc, memLimit := gcSettings()
+				gogc, memLimit := runtimetune.GCSettings()
 				respond(w, http.StatusOK, map[string]any{"gogc": gogc, "memory_limit": memLimit})
 			})
 
@@ -549,14 +549,20 @@ func NewAdminRouter(pool db.DB, cfg *config.Config, opts ...RouterOption) (http.
 					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc is required")
 					return
 				}
-				// A negative percentage turns the collector off. Without a memory
-				// limit nothing then bounds the heap short of the kernel's OOM kill.
-				if _, memLimit := gcSettings(); *input.GOGC < 0 && memLimit == 0 {
-					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit")
+				// Without a memory limit below the container's or the machine's
+				// memory, a negative percentage turns the collector off and one
+				// above the ceiling lets the heap outgrow the machine, so either
+				// leaves nothing bounding the heap short of the kernel's OOM kill.
+				old, err := runtimetune.SetGCPercent(*input.GOGC)
+				switch {
+				case errors.Is(err, runtimetune.ErrGCPercentNeedsLimit):
+					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, fmt.Sprintf("gogc above %d needs a memory limit below the container's or the machine's memory", core.MaxGCPercent))
+					return
+				case err != nil:
+					httpx.ErrorReq(w, r, http.StatusUnprocessableEntity, "gogc below zero turns the garbage collector off, which needs a memory limit below the container's or the machine's memory")
 					return
 				}
-				old := runtimedebug.SetGCPercent(*input.GOGC)
-				gogc, memLimit := gcSettings()
+				gogc, memLimit := runtimetune.GCSettings()
 				respond(w, http.StatusOK, map[string]any{"previous_gogc": old, "current_gogc": gogc, "memory_limit": memLimit})
 			})
 
@@ -665,17 +671,4 @@ func withBodyLimits(overrides, limits map[string]int64) map[string]int64 {
 		}
 	}
 	return out
-}
-
-// gcSettings returns the collector percentage and the memory limit in force,
-// with 0 for no memory limit. The percentage is read from runtime/metrics,
-// because debug.SetGCPercent reports it only by replacing it.
-func gcSettings() (gogc, memLimit int64) {
-	sample := []rtmetrics.Sample{{Name: "/gc/gogc:percent"}}
-	rtmetrics.Read(sample)
-	memLimit = runtimedebug.SetMemoryLimit(-1)
-	if memLimit == math.MaxInt64 {
-		memLimit = 0
-	}
-	return int64(sample[0].Value.Uint64()), memLimit
 }

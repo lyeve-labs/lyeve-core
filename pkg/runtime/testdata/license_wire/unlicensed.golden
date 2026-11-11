@@ -293,6 +293,7 @@ body (json, newline):
     "/.well-known/jwks.json": {
       "get": {
         "description": "Verify a token the engine issued without calling it: every key the engine signs with, current and rotated, by kid.",
+        "operationId": "getSigningKeys",
         "responses": {
           "200": {
             "description": "OK"
@@ -301,12 +302,14 @@ body (json, newline):
         "summary": "The signing keys, as a JWK Set",
         "tags": [
           "Content API / Auth"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/api-key-scopes": {
       "get": {
         "description": "One row per route: method, path, the scope's resource, the name that qualifies it (a path parameter such as {schema}, a literal endpoint, or none), the action, the narrowest scope that reaches the route, and the owner. A route marked declared names its own scope, which takes no qualifier. A scope on the bare resource covers every name under it.",
+        "operationId": "listApiKeyScopes",
         "responses": {
           "200": {
             "description": "OK"
@@ -330,6 +333,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -339,6 +343,7 @@ body (json, newline):
     "/api/admin/auth/device": {
       "post": {
         "description": "Opens a sign-in for a command line tool or another device without a browser. Answers a device_code the device keeps and polls with, a user_code of the form XXXX-XXXX a person enters on verification_uri while signed in to the admin, and verification_uri_complete with the code filled in. verification_uri is the console's device page on LYEVE_CONSOLE_URL, or on the console dev server outside production when that is unset. In production without LYEVE_CONSOLE_URL the request is refused with 503. The request expires in 600 seconds; poll no more often than interval seconds. Rate limited per address, and one address holds at most ten open requests.",
+        "operationId": "startDeviceSignIn",
         "requestBody": {
           "content": {
             "application/json": {
@@ -372,12 +377,14 @@ body (json, newline):
         "summary": "Start a device sign-in",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/device/token": {
       "post": {
         "description": "Exchanges the device_code for a session once a person approves it. Until then it answers 400 with error set to authorization_pending, slow_down (polled sooner than the interval; the interval grows by five seconds and is returned), access_denied, expired_token (expired, or already exchanged) or invalid_grant (unknown code). On approval it answers 200 with user, token (a session JWT with the engine's normal expiry, the approver's roles in the approved tenant and their token version), token_type, expires_in and expires_at, once. There is no refresh token. Rate limited per address.",
+        "operationId": "exchangeDeviceCode",
         "requestBody": {
           "content": {
             "application/json": {
@@ -405,12 +412,14 @@ body (json, newline):
         "summary": "Poll a device sign-in",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/device/{user_code}": {
       "get": {
         "description": "What a person is about to approve: the client name as the device sent it, the address the request came from, when it was made and when it expires; and what approving hands over: tenant_id, the tenant the caller's session acts in, roles, the roles the session would carry, and session_expires_in, its lifetime in seconds. approver_ip and same_address set the caller's own address beside the requester's. Session only: an API key or an admin token is refused. The code is read in any case, with or without the dash.",
+        "operationId": "getDeviceSignIn",
         "parameters": [
           {
             "in": "path",
@@ -454,6 +463,7 @@ body (json, newline):
         "tags": [
           "Admin / Auth"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -463,6 +473,7 @@ body (json, newline):
     "/api/admin/auth/device/{user_code}/approve": {
       "post": {
         "description": "Binds the sign-in to the caller and the tenant their session acts in. The caller confirms with mfa_code when the account has MFA enrolled and with password otherwise; wrong answers count toward the account's lockouts and a locked account answers 429. The device's next poll receives a session, unless the caller's sessions end first. Session only: an API key or an admin token is refused. One decision per request.",
+        "operationId": "approveDeviceSignIn",
         "parameters": [
           {
             "in": "path",
@@ -519,6 +530,7 @@ body (json, newline):
         "tags": [
           "Admin / Auth"
         ],
+        "x-effect": "write",
         "x-roles": [
           "admin",
           "super_admin"
@@ -528,6 +540,7 @@ body (json, newline):
     "/api/admin/auth/device/{user_code}/deny": {
       "post": {
         "description": "Refuses the sign-in; the device's next poll is answered access_denied. Session only: an API key or an admin token is refused. One decision per request.",
+        "operationId": "denyDeviceSignIn",
         "parameters": [
           {
             "in": "path",
@@ -571,6 +584,7 @@ body (json, newline):
         "tags": [
           "Admin / Auth"
         ],
+        "x-effect": "write",
         "x-roles": [
           "admin",
           "super_admin"
@@ -580,6 +594,7 @@ body (json, newline):
     "/api/admin/auth/login": {
       "post": {
         "description": "Returns `mfa_required: true` and a `challenge_token` when the user has MFA enabled. Exchange the token via `/auth/mfa-verify`.",
+        "operationId": "signIn",
         "requestBody": {
           "content": {
             "application/json": {
@@ -605,11 +620,13 @@ body (json, newline):
         "summary": "Login and receive session cookie",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/logout": {
       "post": {
+        "operationId": "signOut",
         "responses": {
           "200": {
             "description": "OK"
@@ -626,11 +643,13 @@ body (json, newline):
         "summary": "Logout (clear session cookie)",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/me": {
       "get": {
+        "operationId": "getCurrentUser",
         "responses": {
           "200": {
             "description": "OK"
@@ -650,11 +669,13 @@ body (json, newline):
         "summary": "Current authenticated user",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/auth/memberships": {
       "get": {
+        "operationId": "listMemberships",
         "responses": {
           "200": {
             "description": "OK"
@@ -674,11 +695,13 @@ body (json, newline):
         "summary": "Tenants the caller may act in, home tenant first",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/auth/mfa-verify": {
       "post": {
+        "operationId": "verifyMFAChallenge",
         "requestBody": {
           "content": {
             "application/json": {
@@ -707,11 +730,13 @@ body (json, newline):
         "summary": "Complete MFA challenge - exchange challenge token + TOTP code for a full session JWT",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/provider-window": {
       "get": {
+        "operationId": "getProviderWindow",
         "responses": {
           "200": {
             "description": "OK"
@@ -735,12 +760,14 @@ body (json, newline):
         "tags": [
           "Admin / Auth"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
         ]
       },
       "put": {
+        "operationId": "setProviderWindow",
         "requestBody": {
           "content": {
             "application/json": {
@@ -780,6 +807,7 @@ body (json, newline):
         "tags": [
           "Admin / Auth"
         ],
+        "x-effect": "write",
         "x-roles": [
           "admin",
           "super_admin"
@@ -789,6 +817,7 @@ body (json, newline):
     "/api/admin/auth/refresh": {
       "post": {
         "description": "Rotates the refresh token and issues a new access token. Rate limited.",
+        "operationId": "refreshSession",
         "responses": {
           "200": {
             "description": "OK"
@@ -800,12 +829,14 @@ body (json, newline):
         "summary": "Refresh the session",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/auth/sign-in-routes": {
       "get": {
         "description": "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+        "operationId": "listSignInRoutes",
         "responses": {
           "200": {
             "description": "OK"
@@ -814,11 +845,13 @@ body (json, newline):
         "summary": "List the sign-in routes the plugins mounted",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/config": {
       "get": {
+        "operationId": "getConfig",
         "responses": {
           "200": {
             "description": "OK"
@@ -842,11 +875,13 @@ body (json, newline):
         "tags": [
           "Admin / Configuration"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
       },
       "put": {
+        "operationId": "updateConfig",
         "responses": {
           "200": {
             "description": "OK"
@@ -879,6 +914,7 @@ body (json, newline):
         "tags": [
           "Admin / Configuration"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -887,6 +923,7 @@ body (json, newline):
     "/api/admin/debug/goroutines": {
       "get": {
         "description": "The tracker snapshot: tracked and runtime totals, counts by source name, and by_owner, one row per plugin or the engine with its live count and the age of its oldest goroutine, so a leak names who started it.",
+        "operationId": "listGoroutines",
         "responses": {
           "200": {
             "description": "OK"
@@ -910,6 +947,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -918,6 +956,7 @@ body (json, newline):
     "/api/admin/entitlements": {
       "get": {
         "description": "Plan, state, feature list and caps, with license_source, which says where the license came from (token, key or stored_key), expires_at, and license_error, which says why the configured license is not in force. A licensing implementation may add plan_label, the plan as an operator reads it, and grace_ends_at, which it sets only in grace. license_module is always present, and true when the build links a licensing implementation. Never the token or the key itself.",
+        "operationId": "getEntitlements",
         "responses": {
           "200": {
             "description": "OK"
@@ -941,6 +980,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -949,6 +989,7 @@ body (json, newline):
     },
     "/api/admin/gdpr/erase": {
       "post": {
+        "operationId": "eraseSubjectData",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1089,6 +1130,7 @@ body (json, newline):
         "tags": [
           "Admin / GDPR"
         ],
+        "x-effect": "delete",
         "x-roles": [
           "super_admin"
         ]
@@ -1096,6 +1138,7 @@ body (json, newline):
     },
     "/api/admin/gdpr/export": {
       "post": {
+        "operationId": "exportSubjectData",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1141,6 +1184,7 @@ body (json, newline):
         "tags": [
           "Admin / GDPR"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -1148,6 +1192,7 @@ body (json, newline):
     },
     "/api/admin/gdpr/subject-digests": {
       "post": {
+        "operationId": "listSubjectDigests",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1208,6 +1253,7 @@ body (json, newline):
         "tags": [
           "Admin / GDPR"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -1215,6 +1261,7 @@ body (json, newline):
     },
     "/api/admin/health": {
       "get": {
+        "operationId": "getAdminHealth",
         "responses": {
           "200": {
             "description": "OK"
@@ -1237,12 +1284,14 @@ body (json, newline):
         "summary": "Liveness probe - is the process alive?",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/metrics": {
       "get": {
         "description": "A scraper presents the metrics token and needs no account. A super admin's session reaches the route too. While METRICS_TOKEN is set, any other bearer token is refused, so that session has to come from the cookie.",
+        "operationId": "getMetrics",
         "responses": {
           "200": {
             "content": {
@@ -1277,6 +1326,7 @@ body (json, newline):
         "tags": [
           "System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -1284,15 +1334,13 @@ body (json, newline):
     },
     "/api/admin/openapi.json": {
       "get": {
+        "operationId": "getOpenAPIDocument",
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden"
           }
         },
         "security": [
@@ -1303,18 +1351,16 @@ body (json, newline):
             "cookieAuth": []
           }
         ],
-        "summary": "OpenAPI 3.1 specification: the whole document for a super admin, the public half for an admin",
+        "summary": "OpenAPI 3.1 specification as the caller may use it: the whole document for a super admin, and for any other signed-in role every route outside /api/admin and the /api/admin operations its role may call",
         "tags": [
           "Admin / System"
         ],
-        "x-roles": [
-          "admin",
-          "super_admin"
-        ]
+        "x-effect": "read"
       }
     },
     "/api/admin/openapi/admin.json": {
       "get": {
+        "operationId": "getAdminOpenAPIDocument",
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
@@ -1338,6 +1384,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -1345,6 +1392,7 @@ body (json, newline):
     },
     "/api/admin/openapi/public.json": {
       "get": {
+        "operationId": "getPublicOpenAPIDocument",
         "responses": {
           "200": {
             "description": "OpenAPI 3.1 JSON"
@@ -1368,6 +1416,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1377,6 +1426,7 @@ body (json, newline):
     "/api/admin/plugins/running": {
       "get": {
         "description": "Any signed-in role. plugins is every compiled plugin that is running or starts on first use, less the ones withheld from the caller's tenant. withheld is every plugin that runs but is withheld from it. Names only, sorted, and neither list is ever null.",
+        "operationId": "listRunningPlugins",
         "responses": {
           "200": {
             "description": "OK"
@@ -1396,12 +1446,14 @@ body (json, newline):
         "summary": "The plugins that serve the caller's tenant",
         "tags": [
           "Admin / Plugins"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/plugins/status": {
       "get": {
         "description": "One row per compiled plugin. A plugin that describes itself carries a manifest: a label of at most 40 characters, a description of at most 240, a category (content, delivery, access, automation, insight, operations, compliance, ai, platform) and a maturity (stable or beta). A plugin that does not is listed by its name.",
+        "operationId": "listPluginStatus",
         "responses": {
           "200": {
             "description": "OK"
@@ -1425,6 +1477,7 @@ body (json, newline):
         "tags": [
           "Admin / Plugins"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1433,6 +1486,7 @@ body (json, newline):
     },
     "/api/admin/plugins/{name}/config": {
       "get": {
+        "operationId": "getPluginConfig",
         "parameters": [
           {
             "in": "path",
@@ -1466,6 +1520,7 @@ body (json, newline):
         "tags": [
           "Admin / Plugins"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1473,6 +1528,7 @@ body (json, newline):
       },
       "put": {
         "description": "Validated against the plugin's schema; secret values are sealed at rest.",
+        "operationId": "updatePluginConfig",
         "parameters": [
           {
             "in": "path",
@@ -1519,6 +1575,7 @@ body (json, newline):
         "tags": [
           "Admin / Plugins"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -1526,6 +1583,7 @@ body (json, newline):
     },
     "/api/admin/plugins/{name}/config/reset": {
       "post": {
+        "operationId": "resetPluginConfig",
         "parameters": [
           {
             "in": "path",
@@ -1559,6 +1617,7 @@ body (json, newline):
         "tags": [
           "Admin / Plugins"
         ],
+        "x-effect": "delete",
         "x-roles": [
           "super_admin"
         ]
@@ -1566,6 +1625,7 @@ body (json, newline):
     },
     "/api/admin/plugins/{name}/schema": {
       "get": {
+        "operationId": "getPluginConfigSchema",
         "parameters": [
           {
             "in": "path",
@@ -1599,6 +1659,7 @@ body (json, newline):
         "tags": [
           "Admin / Plugins"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1607,6 +1668,7 @@ body (json, newline):
     },
     "/api/admin/pool/health": {
       "get": {
+        "operationId": "getPoolHealth",
         "responses": {
           "200": {
             "description": "OK"
@@ -1633,6 +1695,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1641,6 +1704,7 @@ body (json, newline):
     },
     "/api/admin/ready": {
       "get": {
+        "operationId": "getAdminReadiness",
         "responses": {
           "200": {
             "description": "OK"
@@ -1663,11 +1727,13 @@ body (json, newline):
         "summary": "Readiness probe: is the engine ready to serve traffic?",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/admin/schemas/export": {
       "get": {
+        "operationId": "exportContentTypes",
         "parameters": [
           {
             "in": "query",
@@ -1725,6 +1791,7 @@ body (json, newline):
           "Admin / Content Types"
         ],
         "x-admin-grant": "schemas:read",
+        "x-effect": "read",
         "x-roles": [
           "admin",
           "super_admin"
@@ -1734,6 +1801,7 @@ body (json, newline):
     "/api/admin/schemas/import": {
       "post": {
         "description": "Reports what would change. Nothing is written unless apply=true, because the statements a content type change generates include destructive ones.",
+        "operationId": "importContentTypes",
         "parameters": [
           {
             "in": "query",
@@ -1840,6 +1908,7 @@ body (json, newline):
         "tags": [
           "Admin / Content Types"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -1848,6 +1917,7 @@ body (json, newline):
     "/api/admin/security/controls": {
       "get": {
         "description": "One row per control: pass, warn, fail or skip, the detail behind it, and what turns a control on that is not enforcing. Read live, so a plugin the license activates after boot shows without a restart.",
+        "operationId": "listSecurityControls",
         "responses": {
           "200": {
             "description": "OK"
@@ -1871,6 +1941,7 @@ body (json, newline):
         "tags": [
           "Admin / System"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
@@ -1878,6 +1949,7 @@ body (json, newline):
     },
     "/api/admin/setup": {
       "get": {
+        "operationId": "getSetupStatus",
         "responses": {
           "200": {
             "description": "OK"
@@ -1886,10 +1958,12 @@ body (json, newline):
         "summary": "Check setup status",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "read"
       },
       "post": {
         "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+        "operationId": "completeSetup",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1922,11 +1996,13 @@ body (json, newline):
         "summary": "Initial admin setup (first-run only)",
         "tags": [
           "Admin / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/admin/users": {
       "get": {
+        "operationId": "listUsers",
         "responses": {
           "200": {
             "description": "OK"
@@ -1950,11 +2026,13 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "read",
         "x-roles": [
           "super_admin"
         ]
       },
       "post": {
+        "operationId": "createUser",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2020,6 +2098,7 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -2027,6 +2106,7 @@ body (json, newline):
     },
     "/api/admin/users/{id}": {
       "delete": {
+        "operationId": "deleteUser",
         "parameters": [
           {
             "in": "path",
@@ -2067,6 +2147,7 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "delete",
         "x-roles": [
           "super_admin"
         ]
@@ -2075,6 +2156,7 @@ body (json, newline):
     "/api/admin/users/{id}/password": {
       "put": {
         "description": "remove_passkeys defaults to true, which removes the account's passkeys before the password changes when a running plugin supplies passkey removal. When they cannot be removed the answer is 503 and the password is not changed.",
+        "operationId": "setUserPassword",
         "parameters": [
           {
             "in": "path",
@@ -2135,6 +2217,7 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -2142,6 +2225,7 @@ body (json, newline):
     },
     "/api/admin/users/{id}/roles": {
       "put": {
+        "operationId": "setUserRoles",
         "parameters": [
           {
             "in": "path",
@@ -2194,6 +2278,7 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -2201,6 +2286,7 @@ body (json, newline):
     },
     "/api/admin/users/{id}/state": {
       "put": {
+        "operationId": "setUserState",
         "parameters": [
           {
             "in": "path",
@@ -2254,6 +2340,7 @@ body (json, newline):
         "tags": [
           "Admin / Users"
         ],
+        "x-effect": "write",
         "x-roles": [
           "super_admin"
         ]
@@ -2312,6 +2399,7 @@ body (json, newline):
     "/api/v1/auth/token": {
       "post": {
         "description": "Returns `mfa_required: true` and a `challenge_token` in place of a token when the user has MFA enabled. Exchange the challenge for a session via `/api/admin/auth/mfa-verify`.",
+        "operationId": "createAccessToken",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2337,11 +2425,13 @@ body (json, newline):
         "summary": "Obtain a Bearer token",
         "tags": [
           "Content API / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/v1/content/{schema}": {
       "get": {
+        "operationId": "listContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2372,6 +2462,20 @@ body (json, newline):
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
+            "explode": true,
+            "in": "query",
+            "name": "filters",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
           },
           {
             "description": "Relation fields to resolve inline, comma-separated, or * for all.",
@@ -2421,6 +2525,9 @@ body (json, newline):
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "A filter names a field this caller may not read"
+          },
           "404": {
             "description": "Not found"
           },
@@ -2436,9 +2543,11 @@ body (json, newline):
         "summary": "List records",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "post": {
+        "operationId": "createContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2483,6 +2592,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -2492,6 +2602,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/bulk": {
       "post": {
+        "operationId": "createContentInBulk",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2539,6 +2650,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -2549,6 +2661,7 @@ body (json, newline):
     "/api/v1/content/{schema}/cursor": {
       "get": {
         "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "operationId": "listContentByCursor",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2623,12 +2736,14 @@ body (json, newline):
         "summary": "List records by cursor",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
         "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the content type, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the content type, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the content type, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
+        "operationId": "streamContentChanges",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2734,11 +2849,13 @@ body (json, newline):
         "summary": "Stream changes to the content type",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/{id}": {
       "delete": {
+        "operationId": "deleteContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2780,6 +2897,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "delete",
         "x-roles": [
           "editor",
           "admin",
@@ -2787,6 +2905,7 @@ body (json, newline):
         ]
       },
       "get": {
+        "operationId": "getContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2870,9 +2989,11 @@ body (json, newline):
         "summary": "Get a record",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "put": {
+        "operationId": "updateContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2930,6 +3051,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -2939,6 +3061,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/publish": {
       "put": {
+        "operationId": "publishContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -2980,6 +3103,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -2989,6 +3113,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/relations/{field}": {
       "get": {
+        "operationId": "listContentRelations",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3038,9 +3163,11 @@ body (json, newline):
         "summary": "List the records a relation field points at",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "put": {
+        "operationId": "replaceContentRelations",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3107,6 +3234,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -3116,6 +3244,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/revisions": {
       "get": {
+        "operationId": "listContentRevisions",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3156,12 +3285,14 @@ body (json, newline):
         "summary": "List a record's revisions",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore": {
       "put": {
         "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
+        "operationId": "restoreContentRevision",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3219,6 +3350,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -3228,6 +3360,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/unpublish": {
       "put": {
+        "operationId": "unpublishContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3269,6 +3402,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -3279,6 +3413,7 @@ body (json, newline):
     "/api/v1/delivery/{schema}": {
       "get": {
         "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "operationId": "listDeliveredContent",
         "parameters": [
           {
             "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
@@ -3365,12 +3500,14 @@ body (json, newline):
         "summary": "List published records",
         "tags": [
           "Content API / Delivery"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/delivery/{schema}/{id}": {
       "get": {
         "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "operationId": "getDeliveredContent",
         "parameters": [
           {
             "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
@@ -3444,11 +3581,13 @@ body (json, newline):
         "summary": "Get a published record",
         "tags": [
           "Content API / Delivery"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/health": {
       "get": {
+        "operationId": "getHealth",
         "responses": {
           "200": {
             "description": "OK"
@@ -3465,11 +3604,13 @@ body (json, newline):
         "summary": "API server liveness probe",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/ready": {
       "get": {
+        "operationId": "getReadiness",
         "responses": {
           "200": {
             "description": "OK"
@@ -3486,11 +3627,13 @@ body (json, newline):
         "summary": "API server readiness probe",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/schemas": {
       "get": {
+        "operationId": "listContentTypes",
         "responses": {
           "200": {
             "description": "OK"
@@ -3507,11 +3650,13 @@ body (json, newline):
         "summary": "List content types",
         "tags": [
           "Content API / Content Types"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/schemas/{name}": {
       "get": {
+        "operationId": "getContentType",
         "parameters": [
           {
             "in": "path",
@@ -3541,12 +3686,14 @@ body (json, newline):
         "summary": "Get a content type's definition",
         "tags": [
           "Content API / Content Types"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/robots.txt": {
       "get": {
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
+        "operationId": "getRobotsTxt",
         "responses": {
           "200": {
             "content": {
@@ -3562,7 +3709,8 @@ body (json, newline):
         "summary": "Refuses every crawler",
         "tags": [
           "Admin / System"
-        ]
+        ],
+        "x-effect": "read"
       }
     }
   },
@@ -3612,7 +3760,7 @@ body (json, newline):
     }
   },
   "info": {
-    "description": "The content API, auth, and every route outside /api/admin.",
+    "description": "The content API, auth, every route outside /api/admin, and the /api/admin operations the caller's role may call.",
     "title": "LyEve API",
     "version": "1.0.0"
   },
@@ -3621,6 +3769,7 @@ body (json, newline):
     "/.well-known/jwks.json": {
       "get": {
         "description": "Verify a token the engine issued without calling it: every key the engine signs with, current and rotated, by kid.",
+        "operationId": "getSigningKeys",
         "responses": {
           "200": {
             "description": "OK"
@@ -3629,12 +3778,1061 @@ body (json, newline):
         "summary": "The signing keys, as a JWK Set",
         "tags": [
           "Content API / Auth"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/api-key-scopes": {
+      "get": {
+        "description": "One row per route: method, path, the scope's resource, the name that qualifies it (a path parameter such as {schema}, a literal endpoint, or none), the action, the narrowest scope that reaches the route, and the owner. A route marked declared names its own scope, which takes no qualifier. A scope on the bare resource covers every name under it.",
+        "operationId": "listApiKeyScopes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Every route an API key can be scoped to",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device": {
+      "post": {
+        "description": "Opens a sign-in for a command line tool or another device without a browser. Answers a device_code the device keeps and polls with, a user_code of the form XXXX-XXXX a person enters on verification_uri while signed in to the admin, and verification_uri_complete with the code filled in. verification_uri is the console's device page on LYEVE_CONSOLE_URL, or on the console dev server outside production when that is unset. In production without LYEVE_CONSOLE_URL the request is refused with 503. The request expires in 600 seconds; poll no more often than interval seconds. Rate limited per address, and one address holds at most ten open requests.",
+        "operationId": "startDeviceSignIn",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "client_name": "cli on build-box"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "device_code, user_code, verification_uri, verification_uri_complete, expires_in, interval"
+          },
+          "400": {
+            "description": "Malformed request"
+          },
+          "422": {
+            "description": "client_name is missing, longer than 64 characters or not printable"
+          },
+          "429": {
+            "description": "Rate limited, or too many open requests from this address or its IPv6 /64"
+          },
+          "503": {
+            "description": "The install holds too many open requests; retry after the Retry-After seconds"
+          }
+        },
+        "summary": "Start a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/device/token": {
+      "post": {
+        "description": "Exchanges the device_code for a session once a person approves it. Until then it answers 400 with error set to authorization_pending, slow_down (polled sooner than the interval; the interval grows by five seconds and is returned), access_denied, expired_token (expired, or already exchanged) or invalid_grant (unknown code). On approval it answers 200 with user, token (a session JWT with the engine's normal expiry, the approver's roles in the approved tenant and their token version), token_type, expires_in and expires_at, once. There is no refresh token. Rate limited per address.",
+        "operationId": "exchangeDeviceCode",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "device_code": "\u003cdevice_code\u003e"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A session"
+          },
+          "400": {
+            "description": "authorization_pending, slow_down, access_denied, expired_token, invalid_grant or invalid_request"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "summary": "Poll a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/device/{user_code}": {
+      "get": {
+        "description": "What a person is about to approve: the client name as the device sent it, the address the request came from, when it was made and when it expires; and what approving hands over: tenant_id, the tenant the caller's session acts in, roles, the roles the session would carry, and session_expires_in, its lifetime in seconds. approver_ip and same_address set the caller's own address beside the requester's. Session only: an API key or an admin token is refused. The code is read in any case, with or without the dash.",
+        "operationId": "getDeviceSignIn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Read a pending device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device/{user_code}/approve": {
+      "post": {
+        "description": "Binds the sign-in to the caller and the tenant their session acts in. The caller confirms with mfa_code when the account has MFA enrolled and with password otherwise; wrong answers count toward the account's lockouts and a locked account answers 429. The device's next poll receives a session, unless the caller's sessions end first. Session only: an API key or an admin token is refused. One decision per request.",
+        "operationId": "approveDeviceSignIn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "password": "your-password"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Approve a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/device/{user_code}/deny": {
+      "post": {
+        "description": "Refuses the sign-in; the device's next poll is answered access_denied. Session only: an API key or an admin token is refused. One decision per request.",
+        "operationId": "denyDeviceSignIn",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_code",
+            "required": true,
+            "schema": {
+              "example": "WDJB-MJHT",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden: not a signed-in session, not an admin, or on approval the password or MFA code was missing or wrong"
+          },
+          "404": {
+            "description": "No pending sign-in for this code: reason is unknown, expired or decided"
+          },
+          "409": {
+            "description": "The sign-in was already approved or denied"
+          },
+          "429": {
+            "description": "Rate limited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Deny a device sign-in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/login": {
+      "post": {
+        "description": "Returns `mfa_required: true` and a `challenge_token` when the user has MFA enabled. Exchange the token via `/auth/mfa-verify`.",
+        "operationId": "signIn",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "admin@example.com",
+                  "password": "changeme"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Login and receive session cookie",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/logout": {
+      "post": {
+        "operationId": "signOut",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Logout (clear session cookie)",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/me": {
+      "get": {
+        "operationId": "getCurrentUser",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Current authenticated user",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/auth/memberships": {
+      "get": {
+        "operationId": "listMemberships",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Tenants the caller may act in, home tenant first",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/auth/mfa-verify": {
+      "post": {
+        "operationId": "verifyMFAChallenge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "challenge_token": "\u003cshort-lived JWT\u003e",
+                  "code": "123456"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "description": "Invalid code"
+          }
+        },
+        "summary": "Complete MFA challenge - exchange challenge token + TOTP code for a full session JWT",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/provider-window": {
+      "get": {
+        "operationId": "getProviderWindow",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Days an account created by the tenant's identity provider may still sign in by password, reset or magic link after the provider last signed it in",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      },
+      "put": {
+        "operationId": "setProviderWindow",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "days": 30
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Days outside 0 to 365, or not a whole number"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Set the provider window, a whole number of days from 0 to 365. 0 means only through the identity provider",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/auth/refresh": {
+      "post": {
+        "description": "Rotates the refresh token and issues a new access token. Rate limited.",
+        "operationId": "refreshSession",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "summary": "Refresh the session",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/auth/sign-in-routes": {
+      "get": {
+        "description": "Public. Each entry is a method and a path under `/api/admin/auth/` that a plugin serves without a credential, such as a password reset request. A sign-in page offers a method only when its route is listed.",
+        "operationId": "listSignInRoutes",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "List the sign-in routes the plugins mounted",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/entitlements": {
+      "get": {
+        "description": "Plan, state, feature list and caps, with license_source, which says where the license came from (token, key or stored_key), expires_at, and license_error, which says why the configured license is not in force. A licensing implementation may add plan_label, the plan as an operator reads it, and grace_ends_at, which it sets only in grace. license_module is always present, and true when the build links a licensing implementation. Never the token or the key itself.",
+        "operationId": "getEntitlements",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "What the license entitles",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/health": {
+      "get": {
+        "operationId": "getAdminHealth",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Database unreachable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Liveness probe - is the process alive?",
+        "tags": [
+          "System"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPIDocument",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "OpenAPI 3.1 specification as the caller may use it: the whole document for a super admin, and for any other signed-in role every route outside /api/admin and the /api/admin operations its role may call",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/openapi/public.json": {
+      "get": {
+        "operationId": "getPublicOpenAPIDocument",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 JSON"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "OpenAPI 3.1 specification of the content API and every route outside /api/admin",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/running": {
+      "get": {
+        "description": "Any signed-in role. plugins is every compiled plugin that is running or starts on first use, less the ones withheld from the caller's tenant. withheld is every plugin that runs but is withheld from it. Names only, sorted, and neither list is ever null.",
+        "operationId": "listRunningPlugins",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "The plugins that serve the caller's tenant",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/plugins/status": {
+      "get": {
+        "description": "One row per compiled plugin. A plugin that describes itself carries a manifest: a label of at most 40 characters, a description of at most 240, a category (content, delivery, access, automation, insight, operations, compliance, ai, platform) and a maturity (stable or beta). A plugin that does not is listed by its name.",
+        "operationId": "listPluginStatus",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Every plugin's phase, start time and last error",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/{name}/config": {
+      "get": {
+        "operationId": "getPluginConfig",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "A plugin's configuration, secrets masked",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/plugins/{name}/schema": {
+      "get": {
+        "operationId": "getPluginConfigSchema",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "JSON Schema of a plugin's configuration",
+        "tags": [
+          "Admin / Plugins"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/pool/health": {
+      "get": {
+        "operationId": "getPoolHealth",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Pool unhealthy"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Connection pool health - live statistics (open/in-use/idle connections, latency, prepared statement cache)",
+        "tags": [
+          "Admin / System"
+        ],
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/ready": {
+      "get": {
+        "operationId": "getAdminReadiness",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "503": {
+            "description": "Not ready"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "Readiness probe: is the engine ready to serve traffic?",
+        "tags": [
+          "System"
+        ],
+        "x-effect": "read"
+      }
+    },
+    "/api/admin/schemas/export": {
+      "get": {
+        "operationId": "exportContentTypes",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "yaml",
+              "enum": [
+                "yaml",
+                "json"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              },
+              "application/yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The bundle: a YAML file to download, or JSON when format is json"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "503": {
+            "description": "Schema engine unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          },
+          {
+            "adminToken": []
+          }
+        ],
+        "summary": "Export every content type as a portable bundle",
+        "tags": [
+          "Admin / Content Types"
+        ],
+        "x-admin-grant": "schemas:read",
+        "x-effect": "read",
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/setup": {
+      "get": {
+        "operationId": "getSetupStatus",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "summary": "Check setup status",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "read"
+      },
+      "post": {
+        "description": "Requires the setup token: LYEVE_SETUP_TOKEN, or the one-time token the engine writes to its standard error at boot while no account exists. Send it as `setup_token` or in the `X-Setup-Token` header. Answers 409 once an account exists.",
+        "operationId": "completeSetup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "example": {
+                  "email": "admin@example.com",
+                  "password": "changeme",
+                  "setup_token": "from-the-engine-stderr"
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "409": {
+            "description": "Setup already complete"
+          }
+        },
+        "summary": "Initial admin setup (first-run only)",
+        "tags": [
+          "Admin / Auth"
+        ],
+        "x-effect": "write"
+      }
+    },
+    "/api/admin/wire/gadgets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "GET /api/admin/wire/gadgets",
+        "tags": [
+          "Plugin / gadgets"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/admin/wire/widgets": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "summary": "GET /api/admin/wire/widgets",
+        "tags": [
+          "Plugin / widgets"
+        ],
+        "x-roles": [
+          "admin",
+          "super_admin"
         ]
       }
     },
     "/api/v1/auth/token": {
       "post": {
         "description": "Returns `mfa_required: true` and a `challenge_token` in place of a token when the user has MFA enabled. Exchange the challenge for a session via `/api/admin/auth/mfa-verify`.",
+        "operationId": "createAccessToken",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3660,11 +4858,13 @@ body (json, newline):
         "summary": "Obtain a Bearer token",
         "tags": [
           "Content API / Auth"
-        ]
+        ],
+        "x-effect": "write"
       }
     },
     "/api/v1/content/{schema}": {
       "get": {
+        "operationId": "listContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3695,6 +4895,20 @@ body (json, newline):
               "default": 0,
               "type": "integer"
             }
+          },
+          {
+            "description": "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
+            "explode": true,
+            "in": "query",
+            "name": "filters",
+            "required": false,
+            "schema": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "style": "deepObject"
           },
           {
             "description": "Relation fields to resolve inline, comma-separated, or * for all.",
@@ -3744,6 +4958,9 @@ body (json, newline):
           "401": {
             "description": "Unauthorized"
           },
+          "403": {
+            "description": "A filter names a field this caller may not read"
+          },
           "404": {
             "description": "Not found"
           },
@@ -3759,9 +4976,11 @@ body (json, newline):
         "summary": "List records",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "post": {
+        "operationId": "createContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3806,6 +5025,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -3815,6 +5035,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/bulk": {
       "post": {
+        "operationId": "createContentInBulk",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3862,6 +5083,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -3872,6 +5094,7 @@ body (json, newline):
     "/api/v1/content/{schema}/cursor": {
       "get": {
         "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "operationId": "listContentByCursor",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -3946,12 +5169,14 @@ body (json, newline):
         "summary": "List records by cursor",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/stream": {
       "get": {
         "description": "Server-Sent Events. While the stream is open it sends one event for each record created, updated or deleted in the content type, in the caller's tenant. It replays nothing written before it opened.\n\nEach event is a single `data` line holding a JSON object. `event` is after_create, after_update or after_delete, `schema` names the content type, and `data` is the record after the change, or as it was before a delete. The record carries its `id` and leaves out every field a read withholds from the caller. Relations are not populated and translations are not applied. A change to a draft reaches only a caller who may read drafts.\n\nA change carries no `event` or `id` field, so an EventSource reports every change as a `message` event, and a client that reconnects cannot resume where it stopped. A client that reads more slowly than changes arrive misses some of them.\n\nWhen the caller's credential expires or is revoked, or the caller can no longer read the content type, the stream sends one last event named `error`, whose `data` line holds `{\"error\": reason}`, and closes.\n\nComment lines carry no event. The stream opens with `: connected to {schema} stream` and sends `: heartbeat` every 10 seconds to keep an idle connection open. The route takes no query parameters.\n\nA record created in posts arrives as `data: {\"data\":{\"id\":\"<uuid>\",\"title\":\"Hello\"},\"event\":\"after_create\",\"schema\":\"posts\"}`.",
+        "operationId": "streamContentChanges",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4057,11 +5282,13 @@ body (json, newline):
         "summary": "Stream changes to the content type",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/{id}": {
       "delete": {
+        "operationId": "deleteContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4103,6 +5330,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "delete",
         "x-roles": [
           "editor",
           "admin",
@@ -4110,6 +5338,7 @@ body (json, newline):
         ]
       },
       "get": {
+        "operationId": "getContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4193,9 +5422,11 @@ body (json, newline):
         "summary": "Get a record",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "put": {
+        "operationId": "updateContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4253,6 +5484,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -4262,6 +5494,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/publish": {
       "put": {
+        "operationId": "publishContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4303,6 +5536,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -4312,6 +5546,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/relations/{field}": {
       "get": {
+        "operationId": "listContentRelations",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4361,9 +5596,11 @@ body (json, newline):
         "summary": "List the records a relation field points at",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       },
       "put": {
+        "operationId": "replaceContentRelations",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4430,6 +5667,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -4439,6 +5677,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/revisions": {
       "get": {
+        "operationId": "listContentRevisions",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4479,12 +5718,14 @@ body (json, newline):
         "summary": "List a record's revisions",
         "tags": [
           "Content API / Content"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/content/{schema}/{id}/revisions/{rev_id}/restore": {
       "put": {
         "description": "The record's current state becomes a new revision first, so a restore is itself undoable.",
+        "operationId": "restoreContentRevision",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4542,6 +5783,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -4551,6 +5793,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/{id}/unpublish": {
       "put": {
+        "operationId": "unpublishContent",
         "parameters": [
           {
             "description": "Content type name, as listed by GET /api/v1/schemas.",
@@ -4592,6 +5835,7 @@ body (json, newline):
         "tags": [
           "Content API / Content"
         ],
+        "x-effect": "write",
         "x-roles": [
           "editor",
           "admin",
@@ -4602,6 +5846,7 @@ body (json, newline):
     "/api/v1/delivery/{schema}": {
       "get": {
         "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "operationId": "listDeliveredContent",
         "parameters": [
           {
             "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
@@ -4688,12 +5933,14 @@ body (json, newline):
         "summary": "List published records",
         "tags": [
           "Content API / Delivery"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/delivery/{schema}/{id}": {
       "get": {
         "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused.",
+        "operationId": "getDeliveredContent",
         "parameters": [
           {
             "description": "A content type its tenant marked for public delivery, spelled as it is stored.",
@@ -4767,11 +6014,13 @@ body (json, newline):
         "summary": "Get a published record",
         "tags": [
           "Content API / Delivery"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/health": {
       "get": {
+        "operationId": "getHealth",
         "responses": {
           "200": {
             "description": "OK"
@@ -4788,11 +6037,13 @@ body (json, newline):
         "summary": "API server liveness probe",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/ready": {
       "get": {
+        "operationId": "getReadiness",
         "responses": {
           "200": {
             "description": "OK"
@@ -4809,11 +6060,13 @@ body (json, newline):
         "summary": "API server readiness probe",
         "tags": [
           "System"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/schemas": {
       "get": {
+        "operationId": "listContentTypes",
         "responses": {
           "200": {
             "description": "OK"
@@ -4830,11 +6083,13 @@ body (json, newline):
         "summary": "List content types",
         "tags": [
           "Content API / Content Types"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/api/v1/schemas/{name}": {
       "get": {
+        "operationId": "getContentType",
         "parameters": [
           {
             "in": "path",
@@ -4864,12 +6119,14 @@ body (json, newline):
         "summary": "Get a content type's definition",
         "tags": [
           "Content API / Content Types"
-        ]
+        ],
+        "x-effect": "read"
       }
     },
     "/robots.txt": {
       "get": {
         "description": "Every route on this server is authenticated, so there is nothing to index; the same refusal rides on every response as X-Robots-Tag.",
+        "operationId": "getRobotsTxt",
         "responses": {
           "200": {
             "content": {
@@ -4885,7 +6142,8 @@ body (json, newline):
         "summary": "Refuses every crawler",
         "tags": [
           "Admin / System"
-        ]
+        ],
+        "x-effect": "read"
       }
     }
   },
