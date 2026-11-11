@@ -236,6 +236,8 @@ func capName(c Capability) string {
 		return "CapStorage"
 	case CapUserProvisioner:
 		return "CapUserProvisioner"
+	case CapMediaLibrary:
+		return "CapMediaLibrary"
 	case CapSessionSign:
 		return "CapSessionSign"
 	case CapSessionKey:
@@ -982,6 +984,29 @@ func (h *ScopedHost) RegisterRecordRevisionStore(s RecordRevisionStore) error {
 		func() error { return p.RegisterRecordRevisionStore(s) })
 }
 
+// MediaLibrary forwards to inner if it implements MediaLibraryProvider. Nil,
+// and the log line, as for ContentEntryWriter: a build with no plugin owning
+// the library has no files to offer.
+func (h *ScopedHost) MediaLibrary() MediaLibrary {
+	if p, ok := h.inner.(MediaLibraryProvider); ok {
+		if l := p.MediaLibrary(); l != nil {
+			return l
+		}
+	}
+	h.warnUnavailable("MediaLibrary")
+	return nil
+}
+
+// RegisterMediaLibrary forwards to inner if it implements
+// MediaLibraryRegistrar, for a plugin holding CapMediaLibrary. Every file a
+// plugin adds outside the media screens goes through the library, so no other
+// plugin may replace it or take it away. A refusal is logged and returned.
+func (h *ScopedHost) RegisterMediaLibrary(l MediaLibrary) error {
+	p, ok := h.inner.(MediaLibraryRegistrar)
+	return h.registerRole(HostRoleMediaLibrary, "RegisterMediaLibrary", CapMediaLibrary, ok, l == nil,
+		func() error { return p.RegisterMediaLibrary(l) })
+}
+
 // MetricsGatherer forwards to inner if CapMetrics is held and inner
 // implements MetricsGathererProvider. Denied, it returns nil and logs the
 // grant to add: the registry carries every tenant's request series, so a
@@ -1015,6 +1040,8 @@ var (
 	_ ContentEntryWriterRegistrar      = (*ScopedHost)(nil)
 	_ RecordRevisionStoreProvider      = (*ScopedHost)(nil)
 	_ RecordRevisionStoreRegistrar     = (*ScopedHost)(nil)
+	_ MediaLibraryProvider             = (*ScopedHost)(nil)
+	_ MediaLibraryRegistrar            = (*ScopedHost)(nil)
 	_ SchemaEngineRegistrar            = (*ScopedHost)(nil)
 	_ EmailSenderRegistrar             = (*ScopedHost)(nil)
 	_ StepUpChecker                    = (*ScopedHost)(nil)

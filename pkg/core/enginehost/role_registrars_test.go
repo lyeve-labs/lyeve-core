@@ -37,6 +37,7 @@ type (
 	roleRevisionStore   struct{ core.RecordRevisionStore }
 	roleStorage         struct{ core.Storage }
 	roleUserProvisioner struct{ core.UserProvisioner }
+	roleMediaLibrary    struct{ core.MediaLibrary }
 )
 
 // ordinaryGrant is what most plugins of the build hold: their own tables,
@@ -152,6 +153,7 @@ func TestRoleRegistrars_EveryRoleAnswersToItsOwnGrant(t *testing.T) {
 		revisions   = &roleRevisionStore{}
 		storage     = &roleStorage{}
 		provisioner = &roleUserProvisioner{}
+		library     = &roleMediaLibrary{}
 	)
 	cases := []roleCase{
 		{
@@ -257,6 +259,16 @@ func TestRoleRegistrars_EveryRoleAnswersToItsOwnGrant(t *testing.T) {
 				return sh.SetUserProvisioner(provisioner)
 			},
 			installs: func(h *engineHost) bool { return h.UserProvisioner() == core.UserProvisioner(provisioner) },
+		},
+		{
+			role: core.HostRoleMediaLibrary, need: core.CapMediaLibrary,
+			register: func(sh *core.ScopedHost, clear bool) error {
+				if clear {
+					return sh.RegisterMediaLibrary(nil)
+				}
+				return sh.RegisterMediaLibrary(library)
+			},
+			installs: func(h *engineHost) bool { return h.MediaLibrary() == core.MediaLibrary(library) },
 		},
 	}
 

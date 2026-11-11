@@ -151,6 +151,11 @@ type engineHost struct {
 	// writes the generated table directly.
 	contentEntryWriter core.ContentEntryWriter
 
+	// mediaLibrary is the library the plugin owning the media files
+	// registers when it activates. Nil until one registers, and nil again
+	// when it stops.
+	mediaLibrary core.MediaLibrary
+
 	// recordRevisionStore is the plugin that keeps the schema-driven content
 	// API's revision snapshots. Nil until one registers, and nil again when
 	// it stops.
@@ -245,6 +250,8 @@ var (
 	_ core.ConfigSectionRegistrar           = (*engineHost)(nil)
 	_ core.ContentEntryWriterProvider       = (*engineHost)(nil)
 	_ core.ContentEntryWriterRegistrar      = (*engineHost)(nil)
+	_ core.MediaLibraryProvider             = (*engineHost)(nil)
+	_ core.MediaLibraryRegistrar            = (*engineHost)(nil)
 	_ core.RecordRevisionStoreProvider      = (*engineHost)(nil)
 	_ core.RecordRevisionStoreRegistrar     = (*engineHost)(nil)
 	_ core.SchemaEngineRegistrar            = (*engineHost)(nil)
