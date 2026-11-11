@@ -28,8 +28,8 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     host role: permissions the permission checker, email the email sender,
 //     localization the content localizer, content the entry writer and the
 //     revision store, storage the storage backend, scim the user
-//     provisioner. Each is held by that one plugin, and the role's registrar
-//     refuses every other. The schema engine and the flow roles need
+//     provisioner, media the media library. Each is held by that one plugin,
+//     and the role's registrar refuses every other. The schema engine and the flow roles need
 //     core.CapSchema and core.CapFlowRegistry, which schema and flow hold.
 //   - core.CapSessionSign, because the plugin signs a user in: magic-link,
 //     mfa, oauth and saml. A session it signs acts as the account it names.
