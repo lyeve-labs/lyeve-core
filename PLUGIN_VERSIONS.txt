@@ -17,7 +17,7 @@
 #
 # Generated 2026-11-11T12:31:20Z from origin default branches.
 
-lyeve-libs = 01613e057590d44f1bd972e17a6fee45dc9c346c
+lyeve-libs = 5459a183747d31896c445fc4fa9e069404cbdb52
 lyeve-plugin-ab-testing = 35a534eb1c85c6a6b52954c8f8fd398b2c6ce1b1
 lyeve-plugin-ai = 0e5e1dd2b2966572d591eb04ccce00f3624f2918
 lyeve-plugin-analytics = 6516c7385f602802dbb970a45ba1e9a4bee32806
@@ -45,7 +45,7 @@ lyeve-plugin-idempotency = 16e561808926e1b2adff13fbd669ccab9f858210
 lyeve-plugin-localization = 3e87bb3f04749a61f6bd2b60b6ec115464f1c9f8
 lyeve-plugin-logging = 944e58d7bfef733c394e2b095d6aa6b9125bf974
 lyeve-plugin-magic-link = 9ebdd40f183f3914f6cdb5bc8b4ad141143af3ba
-lyeve-plugin-mcp = f61d239163891764e3a5c6020e7c0f111d5be786
+lyeve-plugin-mcp = b1c9a049a5bea4c1f0515fd3c0e7525a7378251d
 lyeve-plugin-media = c24090ca74eb46e16cb07a09a80c888aec49d408
 lyeve-plugin-messagebroker = a329669b333bfe35a42203c1369003f9036e63a9
 lyeve-plugin-mfa = 1e159e263ae004719bb72acce46d61f83ffc382c
