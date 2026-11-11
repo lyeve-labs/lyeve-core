@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The engine links the MCP server plugin, so an outside agent can read the engine's API and write drafts as the person whose credential it holds. Agents send their calls to `POST /api/v1/mcp` on the API listener, and the admin operations are served only through `POST /api/admin/mcp` on the admin listener. Every install runs it with one connected agent per tenant, and a connection past that answers 402 `cap_exceeded` with the pricing link.
+
+### Changed
+
+- Through the plugin releases this engine pins: the AI plugin runs on every install. Without a license a tenant connects one AI provider and keeps transcripts for 30 days, whatever the retention setting says. The `ai-pro` capability lifts both limits and the MCP server's one agent. A provider past the limit answers 402 `cap_exceeded` with the pricing link. A license that carries `ai` is read as `ai-pro` for one minor release.
+
 ## [0.62.0] - 2026-11-11
 
 ### Added

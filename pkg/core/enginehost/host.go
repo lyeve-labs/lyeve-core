@@ -404,6 +404,10 @@ func (h *engineHost) DistLock(name string) *engine.DistLock {
 // primitives this host was built with.
 func (h *engineHost) GoroutineTunables() core.GoroutineTunables { return core.NewGoroutineTunables(h) }
 
+// ScopedHost forwards the mark by type assertion, so the method set is held
+// here rather than left to that assertion to discover at run time.
+var _ core.LoopbackMarker = (*engineHost)(nil)
+
 // MarkLoopback implements core.LoopbackMarker with the mark the engine's
 // listeners recognize as their own process.
 func (h *engineHost) MarkLoopback(req *http.Request) { apimw.MarkLoopback(req) }
