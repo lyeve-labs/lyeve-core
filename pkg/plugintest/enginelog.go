@@ -3,6 +3,7 @@ package plugintest
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"sort"
 	"strings"
@@ -103,11 +104,18 @@ func EngineLogger(levels observability.LogLevelManager) (*slog.Logger, *EngineLo
 // CaptureEngineLog makes an EngineLogger the default logger for the rest of
 // the test and returns what it stores. The default logger is process-wide, so
 // a test that captures cannot run in parallel with another test that logs.
+// Making it the default also sends the log package's output to its handler,
+// and making the old logger the default again leaves the output there, so the
+// capture puts back the log package's writer and flags when the test ends.
 func CaptureEngineLog(t testing.TB, levels observability.LogLevelManager) *EngineLog {
 	t.Helper()
 	logger, l := EngineLogger(levels)
-	prev := slog.Default()
+	prev, writer, flags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(logger)
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(writer)
+		log.SetFlags(flags)
+	})
 	return l
 }
