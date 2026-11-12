@@ -146,3 +146,37 @@ func TestScopedHost_MediaLibrary_ReportsTheRegisteredUploadLimit(t *testing.T) {
 	_, ok = consumer.MediaLibrary().(MediaUploadLimiter)
 	assert.False(t, ok, "a library that reports no limit read as reporting one")
 }
+
+// publishingMediaLibrary is a library that confirms its published files.
+type publishingMediaLibrary struct {
+	fakeMediaLibrary
+	published MediaItem
+}
+
+func (p *publishingMediaLibrary) PublishedMedia(context.Context, []uuid.UUID) ([]MediaItem, error) {
+	return []MediaItem{p.published}, nil
+}
+
+// A consumer confirms published files by asserting PublishedMediaReader on
+// the library its scoped host returns, so the host must hand back the
+// registered value itself, and a library that confirms nothing must not
+// appear to.
+func TestScopedHost_MediaLibrary_ConfirmsPublishedMediaThroughTheRegisteredLibrary(t *testing.T) {
+	inner := &mediaLibraryHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "library-owner", CapMediaLibrary)
+	consumer := NewScopedHost(inner, "editor", CapRoutes)
+	ctx := WithTenantID(context.Background(), "acme")
+	file := MediaItem{ID: uuid.New(), Filename: "hero.jpg"}
+	file.PublicPath = "/api/v1/media/" + file.ID.String() + "/hero.jpg"
+
+	require.NoError(t, owner.RegisterMediaLibrary(&publishingMediaLibrary{published: file}))
+	reader, ok := consumer.MediaLibrary().(PublishedMediaReader)
+	require.True(t, ok, "the scoped host hid the library's published files")
+	got, err := reader.PublishedMedia(ctx, []uuid.UUID{file.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []MediaItem{file}, got)
+
+	require.NoError(t, owner.RegisterMediaLibrary(&fakeMediaLibrary{}))
+	_, ok = consumer.MediaLibrary().(PublishedMediaReader)
+	assert.False(t, ok, "a library that confirms no published file read as confirming them")
+}
