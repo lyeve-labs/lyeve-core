@@ -53,6 +53,24 @@ type MediaUploadLimiter interface {
 	MaxUploadBytes(ctx context.Context) int64
 }
 
+// MaxPublishedMediaIDs is the most ids one PublishedMedia call may name.
+const MaxPublishedMediaIDs = 100
+
+// PublishedMediaReader is implemented by a MediaLibrary that confirms which
+// files are published, so a caller can keep an address only when it names a
+// published file of the tenant. It is optional: a caller asserts it on the
+// library it holds and confirms no file when the library does not implement
+// it.
+type PublishedMediaReader interface {
+	// PublishedMedia returns the files among ids that the tenant on ctx
+	// holds, has published and may serve, each once with PublicPath set,
+	// in no set order. A file of another tenant, an unpublished one, a
+	// deleted one and one whose virus scan found it infected or failed are
+	// left out without an error. More than MaxPublishedMediaIDs ids is
+	// ErrValidation, and a context without a tenant is ErrTenantRequired.
+	PublishedMedia(ctx context.Context, ids []uuid.UUID) ([]MediaItem, error)
+}
+
 // ErrMediaScanFailed is the refusal of a file the virus scan found infected.
 // It wraps ErrValidation, so a caller that tells the two apart checks for it
 // first.
