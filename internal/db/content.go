@@ -1326,7 +1326,7 @@ func (s *ContentStore) SetStatus(ctx context.Context, schemaName string, id uuid
 		return fmt.Errorf("set status %s: %w", schemaName, err)
 	}
 	if !sc.WithDraftPublish {
-		return fmt.Errorf("set status %s: %w: schema has no draft and publish", schemaName, domain.ErrValidation)
+		return fmt.Errorf("set status %s: %w: content type has no draft and publish", schemaName, domain.ErrValidation)
 	}
 	d := dialect.Must(s.pool.Engine())
 	tag, err := s.pool.Exec(ctx,
