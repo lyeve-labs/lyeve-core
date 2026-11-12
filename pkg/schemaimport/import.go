@@ -195,7 +195,7 @@ func ApplyBundle(ctx context.Context, eng Engine, b *Bundle) (Plan, error) {
 		return Plan{}, err
 	}
 	if blocked := plan.Blocked(); len(blocked) > 0 {
-		return plan, fmt.Errorf("import would fail: %v reference schemas that are neither in the bundle nor in the target", blocked)
+		return plan, fmt.Errorf("import would fail: %v reference content types that are neither in the bundle nor in the target", blocked)
 	}
 
 	byName := make(map[string]domain.Schema, len(b.Schemas))
