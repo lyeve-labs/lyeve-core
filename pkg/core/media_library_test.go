@@ -119,3 +119,30 @@ func TestCapMediaLibrary_IsARoleCapability(t *testing.T) {
 	assert.True(t, CapAll.Has(CapMediaLibrary))
 	assert.Equal(t, "CapMediaLibrary", capName(CapMediaLibrary))
 }
+
+// limitedMediaLibrary is a library that reports its size limit.
+type limitedMediaLibrary struct {
+	fakeMediaLibrary
+	limit int64
+}
+
+func (l *limitedMediaLibrary) MaxUploadBytes(context.Context) int64 { return l.limit }
+
+// A consumer reaches the limit by asserting MediaUploadLimiter on the library
+// its scoped host returns, so the host must hand back the registered value
+// itself, and a library that does not report one must not appear to.
+func TestScopedHost_MediaLibrary_ReportsTheRegisteredUploadLimit(t *testing.T) {
+	inner := &mediaLibraryHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "library-owner", CapMediaLibrary)
+	consumer := NewScopedHost(inner, "editor", CapRoutes)
+	ctx := WithTenantID(context.Background(), "acme")
+
+	require.NoError(t, owner.RegisterMediaLibrary(&limitedMediaLibrary{limit: 8 << 20}))
+	limiter, ok := consumer.MediaLibrary().(MediaUploadLimiter)
+	require.True(t, ok, "the scoped host hid the library's upload limit")
+	assert.Equal(t, int64(8<<20), limiter.MaxUploadBytes(ctx))
+
+	require.NoError(t, owner.RegisterMediaLibrary(&fakeMediaLibrary{}))
+	_, ok = consumer.MediaLibrary().(MediaUploadLimiter)
+	assert.False(t, ok, "a library that reports no limit read as reporting one")
+}
