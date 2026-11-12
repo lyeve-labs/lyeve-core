@@ -13,7 +13,7 @@ import (
 // refusal.
 var (
 	ErrNoCaller         = errors.New("no caller")
-	ErrSchemaNotAllowed = errors.New("schema not allowed for this credential")
+	ErrSchemaNotAllowed = errors.New("content type not allowed for this credential")
 	ErrScopeDenied      = errors.New("insufficient scope")
 	ErrPermissionDenied = errors.New("permission denied")
 	// ErrHiddenFieldQueried is a filter or a sort that names a field the

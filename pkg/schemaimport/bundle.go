@@ -76,7 +76,7 @@ func ParseBundle(data []byte) (*Bundle, error) {
 		return nil, fmt.Errorf("bundle version %d is newer than this engine understands (%d)", b.Version, BundleVersion)
 	}
 	if len(b.Schemas) == 0 {
-		return nil, fmt.Errorf("bundle declares no schemas")
+		return nil, fmt.Errorf("bundle declares no content types")
 	}
 	if err := b.Validate(); err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (b *Bundle) Validate() error {
 	for i := range b.Schemas {
 		s := &b.Schemas[i]
 		if _, dup := seen[s.Name]; dup {
-			return fmt.Errorf("schema %q is declared twice", s.Name)
+			return fmt.Errorf("content type %q is declared twice", s.Name)
 		}
 		seen[s.Name] = struct{}{}
 	}
