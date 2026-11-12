@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"log"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -68,9 +69,13 @@ func captureLines(t *testing.T) func() []loggedLine {
 	t.Helper()
 	var mu sync.Mutex
 	var lines []loggedLine
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(logging.NewEnrichHandler(lineRecorder{mu: &mu, lines: &lines}, logging.NewLevelMap(slog.LevelDebug))))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return func() []loggedLine {
 		mu.Lock()
 		defer mu.Unlock()

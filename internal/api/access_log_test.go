@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -62,9 +63,13 @@ func (c *logCapture) requestLines() []map[string]any {
 func captureAccessLog(t *testing.T) *logCapture {
 	t.Helper()
 	cap := &logCapture{}
-	previous := slog.Default()
+	previous, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(cap, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return cap
 }
 

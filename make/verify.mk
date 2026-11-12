@@ -9,7 +9,7 @@
         lint-no-test-seams lint-no-typography-in-strings \
         lint-mysql-text-default lint-mysql-inline-references lint-mssql-merge-holdlock \
         lint-mysql-index-guard lint-no-insert-ignore lint-sql-bool-literal lint-validate-tags lint-inert-tests lint-bare-goroutines \
-        lint-dialect-gates \
+        lint-dialect-gates lint-log-output-restore \
         build-dev lint-secrets \
         verify verify-ci preflight
 
@@ -77,6 +77,9 @@ lint-bare-goroutines: ## Fail if engine source starts a goroutine that does not 
 lint-dialect-gates: ## Fail if a test starts a database server without asking whether CI_DIALECT covers it
 	@bash tools/lint-dialect-gates.sh
 
+lint-log-output-restore: ## Fail if a test makes a logger the default and leaves the log package writing to it
+	@bash tools/lint-log-output-restore.sh
+
 lint-mssql-merge-holdlock: ## Fail if an MSSQL MERGE upsert does not take a range lock
 	@bash tools/lint-mssql-merge-holdlock.sh
 
@@ -124,7 +127,7 @@ VERIFY_CORE_LINTS := lint-no-plugin-source env-parity lint-core-pure \
                      lint-mysql-index-guard lint-no-test-seams lint-no-typography-in-strings \
                      lint-no-insert-ignore lint-sql-bool-literal \
                      lint-validate-tags lint-inert-tests lint-bare-goroutines \
-                     lint-dialect-gates
+                     lint-dialect-gates lint-log-output-restore
 
 # What CI enforces: everything verify runs except the secret scan. That shells
 # out to whichever gitleaks is on PATH, so the workflow runs it itself against

@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"strings"
 	"sync"
@@ -161,9 +162,13 @@ func (b *lockedBuffer) count(substr string) int {
 func captureWarnings(t *testing.T) *lockedBuffer {
 	t.Helper()
 	buf := &lockedBuffer{}
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return buf
 }
 

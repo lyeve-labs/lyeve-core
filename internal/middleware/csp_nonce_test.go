@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -103,9 +104,13 @@ func TestCSPNonce_ErrorLogging(t *testing.T) {
 	// The previous default is read before the swap: a deferred call's
 	// argument is read when the defer runs, after the swap. Concurrent tests
 	// would conflict, and -race on the suite catches that.
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(logHandler))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	r := chi.NewRouter()
 	r.Use(apimw.CSPNonce())
