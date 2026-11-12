@@ -5,6 +5,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -40,9 +41,13 @@ func TestAuthIntegration_Login_RiskLinesLogADigestNotTheAddress(t *testing.T) {
 	h.WithDeviceRiskAssessor(alertingRiskAssessor{})
 
 	var out bytes.Buffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&out, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/auth/login",
 		strings.NewReader(makeLoginBody(address, "correct-password")))

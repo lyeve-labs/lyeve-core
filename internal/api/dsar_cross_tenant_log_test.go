@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -49,9 +50,13 @@ func engineLogs(t *testing.T, tenant string) (*logstream.Buffer, *entrySink) {
 	enrich := logging.NewEnrichHandler(logstream.NewInterceptor(base, ring), levels)
 	sink := &entrySink{}
 	enrich.SetSink(sink)
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(enrich.Logger())
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return ring, sink
 }
 

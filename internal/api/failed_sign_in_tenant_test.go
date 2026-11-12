@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -63,9 +64,13 @@ func captureStampedLogs(t *testing.T) func(userID uuid.UUID) []stampedRecord {
 	t.Helper()
 	var mu sync.Mutex
 	var records []stampedRecord
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(logging.NewEnrichHandler(stampRecorder{mu: &mu, records: &records}, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return func(userID uuid.UUID) []stampedRecord {
 		mu.Lock()
 		defer mu.Unlock()

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"log"
 	"log/slog"
 	"net/http"
 	"testing"
@@ -20,9 +21,13 @@ import (
 func captureWarnings(t *testing.T, fn func()) string {
 	t.Helper()
 	var buf bytes.Buffer
-	previous := slog.Default()
+	previous, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	fn()
 	return buf.String()
 }

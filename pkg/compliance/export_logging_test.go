@@ -3,6 +3,7 @@ package compliance
 import (
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"strings"
 	"testing"
@@ -42,9 +43,13 @@ func TestSubjectExport_LogsADigestNotTheIdentifier(t *testing.T) {
 			})
 
 			var buf bytes.Buffer
-			restore := slog.Default()
+			restore, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(restore) })
+			t.Cleanup(func() {
+				slog.SetDefault(restore)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			})
 
 			require.NoError(t, tc.run())
 
