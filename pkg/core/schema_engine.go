@@ -43,6 +43,29 @@ type SchemaEngine interface {
 	ValidateContent(ctx context.Context, schemaName string, data map[string]any) ([]SchemaValidationError, error)
 }
 
+// SchemaCreator is a SchemaEngine that can create a content type without
+// ever altering one. A caller finds it by asserting it on the engine Schema
+// returns, which with CapSchema is the registered engine itself.
+//
+// Apply is an upsert, so a caller that reads the definitions, finds a name
+// absent and then applies it alters a type someone created in between. Create
+// decides that the name is absent under the same lock its DDL takes.
+type SchemaCreator interface {
+	// Create stores the definition and applies its DDL as Apply does, but
+	// only when the tenant on ctx holds no schema of that name. A name it
+	// already holds is an error wrapping ErrSchemaExists, and nothing is
+	// changed. A name that differs from one the tenant holds only in case
+	// is ErrSchemaExists too, so no caller reads the error's text. Any other
+	// refusal is the one Apply would answer.
+	Create(ctx context.Context, name string, definition json.RawMessage) error
+}
+
+// ErrSchemaExists is what SchemaCreator.Create answers for a name the tenant
+// already holds. It wraps ErrConflict, so it maps to 409, and it is a
+// sentinel of its own because another tenant storing the table another way
+// is a conflict too, and a caller acts on the two differently.
+var ErrSchemaExists = fmt.Errorf("the tenant already holds a schema of that name: %w", ErrConflict)
+
 // SchemaValidationError is a single schema validation failure returned by
 // SchemaEngine.ValidateContent.
 type SchemaValidationError struct {

@@ -100,6 +100,7 @@ func TestStoreError_LogsNothingForACallerOutcome(t *testing.T) {
 	}{
 		{core.ErrNotFound, http.StatusNotFound},
 		{fmt.Errorf("create: %w", core.ErrConflict), http.StatusConflict},
+		{fmt.Errorf("create products: %w", core.ErrSchemaExists), http.StatusConflict},
 		{fmt.Errorf("save: %w", core.ErrValidation), http.StatusBadRequest},
 	} {
 		w := httptest.NewRecorder()
