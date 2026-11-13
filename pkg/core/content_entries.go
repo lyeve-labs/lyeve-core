@@ -49,8 +49,9 @@ type ContentEntryRevisionDeleter interface {
 	// DeleteContentEntryAt removes an entry the tenant on ctx holds while
 	// it is still at revision. The revision is compared under the lock the
 	// delete takes, so an edit that commits after the caller read the entry
-	// keeps it, and the answer wraps ErrConflict. An entry the tenant does
-	// not hold is ErrNotFound.
+	// keeps it, and the answer wraps ErrConflict. A revision below 1 is
+	// ErrValidation. An entry the tenant does not hold is ErrNotFound, and a
+	// context without a tenant is ErrTenantRequired.
 	DeleteContentEntryAt(ctx context.Context, id uuid.UUID, revision int) error
 }
 

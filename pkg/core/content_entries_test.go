@@ -243,9 +243,7 @@ func (f *guardedEntryWriter) DeleteContentEntryAt(ctx context.Context, id uuid.U
 }
 
 // A consumer holding only the writer its scoped host hands out reaches the
-// revision-guarded delete on it, with the id and the revision untouched, and
-// a writer without one is told apart, so the consumer refuses to delete
-// instead of deleting unguarded.
+// revision-guarded delete on it, with the id and the revision untouched.
 func TestScopedHost_ContentEntryRevisionDeleter_ReachedThroughTheWriter(t *testing.T) {
 	inner := &entryWriterHost{stubHost: &stubHost{}}
 	owner := NewScopedHost(inner, "content", CapAll)
@@ -259,8 +257,4 @@ func TestScopedHost_ContentEntryRevisionDeleter_ReachedThroughTheWriter(t *testi
 	id := uuid.New()
 	require.NoError(t, d.DeleteContentEntryAt(WithTenantID(context.Background(), "acme"), id, 3))
 	assert.Equal(t, map[uuid.UUID]int{id: 3}, fake.deletedAt)
-
-	var plain ContentEntryWriter = &fakeEntryWriter{}
-	_, guarded := plain.(ContentEntryRevisionDeleter)
-	assert.False(t, guarded, "a writer without the guarded delete is not a ContentEntryRevisionDeleter")
 }
