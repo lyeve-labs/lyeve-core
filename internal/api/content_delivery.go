@@ -55,6 +55,10 @@ const deliveryPreflightMaxAge = "86400"
 // is not marked, so a filter cannot tell a hidden field from a missing one.
 const deliveryFiltersRefused = "invalid query parameter: filters"
 
+// deliverySortRefused is the one answer to a sort the grammar does not admit,
+// for the reason deliveryFiltersRefused is one answer.
+const deliverySortRefused = "invalid query parameter: sort"
+
 // deliveryCachePolicy is what a delivery answer is served with. The routes
 // refuse every credentialed request, so the answer varies by no credential.
 func deliveryCachePolicy(maxAge, sharedMaxAge time.Duration) apimw.CachePolicy {
@@ -155,6 +159,7 @@ type deliveryQuery struct {
 	filters  map[string]string
 	populate domain.PopulateConfig
 	fields   []string
+	sort     db.ListSort
 }
 
 // parseDeliveryQuery holds the query to the delivery grammar, answering 400
@@ -221,6 +226,12 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 				return refuse("invalid query parameter: offset")
 			}
 			q.offset = n
+		case list && key == "sort":
+			col, desc := strings.CutPrefix(v, "-")
+			if col == "" {
+				return refuse(deliverySortRefused)
+			}
+			q.sort = db.ListSort{Column: col, Desc: desc}
 		case list && isFilter && closed && col != "":
 			if len(v) > deliveryMaxFilterValue || len(q.filters) == deliveryMaxFilters {
 				return refuse(deliveryFiltersRefused)
@@ -320,14 +331,40 @@ func (d *deliveryReader) hiddenFields(sc *core.Schema) (core.HiddenFields, error
 	return hidden, nil
 }
 
+// deliveryOrdered reports whether delivery may sort or bound by col, which
+// holds for created_at alone. The tenant index on every generated table holds
+// created_at, so a page reads the rows it serves. A sort on any other column,
+// updated_at included, sorts the tenant's whole table for each request, and
+// delivery answers anyone, with offset, limit and bounds that each make a URL
+// no cache holds. The authenticated content list keeps the wider set.
+func deliveryOrdered(col string) bool {
+	return col == "created_at"
+}
+
+// deliveryRange admits filters[created_at][gte] and [lte] with a datetime in
+// any form a write accepts, and answers the column and the bound. The value
+// goes to the store as written, which parses it the same way.
+func deliveryRange(key, v string) (string, string, bool) {
+	for _, op := range rangeOps {
+		col, cut := strings.CutSuffix(key, "]["+op)
+		if !cut {
+			continue
+		}
+		_, ok := db.ParseContentTime(v)
+		return col, op, ok && deliveryOrdered(col)
+	}
+	return "", "", false
+}
+
 // deliveryFilters admits a filter on id and on the column of each field
 // delivery serves whose values it can check, with a value of that field's
-// form, and refuses everything else with the one answer an unknown field
-// gets. A checked value goes to the query in the form its column compares,
-// so no dialect sees a value its column cannot hold.
-func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string]string) (map[string]any, bool) {
+// form, and a bound deliveryRange admits, and refuses everything else with
+// the one answer an unknown field gets. A checked value goes to the query in
+// the form its column compares, so no dialect sees a value its column cannot
+// hold.
+func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string]string) (map[string]any, map[string]db.ListRange, bool) {
 	if len(asked) == 0 {
-		return nil, true
+		return nil, nil, true
 	}
 	columns := map[string]core.SchemaField{"id": {Name: "id", FieldType: "uid"}}
 	for _, f := range sc.Fields {
@@ -342,16 +379,34 @@ func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string
 		}
 	}
 	out := make(map[string]any, len(asked))
+	var ranges map[string]db.ListRange
 	for col, v := range asked {
+		if strings.Contains(col, "][") {
+			rcol, op, ok := deliveryRange(col, v)
+			if !ok {
+				return nil, nil, false
+			}
+			if ranges == nil {
+				ranges = map[string]db.ListRange{}
+			}
+			bound := ranges[rcol]
+			if op == "gte" {
+				bound.GTE = v
+			} else {
+				bound.LTE = v
+			}
+			ranges[rcol] = bound
+			continue
+		}
 		f, ok := columns[col]
 		if !ok || hidden.Names(col) {
-			return nil, false
+			return nil, nil, false
 		}
 		if out[col], ok = deliveryFilterValue(f, v); !ok {
-			return nil, false
+			return nil, nil, false
 		}
 	}
-	return out, true
+	return out, ranges, true
 }
 
 // deliveryFilterValue reads v as a value of f, in the forms the content API
@@ -522,10 +577,16 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	filters, ok := deliveryFilters(sc, hidden, q.filters)
+	filters, ranges, ok := deliveryFilters(sc, hidden, q.filters)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, deliveryFiltersRefused)
 		return
+	}
+	if q.sort.Column != "" {
+		if !deliveryOrdered(q.sort.Column) {
+			httpx.ErrorReq(w, r, http.StatusBadRequest, deliverySortRefused)
+			return
+		}
 	}
 	if !h.deliveryPaths(w, r, d, sc, q.populate.Paths) {
 		return
@@ -538,7 +599,9 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 	if !h.deliveryBeforeRequest(w, r, sc.Name, "list") {
 		return
 	}
-	items, err := h.store.List(r.Context(), sc.Name, q.limit, q.offset, filters)
+	items, err := h.store.ListPage(r.Context(), sc.Name, db.ListQuery{
+		Limit: q.limit, Offset: q.offset, Filters: filters, Ranges: ranges, Sort: q.sort,
+	})
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
 		return

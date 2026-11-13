@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
@@ -57,7 +58,13 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
 		return
 	}
-	if !h.refuseHiddenFilters(w, r, schemaName, filters) {
+	ranges := takeRanges(filters)
+	sort, ok := parseListSort(r)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
+		return
+	}
+	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(filters, ranges, sort)) {
 		return
 	}
 	loc, locale, ok := h.readLocale(w, r)
@@ -70,7 +77,9 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	h.draftResponse(w, r, schemaName)
 
-	items, err := h.store.List(r.Context(), schemaName, limit, offset, filters)
+	items, err := h.store.ListPage(r.Context(), schemaName, db.ListQuery{
+		Limit: limit, Offset: offset, Filters: filters, Ranges: ranges, Sort: sort,
+	})
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
 		return
@@ -426,12 +435,20 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: limit")
 		return
 	}
+	sort, ok := parseListSort(r)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
+		return
+	}
+	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(nil, nil, sort)) {
+		return
+	}
 	loc, locale, ok := h.readLocale(w, r)
 	if !ok {
 		return
 	}
 
-	items, err := h.store.ListCursor(r.Context(), schemaName, cursor, limit, h.draftResponse(w, r, schemaName))
+	items, err := h.store.ListCursorSorted(r.Context(), schemaName, cursor, limit, h.draftResponse(w, r, schemaName), sort)
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
 		return
@@ -543,12 +560,13 @@ func (h *ContentHandler) checkStatusFilter(w http.ResponseWriter, r *http.Reques
 	return false
 }
 
-// refuseHiddenFilters answers 403 when a filter names a field the caller's
-// mask hides, and returns false after answering. The mask keeps the field out
-// of the response, but a filter on it still says which entries hold a guessed
-// value, so it reads the field one guess at a time.
-func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Request, schema string, filters map[string]any) bool {
-	if len(filters) == 0 {
+// refuseHiddenFilters answers 403 when a filter, a range or a sort names a
+// field the caller's mask hides, and returns false after answering. The mask
+// keeps the field out of the response, but a filter on it still says which
+// entries hold a guessed value, so it reads the field one guess at a time,
+// and a sort or a range reads its order.
+func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Request, schema string, columns []string) bool {
+	if len(columns) == 0 {
 		return true
 	}
 	hidden, err := h.hiddenFields(r, schema)
@@ -560,7 +578,7 @@ func (h *ContentHandler) refuseHiddenFilters(w http.ResponseWriter, r *http.Requ
 		httpx.StoreError(w, r, err, "database error")
 		return false
 	}
-	for key := range filters {
+	for _, key := range columns {
 		if hidden.Names(key) {
 			httpx.ErrorReq(w, r, http.StatusForbidden, core.ErrHiddenFieldQueried.Error())
 			return false
@@ -597,6 +615,72 @@ func parseFilters(r *http.Request) (map[string]any, error) {
 		}
 	}
 	return out, nil
+}
+
+// rangeOps are the bounds a list filter may put on a column, written
+// filters[field][gte] and filters[field][lte].
+var rangeOps = []string{"gte", "lte"}
+
+// takeRanges moves each filters[field][gte] and filters[field][lte] that
+// parseFilters read out of filters and into the ranges it answers. Any other
+// bracketed key stays a filter, which the store refuses as an unknown column.
+func takeRanges(filters map[string]any) map[string]db.ListRange {
+	var ranges map[string]db.ListRange
+	for key, v := range filters {
+		for _, op := range rangeOps {
+			col, ok := strings.CutSuffix(key, "]["+op)
+			if !ok || col == "" {
+				continue
+			}
+			if ranges == nil {
+				ranges = map[string]db.ListRange{}
+			}
+			bound := ranges[col]
+			if op == "gte" {
+				bound.GTE = v
+			} else {
+				bound.LTE = v
+			}
+			ranges[col] = bound
+			delete(filters, key)
+		}
+	}
+	return ranges
+}
+
+// parseListSort reads ?sort=field, or ?sort=-field for the reverse order.
+// No sort answers the zero value. An empty sort, a bare minus and a sort
+// given twice answer false. Whether the field may be sorted by is the
+// store's question, because it reads the schema.
+func parseListSort(r *http.Request) (db.ListSort, bool) {
+	vals, ok := r.URL.Query()["sort"]
+	if !ok {
+		return db.ListSort{}, true
+	}
+	if len(vals) != 1 {
+		return db.ListSort{}, false
+	}
+	col, desc := strings.CutPrefix(vals[0], "-")
+	if col == "" {
+		return db.ListSort{}, false
+	}
+	return db.ListSort{Column: col, Desc: desc}, true
+}
+
+// queriedColumns answers every column a list query reads a value of: each
+// filter, each range and the sort.
+func queriedColumns(filters map[string]any, ranges map[string]db.ListRange, sort db.ListSort) []string {
+	out := make([]string, 0, len(filters)+len(ranges)+1)
+	for col := range filters {
+		out = append(out, col)
+	}
+	for col := range ranges {
+		out = append(out, col)
+	}
+	if sort.Column != "" {
+		out = append(out, sort.Column)
+	}
+	return out
 }
 
 // storeError answers a failed store call and, when the answer is a 5xx, writes

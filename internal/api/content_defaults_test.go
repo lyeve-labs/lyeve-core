@@ -94,6 +94,22 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "meta", "field_type": "json"}
 		]
 	}`},
+	// A field of each type a list sorts and bounds, and one a mask can hide.
+	"fixtures": {`{
+		"name": "fixtures",
+		"display_name": "Fixtures",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "score", "field_type": "number"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "seed", "field_type": "integer"}
+		]
+	}`},
 	"drafts": {`{
 		"name": "drafts",
 		"display_name": "Drafts",
@@ -281,6 +297,7 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "title", "field_type": "text", "required": true, "indexed": true},
 			{"name": "body", "field_type": "text"},
 			{"name": "secret", "field_type": "text", "private": true},
+			{"name": "tally", "field_type": "integer", "private": true},
 			{"name": "author", "field_type": "relation", "relation_to": "dl_people", "relation_type": "belongs_to"},
 			{"name": "vault", "field_type": "relation", "relation_to": "dl_vaults", "relation_type": "belongs_to"},
 			{"name": "tags", "field_type": "relation", "relation_to": "dl_tags", "relation_type": "many_to_many"},
