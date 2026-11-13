@@ -94,6 +94,22 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "meta", "field_type": "json"}
 		]
 	}`},
+	// A field of each type a list sorts and bounds, and one a mask can hide.
+	"fixtures": {`{
+		"name": "fixtures",
+		"display_name": "Fixtures",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "score", "field_type": "number"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "seed", "field_type": "integer"}
+		]
+	}`},
 	"drafts": {`{
 		"name": "drafts",
 		"display_name": "Drafts",

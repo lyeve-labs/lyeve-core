@@ -132,11 +132,18 @@ func cacheItemKey(tenantID, schemaName string, id uuid.UUID) string {
 }
 
 // cacheListKey returns a stable cache key for a list query.
-func cacheListKey(tenantID, schemaName string, limit, offset int, filters map[string]any) string {
-	h := fmt.Sprintf("%s:%s:l=%d:o=%d", tenantID, schemaName, limit, offset)
-	if len(filters) > 0 {
-		b, _ := json.Marshal(filters)
+func cacheListKey(tenantID, schemaName string, q ListQuery) string {
+	h := fmt.Sprintf("%s:%s:l=%d:o=%d", tenantID, schemaName, q.Limit, q.Offset)
+	if len(q.Filters) > 0 {
+		b, _ := json.Marshal(q.Filters)
 		h += ":f=" + string(b)
+	}
+	if len(q.Ranges) > 0 {
+		b, _ := json.Marshal(q.Ranges)
+		h += ":r=" + string(b)
+	}
+	if q.Sort.Column != "" {
+		h += ":s=" + q.Sort.String()
 	}
 	return h
 }
@@ -414,41 +421,58 @@ func (s *ContentStore) softDeleted(ctx context.Context, schemaName string, id uu
 	return n > 0, nil
 }
 
-// List returns up to limit rows from the calling tenant's collection table,
-// ordered by created_at DESC, then id DESC. Rows can share a created_at:
-// Postgres stamps every row of one transaction with one time, and MySQL every
-// row of one statement. Offset pages over tied rows can repeat some and skip
-// others, so the unique id breaks the tie. filters maps column names to
-// exact-match values (safe: column names come from schema). User-defined field
-// values are returned inside Content.Data.
+// List returns up to limit rows from the calling tenant's collection table
+// in the default order, filtered by exact-match values. See ListPage.
 func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offset int, filters map[string]any) ([]*domain.Content, error) {
+	return s.ListPage(ctx, schemaName, ListQuery{Limit: limit, Offset: offset, Filters: filters})
+}
+
+// ListPage returns up to q.Limit rows from the calling tenant's collection
+// table. With no sort the order is created_at DESC, then id DESC. Rows can
+// share a created_at: Postgres stamps every row of one transaction with one
+// time, and MySQL every row of one statement. Offset pages over tied rows can
+// repeat some and skip others, so the unique id breaks the tie, and it breaks
+// a tie on a sort field the same way. q.Filters maps column names to
+// exact-match values and q.Ranges to inclusive bounds (safe: column names come
+// from schema). User-defined field values are returned inside Content.Data.
+func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQuery) ([]*domain.Content, error) {
+	limit, offset, filters := q.Limit, q.Offset, q.Filters
 	// limit<=0 means "no rows" per the pagination contract. MSSQL rejects
 	// FETCH NEXT 0 ROWS ONLY, so short-circuit before building the query.
 	if limit <= 0 {
 		return []*domain.Content{}, nil
 	}
 
-	// A filtered list resolves its schema before the cache, so the key holds
-	// each value as the column compares it: 10 and 10.00 on a decimal field
-	// are one entry. An unfiltered list keeps the cache read first.
+	// A filtered or sorted list resolves its schema before the cache, so the
+	// key holds each value as the column compares it (10 and 10.00 on a
+	// decimal field are one entry) and names only a sort the schema allows.
+	// A plain list keeps the cache read first.
 	var (
-		sc    *domain.Schema
-		table string
-		err   error
+		sc     *domain.Schema
+		table  string
+		err    error
+		ranges map[string]ListRange
 	)
-	if len(filters) > 0 {
+	if len(filters) > 0 || len(q.Ranges) > 0 || q.Sort.Column != "" {
 		if sc, table, err = s.table(ctx, schemaName); err != nil {
 			return nil, err
 		}
 		if filters, err = typedFilters(sc, filters); err != nil {
 			return nil, err
 		}
+		if ranges, err = typedRanges(sc, q.Ranges); err != nil {
+			return nil, err
+		}
+		if _, err = orderedField(sc, q.Sort.Column); err != nil {
+			return nil, err
+		}
+		q.Filters, q.Ranges = filters, ranges
 	}
 
 	// Cache read
 	tenantID := tenant.ID(ctx)
 	if s.listCache != nil && writeTx(ctx) == nil {
-		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
+		key := cacheListKey(tenantID, schemaName, q)
 		if cached, ok := s.listCache.Get(ctx, key); ok {
 			s.ListCacheHits.Add(1)
 			// Copied: callers decorate Data in place. See content_clone.go.
@@ -495,9 +519,27 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 
 		i++
 	}
+	for _, col := range slices.Sorted(maps.Keys(ranges)) {
+		bound := ranges[col]
+		for _, b := range []struct {
+			op string
+			v  any
+		}{{">=", bound.GTE}, {"<=", bound.LTE}} {
+			if b.v == nil {
+				continue
+			}
+			whereClauses = append(whereClauses, fmt.Sprintf("r.%s %s %s", d.QuoteIdentifier(col), b.op, filterParam(s.pool.Engine(), sc, col, i)))
+			args = append(args, b.v)
+			i++
+		}
+	}
 	where := ""
 	if len(whereClauses) > 0 {
 		where = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	orderBy := "created_at DESC, id DESC"
+	if q.Sort.Column != "" {
+		orderBy = q.Sort.orderBy(d)
 	}
 
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
@@ -505,8 +547,8 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		       %s
 		FROM %s r
 		%s
-		ORDER BY created_at DESC, id DESC
-		%s`, plan.selectExpr, table, where, plan.pagination),
+		ORDER BY %s
+		%s`, plan.selectExpr, table, where, orderBy, plan.pagination),
 		args...,
 	)
 	if err != nil {
@@ -528,7 +570,7 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 	// Cache write: skip for oversized limits (abusive or direct-caller paths).
 	// The handler clamps to ≤200. This guard covers unclamped callers.
 	if s.listCache != nil && limit <= 200 && writeTx(ctx) == nil {
-		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
+		key := cacheListKey(tenantID, schemaName, q)
 		// The cache keeps its own copy so that what it holds stays as the
 		// database returned it, whatever the caller does to the page it got.
 		_ = s.listCache.Set(ctx, key, cloneContents(items), 0) // err suppressed: cache is best-effort
@@ -1169,9 +1211,22 @@ func (w *actionWalker) ids(q string, args ...any) ([]uuid.UUID, error) {
 // no filter, so it cannot follow the offset list's default of published
 // unless a status is named.
 func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int, drafts bool) ([]*domain.Content, error) {
+	return s.ListCursorSorted(ctx, schemaName, cursor, limit, drafts, ListSort{})
+}
+
+// ListCursorSorted is ListCursor in the order sort names, or in id order
+// when it names none. The cursor stays the id of the last row served, and the
+// next page compares against that row's stored value, read under the
+// caller's tenant, so no value travels through the client. A cursor that
+// names no row of the tenant is domain.ErrBadRequest: an empty page would
+// read as the end of the list.
+func (s *ContentStore) ListCursorSorted(ctx context.Context, schemaName string, cursor string, limit int, drafts bool, sort ListSort) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
+	}
+	if sort.Column != "" {
+		return s.listCursorSorted(ctx, sc, table, cursor, limit, drafts, sort)
 	}
 	if limit <= 0 || limit > 1000 {
 		limit = 20

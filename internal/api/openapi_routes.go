@@ -114,7 +114,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
 	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.", Schema: map[string]any{"type": "string"}}
-	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value, or lies within a bound, written filters[field][gte]=value and filters[field][lte]=value, inclusive. A bound applies to created_at, updated_at and number, integer, decimal, date and datetime fields. A field the content type does not have, or a bound on any other field, answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+	sort := openAPIParameter{Name: "sort", In: "query", Description: "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.", Schema: map[string]any{"type": "string"}}
 	err400 := map[string]any{"description": "A query parameter that cannot be read"}
 	err503Locale := map[string]any{"description": "The translations could not be read"}
 	err422 := map[string]any{"description": "Validation failed"}
@@ -127,8 +128,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0}},
-				filters, populate, depth, locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter names a field this caller may not read"}, "404": err404, "503": err503Locale},
+				filters, sort, populate, depth, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter or the sort names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
@@ -139,12 +140,12 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	}
 	paths[base+"/cursor"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned.", Security: bearer,
+			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record that no longer exists answers 400.", Security: bearer,
 			Parameters: []openAPIParameter{schema,
 				{Name: "cursor", In: "query", Description: "The cursor from the previous page; empty for the first page.", Schema: map[string]any{"type": "string"}},
 				{Name: "limit", In: "query", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
-				locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
+				sort, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "The sort names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 	}
 	paths[base+"/stream"] = openAPIPath{
@@ -865,10 +866,11 @@ func documentDelivery(paths map[string]openAPIPath) {
 	}
 	paths["/api/v1/delivery/{schema}"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, and inclusive bounds, written filters[field][gte]=value and filters[field][lte]=value, on created_at, updated_at and the number, integer, decimal, date and datetime fields served here.",
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
+				{Name: "sort", In: "query", Description: "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field served here. Records with no value come last either way, and records with equal values follow their id. Without it the list is newest first.", Schema: map[string]any{"type": "string"}},
 				populate, depth, fields},
 			Responses: responses,
 		},
