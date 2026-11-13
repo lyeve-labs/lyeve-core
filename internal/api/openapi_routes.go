@@ -140,7 +140,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	}
 	paths[base+"/cursor"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record that no longer exists answers 400.", Security: bearer,
+			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record this caller cannot read, or one that no longer exists, answers 400.", Security: bearer,
 			Parameters: []openAPIParameter{schema,
 				{Name: "cursor", In: "query", Description: "The cursor from the previous page; empty for the first page.", Schema: map[string]any{"type": "string"}},
 				{Name: "limit", In: "query", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},

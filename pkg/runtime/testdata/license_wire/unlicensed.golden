@@ -2464,7 +2464,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
+            "description": "Records whose field equals a value, written filters[field]=value, or lies within a bound, written filters[field][gte]=value and filters[field][lte]=value, inclusive. A bound applies to created_at, updated_at and number, integer, decimal, date and datetime fields. A field the content type does not have, or a bound on any other field, answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
             "explode": true,
             "in": "query",
             "name": "filters",
@@ -2476,6 +2476,15 @@ body (json, newline):
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "description": "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "description": "Relation fields to resolve inline, comma-separated, or * for all.",
@@ -2526,7 +2535,7 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "403": {
-            "description": "A filter names a field this caller may not read"
+            "description": "A filter or the sort names a field this caller may not read"
           },
           "404": {
             "description": "Not found"
@@ -2660,7 +2669,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/cursor": {
       "get": {
-        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record this caller cannot read, or one that no longer exists, answers 400.",
         "operationId": "listContentByCursor",
         "parameters": [
           {
@@ -2693,6 +2702,15 @@ body (json, newline):
             }
           },
           {
+            "description": "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
             "in": "query",
             "name": "locale",
@@ -2720,6 +2738,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "The sort names a field this caller may not read"
           },
           "404": {
             "description": "Not found"
@@ -3412,7 +3433,7 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, and inclusive bounds on created_at, written filters[created_at][gte]=value and filters[created_at][lte]=value.",
         "operationId": "listDeliveredContent",
         "parameters": [
           {
@@ -3445,6 +3466,15 @@ body (json, newline):
               "maximum": 10000,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The order of the list: sort=created_at for oldest first, or sort=-created_at for newest first, which is also the order without it. Records created at the same moment follow their id. Any other field answers 400.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -4897,7 +4927,7 @@ body (json, newline):
             }
           },
           {
-            "description": "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
+            "description": "Records whose field equals a value, written filters[field]=value, or lies within a bound, written filters[field][gte]=value and filters[field][lte]=value, inclusive. A bound applies to created_at, updated_at and number, integer, decimal, date and datetime fields. A field the content type does not have, or a bound on any other field, answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.",
             "explode": true,
             "in": "query",
             "name": "filters",
@@ -4909,6 +4939,15 @@ body (json, newline):
               "type": "object"
             },
             "style": "deepObject"
+          },
+          {
+            "description": "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           },
           {
             "description": "Relation fields to resolve inline, comma-separated, or * for all.",
@@ -4959,7 +4998,7 @@ body (json, newline):
             "description": "Unauthorized"
           },
           "403": {
-            "description": "A filter names a field this caller may not read"
+            "description": "A filter or the sort names a field this caller may not read"
           },
           "404": {
             "description": "Not found"
@@ -5093,7 +5132,7 @@ body (json, newline):
     },
     "/api/v1/content/{schema}/cursor": {
       "get": {
-        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned.",
+        "description": "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record this caller cannot read, or one that no longer exists, answers 400.",
         "operationId": "listContentByCursor",
         "parameters": [
           {
@@ -5126,6 +5165,15 @@ body (json, newline):
             }
           },
           {
+            "description": "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.",
             "in": "query",
             "name": "locale",
@@ -5153,6 +5201,9 @@ body (json, newline):
           },
           "401": {
             "description": "Unauthorized"
+          },
+          "403": {
+            "description": "The sort names a field this caller may not read"
           },
           "404": {
             "description": "Not found"
@@ -5845,7 +5896,7 @@ body (json, newline):
     },
     "/api/v1/delivery/{schema}": {
       "get": {
-        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+        "description": "Published records only, without the fields marked private and the relations into content types that are not marked. Served public with s-maxage and a strong ETag, so a CDN may keep the answer. The tenant comes from the host. A parameter outside the ones listed, or one sent twice, is refused. A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, and inclusive bounds on created_at, written filters[created_at][gte]=value and filters[created_at][lte]=value.",
         "operationId": "listDeliveredContent",
         "parameters": [
           {
@@ -5878,6 +5929,15 @@ body (json, newline):
               "maximum": 10000,
               "minimum": 0,
               "type": "integer"
+            }
+          },
+          {
+            "description": "The order of the list: sort=created_at for oldest first, or sort=-created_at for newest first, which is also the order without it. Records created at the same moment follow their id. Any other field answers 400.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
