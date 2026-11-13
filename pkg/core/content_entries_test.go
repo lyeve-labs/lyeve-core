@@ -226,3 +226,41 @@ func TestScopedHost_ContentEntryVersionLister_ReachedThroughTheWriter(t *testing
 	_, lists := older.(ContentEntryVersionLister)
 	assert.False(t, lists, "a store that reads but does not list is told apart")
 }
+
+// guardedEntryWriter is a writer that also deletes at a revision, as the
+// editorial store registers it.
+type guardedEntryWriter struct {
+	fakeEntryWriter
+	deletedAt map[uuid.UUID]int
+}
+
+func (f *guardedEntryWriter) DeleteContentEntryAt(ctx context.Context, id uuid.UUID, revision int) error {
+	if TenantIDFromCtx(ctx) == "" {
+		return ErrTenantRequired
+	}
+	f.deletedAt[id] = revision
+	return nil
+}
+
+// A consumer holding only the writer its scoped host hands out reaches the
+// revision-guarded delete on it, with the id and the revision untouched, and
+// a writer without one is told apart, so the consumer refuses to delete
+// instead of deleting unguarded.
+func TestScopedHost_ContentEntryRevisionDeleter_ReachedThroughTheWriter(t *testing.T) {
+	inner := &entryWriterHost{stubHost: &stubHost{}}
+	owner := NewScopedHost(inner, "content", CapAll)
+	consumer := NewScopedHost(inner, "pages", CapRoutes)
+
+	fake := &guardedEntryWriter{deletedAt: map[uuid.UUID]int{}}
+	require.NoError(t, owner.RegisterContentEntryWriter(fake))
+
+	d, ok := consumer.ContentEntryWriter().(ContentEntryRevisionDeleter)
+	require.True(t, ok, "the writer the host returns must keep the guarded delete it was registered with")
+	id := uuid.New()
+	require.NoError(t, d.DeleteContentEntryAt(WithTenantID(context.Background(), "acme"), id, 3))
+	assert.Equal(t, map[uuid.UUID]int{id: 3}, fake.deletedAt)
+
+	var plain ContentEntryWriter = &fakeEntryWriter{}
+	_, guarded := plain.(ContentEntryRevisionDeleter)
+	assert.False(t, guarded, "a writer without the guarded delete is not a ContentEntryRevisionDeleter")
+}
