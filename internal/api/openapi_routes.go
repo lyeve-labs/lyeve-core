@@ -866,11 +866,11 @@ func documentDelivery(paths map[string]openAPIPath) {
 	}
 	paths["/api/v1/delivery/{schema}"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, and inclusive bounds, written filters[field][gte]=value and filters[field][lte]=value, on created_at, updated_at and the number, integer, decimal, date and datetime fields served here.",
+			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, and inclusive bounds on created_at, written filters[created_at][gte]=value and filters[created_at][lte]=value.",
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
-				{Name: "sort", In: "query", Description: "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field served here. Records with no value come last either way, and records with equal values follow their id. Without it the list is newest first.", Schema: map[string]any{"type": "string"}},
+				{Name: "sort", In: "query", Description: "The order of the list: sort=created_at for oldest first, or sort=-created_at for newest first, which is also the order without it. Records created at the same moment follow their id. Any other field answers 400.", Schema: map[string]any{"type": "string"}},
 				populate, depth, fields},
 			Responses: responses,
 		},

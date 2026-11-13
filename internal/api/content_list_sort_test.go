@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
@@ -335,39 +336,126 @@ func TestContentList_SortOrRangeOnAHiddenFieldIsRefused(t *testing.T) {
 	})
 }
 
-// The delivery list sorts and bounds the fields it serves under its own
-// grammar: newest first by a date, with entries that have no date last, a
-// range counted among its four filters, and a private field refused with the
-// answer an unknown one gets.
-func TestDelivery_SortsAndBoundsServedFields(t *testing.T) {
+// The delivery list sorts and bounds by created_at alone, the one column
+// besides the tenant that its index holds. Every other field, updated_at
+// included, would sort the tenant's whole table for each anonymous request,
+// so a sort or bound on it answers 400 with the answer an unknown field gets,
+// and each bound counts among the four filters.
+func TestDelivery_SortsAndBoundsOnCreatedAtOnly(t *testing.T) {
 	forEachDialectWithSchemas(t, []string{"delivery"}, func(t *testing.T, fx schemaContentFixture) {
 		rg := newDeliveryRig(t, fx, nil)
-		older := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "older", "day": "2026-03-01", "rank": 1})
-		undated := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "undated", "rank": 2})
-		newer := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "newer", "day": "2026-04-01", "rank": 3})
+		first := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "first", "day": "2026-04-01", "rank": 3})
+		second := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "second", "rank": 2})
+		third := rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "third", "day": "2026-03-01", "rank": 1})
 
-		assert.Equal(t, []string{newer, older, undated},
-			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=-day", nil)))
-		assert.Equal(t, []string{older, newer, undated},
-			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=day", nil)))
-		assert.Equal(t, []string{newer, undated},
-			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=-rank&filters[rank][gte]=2", nil)))
-		assert.Equal(t, []string{newer},
-			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?filters[day][gte]=2026-03-15&filters[day][lte]=2026-04-01", nil)))
+		// Two writes can land on one clock tick, so the expected order is
+		// read from the timestamps served rather than the order of the
+		// writes, and a tie follows the id in both directions.
+		asc := listedRows(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=created_at", nil))
+		require.ElementsMatch(t, []string{first, second, third}, entryIDs(asc))
+		created := make([]time.Time, len(asc))
+		for i, e := range asc {
+			var err error
+			created[i], err = time.Parse(time.RFC3339Nano, e.CreatedAt)
+			require.NoError(t, err)
+			if i > 0 {
+				assert.False(t, created[i].Before(created[i-1]), "created_at ascending: %v", entryIDs(asc))
+			}
+		}
+		desc := deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=-created_at", nil))
+		assert.Equal(t, []string{asc[2].ID, asc[1].ID, asc[0].ID}, desc)
+		at := created[1]
+		var from, until []string
+		for i, e := range asc {
+			if !created[i].Before(at) {
+				from = append(from, e.ID)
+			}
+			if !created[i].After(at) {
+				until = append(until, e.ID)
+			}
+		}
+		bound := url.QueryEscape(asc[1].CreatedAt)
+		assert.Equal(t, from,
+			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=created_at&filters[created_at][gte]="+bound, nil)))
+		assert.Equal(t, until,
+			deliveredIDs(t, rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=created_at&filters[created_at][lte]="+bound, nil)))
 
-		unknown := rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=nosuch", nil)
-		require.Equal(t, http.StatusBadRequest, unknown.Code, unknown.Body.String())
-		for _, q := range []string{"sort=secret", "sort=-secret", "sort=title", "sort=", "sort=-"} {
+		unknownSort := rg.get(t, deliveryHostA, deliveryPostsPath+"?sort=nosuch", nil)
+		require.Equal(t, http.StatusBadRequest, unknownSort.Code, unknownSort.Body.String())
+		for _, q := range []string{
+			"sort=-day", "sort=day", "sort=updated_at", "sort=-updated_at", "sort=rank", "sort=-at",
+			"sort=secret", "sort=title", "sort=", "sort=-",
+		} {
 			rr := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+q, nil)
 			assert.Equal(t, http.StatusBadRequest, rr.Code, q)
-			assert.JSONEq(t, stripRequestID(t, unknown.Body.String()), stripRequestID(t, rr.Body.String()), q)
+			assert.JSONEq(t, stripRequestID(t, unknownSort.Body.String()), stripRequestID(t, rr.Body.String()), q)
 		}
+		unknownFilter := rg.get(t, deliveryHostA, deliveryPostsPath+"?filters[nosuch][gte]=1", nil)
+		require.Equal(t, http.StatusBadRequest, unknownFilter.Code, unknownFilter.Body.String())
 		for _, q := range []string{
-			"filters[secret][gte]=a", "filters[title][gte]=a", "filters[day][gt]=2026-01-01", "filters[day][gte]=soon",
-			"filters[rank][gte]=1&filters[rank][lte]=3&filters[day][gte]=2026-01-01&filters[day][lte]=2026-12-31&filters[title]=x",
+			"filters[day][gte]=2026-01-01", "filters[updated_at][gte]=2026-01-01", "filters[rank][lte]=3",
+			"filters[at][gte]=2026-01-01", "filters[secret][gte]=a", "filters[title][gte]=a",
+			"filters[created_at][gt]=2026-01-01", "filters[created_at][gte]=soon",
+			"filters[created_at][gte]=2026-01-01&filters[created_at][lte]=2030-01-01&filters[title]=x&filters[rank]=1&filters[featured]=true",
 		} {
 			rr := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+q, nil)
 			assert.Equal(t, http.StatusBadRequest, rr.Code, q+": "+rr.Body.String())
+			assert.JSONEq(t, stripRequestID(t, unknownFilter.Body.String()), stripRequestID(t, rr.Body.String()), q)
+		}
+	})
+}
+
+// A sorted cursor names the entry the last page ended on. One the caller
+// could not have been served, a draft for a reader without draft access or a
+// deleted entry, answers 400 as an id that names nothing does, so the answer
+// does not say where that entry's value falls.
+func TestContentCursor_RefusesACursorTheCallerCannotRead(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"drafts"}, func(t *testing.T, fx schemaContentFixture) {
+		store := fx.content.store
+		published := createdID(t, fx.create(t, "drafts", map[string]any{"title": "p", "_status": "published"}))
+		createdID(t, fx.create(t, "drafts", map[string]any{"title": "q", "_status": "published"}))
+		draft := createdID(t, fx.create(t, "drafts", map[string]any{"title": "d", "_status": "draft"}))
+		deleted := createdID(t, fx.create(t, "drafts", map[string]any{"title": "x", "_status": "published"}))
+		require.NoError(t, store.Delete(fx.ctx, "drafts", uuid.MustParse(deleted)))
+
+		sort := db.ListSort{Column: "created_at", Desc: true}
+		for name, cursor := range map[string]string{"made up": uuid.NewString(), "draft": draft, "deleted": deleted} {
+			_, err := store.ListCursorSorted(fx.ctx, "drafts", cursor, 10, false, sort)
+			require.Error(t, err, name)
+			assert.Equal(t, http.StatusBadRequest, httpStatus(err), "%s: %v", name, err)
+		}
+		_, err := store.ListCursorSorted(fx.ctx, "drafts", deleted, 10, true, sort)
+		require.Error(t, err, "a reader of drafts is still not served a deleted entry")
+		assert.Equal(t, http.StatusBadRequest, httpStatus(err))
+
+		_, err = store.ListCursorSorted(fx.ctx, "drafts", draft, 10, true, sort)
+		assert.NoError(t, err, "a reader of drafts continues from a draft")
+		_, err = store.ListCursorSorted(fx.ctx, "drafts", published, 10, false, sort)
+		assert.NoError(t, err)
+	})
+}
+
+// A private field of a type delivery could otherwise order by is refused as
+// a sort, a bound and a filter with the answer an unknown field gets, so a
+// request cannot tell it from a missing one or read its order.
+func TestDelivery_PrivateNumberFieldAnswersLikeUnknownField(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"delivery"}, func(t *testing.T, fx schemaContentFixture) {
+		rg := newDeliveryRig(t, fx, nil)
+		rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "a", "tally": 1})
+		rg.post(t, "t1", "dl_posts", "published", map[string]any{"title": "b", "tally": 2})
+
+		for unknown, private := range map[string][]string{
+			"sort=nosuch":            {"sort=tally", "sort=-tally"},
+			"filters[nosuch][gte]=1": {"filters[tally][gte]=1", "filters[tally][lte]=1"},
+			"filters[nosuch]=1":      {"filters[tally]=1"},
+		} {
+			want := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+unknown, nil)
+			require.Equal(t, http.StatusBadRequest, want.Code, want.Body.String())
+			for _, q := range private {
+				rr := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+q, nil)
+				assert.Equal(t, http.StatusBadRequest, rr.Code, q+": "+rr.Body.String())
+				assert.JSONEq(t, stripRequestID(t, want.Body.String()), stripRequestID(t, rr.Body.String()), q)
+			}
 		}
 	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -332,52 +331,34 @@ func (d *deliveryReader) hiddenFields(sc *core.Schema) (core.HiddenFields, error
 	return hidden, nil
 }
 
-// deliveryOrdered answers the field col names when delivery may sort or
-// bound by it: created_at, updated_at, and a number, integer, decimal, date
-// or datetime field it serves. A private field answers as a missing one.
-func deliveryOrdered(sc *core.Schema, hidden core.HiddenFields, col string) (core.SchemaField, bool) {
-	if col == "created_at" || col == "updated_at" {
-		return core.SchemaField{Name: col, FieldType: "datetime"}, true
-	}
-	for _, f := range sc.Fields {
-		if f.Name != col || f.System || hidden.Names(f.Name) {
-			continue
-		}
-		switch f.FieldType {
-		case "number", "integer", "decimal", "date", "datetime":
-			return f, true
-		}
-	}
-	return core.SchemaField{}, false
+// deliveryOrdered reports whether delivery may sort or bound by col, which
+// holds for created_at alone. The tenant index on every generated table holds
+// created_at, so a page reads the rows it serves. A sort on any other column,
+// updated_at included, sorts the tenant's whole table for each request, and
+// delivery answers anyone, with offset, limit and bounds that each make a URL
+// no cache holds. The authenticated content list keeps the wider set.
+func deliveryOrdered(col string) bool {
+	return col == "created_at"
 }
 
-// deliveryRange admits filters[field][gte] and [lte] on a field
-// deliveryOrdered answers, with a value of that field's form, and answers
-// the field's column. The value goes to the store as written, which parses
-// it by the same type.
-func deliveryRange(sc *core.Schema, hidden core.HiddenFields, key, v string) (string, string, bool) {
+// deliveryRange admits filters[created_at][gte] and [lte] with a datetime in
+// any form a write accepts, and answers the column and the bound. The value
+// goes to the store as written, which parses it the same way.
+func deliveryRange(key, v string) (string, string, bool) {
 	for _, op := range rangeOps {
 		col, cut := strings.CutSuffix(key, "]["+op)
 		if !cut {
 			continue
 		}
-		f, ok := deliveryOrdered(sc, hidden, col)
-		if !ok {
-			return "", "", false
-		}
-		if f.FieldType == "number" {
-			n, err := strconv.ParseFloat(v, 64)
-			return col, op, err == nil && !math.IsNaN(n) && !math.IsInf(n, 0)
-		}
-		_, ok = deliveryFilterValue(f, v)
-		return col, op, ok
+		_, ok := db.ParseContentTime(v)
+		return col, op, ok && deliveryOrdered(col)
 	}
 	return "", "", false
 }
 
 // deliveryFilters admits a filter on id and on the column of each field
 // delivery serves whose values it can check, with a value of that field's
-// form, and a range deliveryRange admits, and refuses everything else with
+// form, and a bound deliveryRange admits, and refuses everything else with
 // the one answer an unknown field gets. A checked value goes to the query in
 // the form its column compares, so no dialect sees a value its column cannot
 // hold.
@@ -401,7 +382,7 @@ func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string
 	var ranges map[string]db.ListRange
 	for col, v := range asked {
 		if strings.Contains(col, "][") {
-			rcol, op, ok := deliveryRange(sc, hidden, col, v)
+			rcol, op, ok := deliveryRange(col, v)
 			if !ok {
 				return nil, nil, false
 			}
@@ -602,7 +583,7 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.sort.Column != "" {
-		if _, ok := deliveryOrdered(sc, hidden, q.sort.Column); !ok {
+		if !deliveryOrdered(q.sort.Column) {
 			httpx.ErrorReq(w, r, http.StatusBadRequest, deliverySortRefused)
 			return
 		}

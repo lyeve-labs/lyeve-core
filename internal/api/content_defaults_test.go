@@ -297,6 +297,7 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "title", "field_type": "text", "required": true, "indexed": true},
 			{"name": "body", "field_type": "text"},
 			{"name": "secret", "field_type": "text", "private": true},
+			{"name": "tally", "field_type": "integer", "private": true},
 			{"name": "author", "field_type": "relation", "relation_to": "dl_people", "relation_type": "belongs_to"},
 			{"name": "vault", "field_type": "relation", "relation_to": "dl_vaults", "relation_type": "belongs_to"},
 			{"name": "tags", "field_type": "relation", "relation_to": "dl_tags", "relation_type": "many_to_many"},

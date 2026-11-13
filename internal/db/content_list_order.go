@@ -66,8 +66,9 @@ func (o ListSort) orderBy(d dialect.Dialect) string {
 }
 
 // systemTimestamp reports whether col is one of the two timestamps every
-// entry carries. Both are NOT NULL, and the tenant index on (tenant_id,
-// created_at) serves an order on created_at.
+// entry carries. Both are NOT NULL, so neither takes the NULL term. The
+// tenant index on (tenant_id, created_at) serves an order on created_at
+// only, and nothing indexes updated_at.
 func systemTimestamp(col string) bool {
 	return col == "created_at" || col == "updated_at"
 }
@@ -166,7 +167,7 @@ func (s *ContentStore) listCursorSorted(ctx context.Context, sc *domain.Schema, 
 			return nil, fmt.Errorf("%w: invalid cursor", domain.ErrBadRequest)
 		}
 		args = append(args, cursorID)
-		after, err := s.afterCursor(ctx, d, table, sort, cursorID)
+		after, err := s.afterCursor(ctx, d, sc, table, sort, cursorID, drafts)
 		if err != nil {
 			return nil, err
 		}
@@ -201,10 +202,16 @@ func (s *ContentStore) listCursorSorted(ctx context.Context, sc *domain.Schema, 
 // read back through JSON is a float64 and would lose digits. Whether that
 // value is NULL picks the predicate, because the rows after a NULL are the
 // NULLs with a later id, and the rows after a value include every NULL.
-func (s *ContentStore) afterCursor(ctx context.Context, d dialect.Dialect, table string, sort ListSort, cursorID uuid.UUID) (string, error) {
+//
+// Both reads of the cursor row see only a row the list would serve this
+// caller. A deleted row, or a draft for a caller who cannot read drafts,
+// answers as an id that names nothing, or the next page would say where the
+// hidden row's value falls.
+func (s *ContentStore) afterCursor(ctx context.Context, d dialect.Dialect, sc *domain.Schema, table string, sort ListSort, cursorID uuid.UUID, drafts bool) (string, error) {
 	qcol := d.QuoteIdentifier(sort.Column)
+	visible := softDeleteWhere(sc) + draftWhere(sc, "c", drafts)
 	row, err := s.pool.QueryRow(ctx, fmt.Sprintf(
-		`SELECT CASE WHEN c.%s IS NULL THEN 1 ELSE 0 END FROM %s c WHERE c.id = $1 AND c.tenant_id = $2`, qcol, table),
+		`SELECT CASE WHEN c.%s IS NULL THEN 1 ELSE 0 END FROM %s c WHERE c.id = $1 AND c.tenant_id = $2%s`, qcol, table, visible),
 		cursorID, tenant.ID(ctx))
 	if err != nil {
 		return "", fmt.Errorf("list cursor %s: %w", table, err)
@@ -224,7 +231,7 @@ func (s *ContentStore) afterCursor(ctx context.Context, d dialect.Dialect, table
 	if isNull == 1 {
 		return fmt.Sprintf("%s IS NULL AND r.id %s $3", col, cmp), nil
 	}
-	value := fmt.Sprintf("(SELECT c.%s FROM %s c WHERE c.id = $3 AND c.tenant_id = $2)", qcol, table)
+	value := fmt.Sprintf("(SELECT c.%s FROM %s c WHERE c.id = $3 AND c.tenant_id = $2%s)", qcol, table, visible)
 	after := fmt.Sprintf("%s %s %s OR (%s = %s AND r.id %s $3)", col, cmp, value, col, value, cmp)
 	if !systemTimestamp(sort.Column) {
 		after = col + " IS NULL OR " + after
