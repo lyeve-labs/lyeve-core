@@ -110,6 +110,37 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "seed", "field_type": "integer"}
 		]
 	}`},
+	// A field of each type a list filter puts an operator on, a field a mask
+	// can hide, drafts and deletion.
+	"operators": {`{
+		"name": "op_owners",
+		"display_name": "Owners",
+		"fields": [{"name": "name", "field_type": "text"}]
+	}`, `{
+		"name": "op_items",
+		"display_name": "Items",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"with_draft_publish": true,
+		"with_soft_delete": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "notes", "field_type": "rich_text"},
+			{"name": "mail", "field_type": "email"},
+			{"name": "link", "field_type": "url"},
+			{"name": "code", "field_type": "uid"},
+			{"name": "score", "field_type": "number"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "live", "field_type": "boolean"},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "owner", "field_type": "relation", "relation_to": "op_owners", "relation_type": "belongs_to"},
+			{"name": "photo", "field_type": "media"},
+			{"name": "meta", "field_type": "json"},
+			{"name": "secret", "field_type": "text"}
+		]
+	}`},
 	"drafts": {`{
 		"name": "drafts",
 		"display_name": "Drafts",

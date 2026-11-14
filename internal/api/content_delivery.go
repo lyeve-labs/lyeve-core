@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -157,6 +158,7 @@ type deliveryQuery struct {
 	limit    int
 	offset   int
 	filters  map[string]string
+	lists    map[string][]string
 	populate domain.PopulateConfig
 	fields   []string
 	sort     db.ListSort
@@ -183,12 +185,27 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 		return q, false
 	}
 	for key, vals := range values {
+		col, isFilter := strings.CutPrefix(key, "filters[")
+		col, closed := strings.CutSuffix(col, "]")
+		if list && isFilter && closed && listFilter(col) {
+			if len(vals) > db.MaxListValues || len(q.filters)+len(q.lists) == deliveryMaxFilters {
+				return refuse(deliveryFiltersRefused)
+			}
+			for _, v := range vals {
+				if len(v) > deliveryMaxFilterValue {
+					return refuse(deliveryFiltersRefused)
+				}
+			}
+			if q.lists == nil {
+				q.lists = map[string][]string{}
+			}
+			q.lists[col] = vals
+			continue
+		}
 		if len(vals) != 1 {
 			return refuse("a query parameter is repeated")
 		}
 		v := vals[0]
-		col, isFilter := strings.CutPrefix(key, "filters[")
-		col, closed := strings.CutSuffix(col, "]")
 		switch {
 		case key == "populate":
 			paths := strings.Split(v, ",")
@@ -233,7 +250,7 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 			}
 			q.sort = db.ListSort{Column: col, Desc: desc}
 		case list && isFilter && closed && col != "":
-			if len(v) > deliveryMaxFilterValue || len(q.filters) == deliveryMaxFilters {
+			if len(v) > deliveryMaxFilterValue || len(q.filters)+len(q.lists) == deliveryMaxFilters {
 				return refuse(deliveryFiltersRefused)
 			}
 			q.filters[col] = v
@@ -242,6 +259,12 @@ func parseDeliveryQuery(w http.ResponseWriter, r *http.Request, list bool) (deli
 		}
 	}
 	return q, true
+}
+
+// listFilter reports whether the filter key col names in or nin, the
+// operators that take their key repeated, one value each.
+func listFilter(col string) bool {
+	return strings.HasSuffix(col, "]["+db.OpIn) || strings.HasSuffix(col, "]["+db.OpNotIn)
 }
 
 // deliveryFieldNames reads a fields value under the delivery grammar. A name
@@ -341,34 +364,30 @@ func deliveryOrdered(col string) bool {
 	return col == "created_at"
 }
 
-// deliveryRange admits filters[created_at][gte] and [lte] with a datetime in
-// any form a write accepts, and answers the column and the bound. The value
-// goes to the store as written, which parses it the same way.
-func deliveryRange(key, v string) (string, string, bool) {
-	for _, op := range rangeOps {
-		col, cut := strings.CutSuffix(key, "]["+op)
-		if !cut {
-			continue
-		}
-		_, ok := db.ParseContentTime(v)
-		return col, op, ok && deliveryOrdered(col)
-	}
-	return "", "", false
+// deliveryRange reports whether delivery admits the bound op on col: a bound
+// on created_at, written filters[created_at][gte] and the like, with a
+// datetime in any form a write accepts. The value goes to the store as
+// written, which parses it the same way.
+func deliveryRange(col, op, v string) bool {
+	_, ok := db.ParseContentTime(v)
+	return ok && deliveryOrdered(col) && slices.Contains(rangeOps, op)
 }
 
 // deliveryFilters admits a filter on id and on the column of each field
 // delivery serves whose values it can check, with a value of that field's
-// form, and a bound deliveryRange admits, and refuses everything else with
-// the one answer an unknown field gets. A checked value goes to the query in
-// the form its column compares, so no dialect sees a value its column cannot
-// hold.
-func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string]string) (map[string]any, map[string]db.ListRange, bool) {
-	if len(asked) == 0 {
-		return nil, nil, true
+// form, an operator the field's type takes, and a bound deliveryRange admits,
+// and refuses everything else with the one answer an unknown field gets. A
+// checked value goes to the query in the form its column compares, so no
+// dialect sees a value its column cannot hold. lists holds the values of each
+// in and nin. Each answer has one URL, so the filters[field][eq] spelling of
+// an equality and a value given twice in one in or nin are refused too.
+func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string]string, lists map[string][]string) (map[string]any, map[string]db.ListRange, []db.ListCondition, bool) {
+	if len(asked) == 0 && len(lists) == 0 {
+		return nil, nil, nil, true
 	}
 	columns := map[string]core.SchemaField{"id": {Name: "id", FieldType: "uid"}}
 	for _, f := range sc.Fields {
-		if hidden.Names(f.Name) {
+		if hidden.Names(f.Name) || !deliveryFilterable(f) {
 			continue
 		}
 		switch {
@@ -379,34 +398,106 @@ func deliveryFilters(sc *core.Schema, hidden core.HiddenFields, asked map[string
 		}
 	}
 	out := make(map[string]any, len(asked))
-	var ranges map[string]db.ListRange
-	for col, v := range asked {
-		if strings.Contains(col, "][") {
-			rcol, op, ok := deliveryRange(col, v)
-			if !ok {
-				return nil, nil, false
+	var (
+		ranges map[string]db.ListRange
+		conds  []db.ListCondition
+	)
+	// field answers the field of a served column that takes op.
+	field := func(col, op string) (core.SchemaField, bool) {
+		f, ok := columns[col]
+		if !ok || hidden.Names(col) || (op != "eq" && !db.ListOperatorAllowed(f.FieldType, op)) {
+			return core.SchemaField{}, false
+		}
+		return f, true
+	}
+	for key, v := range asked {
+		col, op, hasOp := cutOperator(key)
+		if !hasOp {
+			col, op = key, "eq"
+		}
+		switch {
+		case slices.Contains(rangeOps, op):
+			if !deliveryRange(col, op, v) {
+				return nil, nil, nil, false
 			}
 			if ranges == nil {
 				ranges = map[string]db.ListRange{}
 			}
-			bound := ranges[rcol]
-			if op == "gte" {
-				bound.GTE = v
-			} else {
-				bound.LTE = v
+			ranges[col] = withBound(ranges[col], op, v)
+			continue
+		case op == "eq":
+			f, ok := field(col, op)
+			if _, twice := out[col]; !ok || twice || hasOp {
+				return nil, nil, nil, false
 			}
-			ranges[rcol] = bound
+			if out[col], ok = deliveryFilterValue(f, v); !ok {
+				return nil, nil, nil, false
+			}
 			continue
 		}
-		f, ok := columns[col]
-		if !ok || hidden.Names(col) {
-			return nil, nil, false
+		f, ok := field(col, op)
+		if !ok {
+			return nil, nil, nil, false
 		}
-		if out[col], ok = deliveryFilterValue(f, v); !ok {
-			return nil, nil, false
+		switch op {
+		case db.OpNotEqual:
+			ok = deliveryConditionValue(f, v)
+		case db.OpEmpty:
+			ok = v == "true" || v == "false"
+		default:
+			ok = v != ""
 		}
+		if !ok {
+			return nil, nil, nil, false
+		}
+		conds = append(conds, db.ListCondition{Column: col, Op: op, Values: []any{v}})
 	}
-	return out, ranges, true
+	for key, vals := range lists {
+		col, op, _ := cutOperator(key)
+		f, ok := field(col, op)
+		if !ok {
+			return nil, nil, nil, false
+		}
+		values := make([]any, len(vals))
+		for i, v := range vals {
+			if !deliveryConditionValue(f, v) || slices.Contains(vals[:i], v) {
+				return nil, nil, nil, false
+			}
+			values[i] = v
+		}
+		conds = append(conds, db.ListCondition{Column: col, Op: op, Values: values})
+	}
+	return out, ranges, conds, true
+}
+
+// deliveryConditionValue reports whether v is a value of f for ne, in and
+// nin: a value deliveryFilterValue reads, and for a text field not the
+// empty string, which empty asks about.
+func deliveryConditionValue(f core.SchemaField, v string) bool {
+	if _, ok := deliveryFilterValue(f, v); !ok {
+		return false
+	}
+	return v != "" || !db.TextField(f.FieldType)
+}
+
+// cutOperator splits a filter key written field][op into the field and the
+// operator.
+func cutOperator(key string) (string, string, bool) {
+	i := strings.LastIndex(key, "][")
+	if i <= 0 {
+		return "", "", false
+	}
+	return key[:i], key[i+2:], true
+}
+
+// deliveryFilterable reports whether delivery filters on a field of f's type,
+// the types deliveryFilterValue reads.
+func deliveryFilterable(f core.SchemaField) bool {
+	switch f.FieldType {
+	case "text", "email", "url", "uid", "relation", "integer", "decimal", "boolean", "date", "datetime":
+		return true
+	}
+	return false
 }
 
 // deliveryFilterValue reads v as a value of f, in the forms the content API
@@ -581,7 +672,7 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	filters, ranges, ok := deliveryFilters(sc, hidden, q.filters)
+	filters, ranges, conds, ok := deliveryFilters(sc, hidden, q.filters, q.lists)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, deliveryFiltersRefused)
 		return
@@ -604,7 +695,7 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, err := h.store.ListPage(r.Context(), sc.Name, db.ListQuery{
-		Limit: q.limit, Offset: q.offset, Filters: filters, Ranges: ranges, Sort: q.sort,
+		Limit: q.limit, Offset: q.offset, Filters: filters, Ranges: ranges, Conditions: conds, Sort: q.sort,
 	})
 	if err != nil {
 		storeError(w, r, err, "failed to list content")

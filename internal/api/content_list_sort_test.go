@@ -287,7 +287,7 @@ func TestContentList_RefusesASortOrRangeItCannotRun(t *testing.T) {
 		seedFixtures(t, fx)
 		for _, q := range []string{
 			"sort=nosuch", "sort=-nosuch", "sort=title", "sort=id", "sort=", "sort=-", "sort=day&sort=rank",
-			"filters[nosuch][gte]=1", "filters[title][gte]=a", "filters[day][gt]=2026-01-01",
+			"filters[nosuch][gte]=1", "filters[title][gte]=a", "filters[day][contains]=2026",
 			"filters[day][gte]=soon", "filters[at][lte]=x", "filters[score][gte]=abc", "filters[rank][lte]=1.5",
 			"filters[price][gte]=1.005",
 		} {
@@ -395,7 +395,7 @@ func TestDelivery_SortsAndBoundsOnCreatedAtOnly(t *testing.T) {
 		for _, q := range []string{
 			"filters[day][gte]=2026-01-01", "filters[updated_at][gte]=2026-01-01", "filters[rank][lte]=3",
 			"filters[at][gte]=2026-01-01", "filters[secret][gte]=a", "filters[title][gte]=a",
-			"filters[created_at][gt]=2026-01-01", "filters[created_at][gte]=soon",
+			"filters[created_at][contains]=2026", "filters[created_at][gte]=soon",
 			"filters[created_at][gte]=2026-01-01&filters[created_at][lte]=2030-01-01&filters[title]=x&filters[rank]=1&filters[featured]=true",
 		} {
 			rr := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+q, nil)

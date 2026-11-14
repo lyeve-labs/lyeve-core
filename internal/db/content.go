@@ -142,6 +142,10 @@ func cacheListKey(tenantID, schemaName string, q ListQuery) string {
 		b, _ := json.Marshal(q.Ranges)
 		h += ":r=" + string(b)
 	}
+	if len(q.Conditions) > 0 {
+		b, _ := json.Marshal(q.Conditions)
+		h += ":c=" + string(b)
+	}
 	if q.Sort.Column != "" {
 		h += ":s=" + q.Sort.String()
 	}
@@ -433,8 +437,9 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 // time, and MySQL every row of one statement. Offset pages over tied rows can
 // repeat some and skip others, so the unique id breaks the tie, and it breaks
 // a tie on a sort field the same way. q.Filters maps column names to
-// exact-match values and q.Ranges to inclusive bounds (safe: column names come
-// from schema). User-defined field values are returned inside Content.Data.
+// exact-match values, q.Ranges to bounds and q.Conditions holds the other
+// operators (safe: column names come from schema). User-defined field values
+// are returned inside Content.Data.
 func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQuery) ([]*domain.Content, error) {
 	limit, offset, filters := q.Limit, q.Offset, q.Filters
 	// limit<=0 means "no rows" per the pagination contract. MSSQL rejects
@@ -453,7 +458,7 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		err    error
 		ranges map[string]ListRange
 	)
-	if len(filters) > 0 || len(q.Ranges) > 0 || q.Sort.Column != "" {
+	if len(filters) > 0 || len(q.Ranges) > 0 || len(q.Conditions) > 0 || q.Sort.Column != "" {
 		if sc, table, err = s.table(ctx, schemaName); err != nil {
 			return nil, err
 		}
@@ -461,6 +466,9 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 			return nil, err
 		}
 		if ranges, err = typedRanges(sc, q.Ranges); err != nil {
+			return nil, err
+		}
+		if q.Conditions, err = typedConditions(sc, q.Conditions); err != nil {
 			return nil, err
 		}
 		if _, err = orderedField(sc, q.Sort.Column); err != nil {
@@ -524,7 +532,7 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		for _, b := range []struct {
 			op string
 			v  any
-		}{{">=", bound.GTE}, {"<=", bound.LTE}} {
+		}{{">=", bound.GTE}, {"<=", bound.LTE}, {">", bound.GT}, {"<", bound.LT}} {
 			if b.v == nil {
 				continue
 			}
@@ -532,6 +540,15 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 			args = append(args, b.v)
 			i++
 		}
+	}
+	for _, c := range q.Conditions {
+		clause, cargs, err := conditionClause(s.pool.Engine(), sc, c, i)
+		if err != nil {
+			return nil, err
+		}
+		whereClauses = append(whereClauses, clause)
+		args = append(args, cargs...)
+		i += len(cargs)
 	}
 	where := ""
 	if len(whereClauses) > 0 {

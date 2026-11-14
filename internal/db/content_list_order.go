@@ -30,20 +30,25 @@ func (o ListSort) String() string {
 	return o.Column
 }
 
-// ListRange bounds a column inclusively. A nil bound leaves that side open.
+// ListRange bounds a column, inclusively with GTE and LTE and strictly with
+// GT and LT. A nil bound leaves that side open.
 type ListRange struct {
 	GTE any `json:"gte,omitempty"`
 	LTE any `json:"lte,omitempty"`
+	GT  any `json:"gt,omitempty"`
+	LT  any `json:"lt,omitempty"`
 }
 
 // ListQuery is one page of an offset list: exact-match filters and ranges,
-// both keyed by column, and the order.
+// both keyed by column, the conditions with any other operator, and the
+// order.
 type ListQuery struct {
-	Limit   int
-	Offset  int
-	Filters map[string]any
-	Ranges  map[string]ListRange
-	Sort    ListSort
+	Limit      int
+	Offset     int
+	Filters    map[string]any
+	Ranges     map[string]ListRange
+	Conditions []ListCondition
+	Sort       ListSort
 }
 
 // orderBy answers the ORDER BY terms for o over the table aliased r. A row
@@ -113,6 +118,12 @@ func typedRanges(sc *domain.Schema, ranges map[string]ListRange) (map[string]Lis
 			return nil, err
 		}
 		if typed.LTE, err = rangeValue(f, r.LTE); err != nil {
+			return nil, err
+		}
+		if typed.GT, err = rangeValue(f, r.GT); err != nil {
+			return nil, err
+		}
+		if typed.LT, err = rangeValue(f, r.LT); err != nil {
 			return nil, err
 		}
 		out[col] = typed
