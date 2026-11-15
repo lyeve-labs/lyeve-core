@@ -365,9 +365,9 @@ func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.Hidd
 // fails the read rather than serving the relation empty, and a walk past its
 // bounds is refused rather than cut short. A has_one or has_many whose key
 // cannot be read is refused when the request names it, and left out when a
-// wildcard or a depth reaches it. A relation field hidden names on the
-// items' own schema is not read. populate reports false after writing the
-// answer.
+// wildcard or a depth reaches it. A relation field the caller's mask hides
+// on the items' own type is not read. populate reports false after writing
+// the answer.
 func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content, hidden core.HiddenFields) bool {
 	cfg, ok := parsePopulateFromQuery(r)
 	if !ok {

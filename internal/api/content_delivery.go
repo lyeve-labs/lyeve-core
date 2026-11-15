@@ -624,9 +624,9 @@ func (h *ContentHandler) deliveryBeforeRequest(w http.ResponseWriter, r *http.Re
 // delivery does not serve are left out, and a target it serves comes back
 // with its own hidden fields left out and as null when it is not published.
 // A to-many relation would pull every entry it reaches, with no bound. A
-// relation field hidden names on the items' own schema is not read. A
-// definition or a relation that cannot be read answers 503, never an answer
-// with the relation left empty.
+// relation field the caller's mask hides on the items' own type is not read.
+// A definition or a relation that cannot be read answers 503, never an
+// answer with the relation left empty.
 func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request, d *deliveryReader, items []*domain.Content, cfg domain.PopulateConfig, hidden core.HiddenFields) bool {
 	if cfg.IsEmpty() || len(items) == 0 {
 		return true
