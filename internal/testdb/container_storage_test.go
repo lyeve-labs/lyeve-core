@@ -22,7 +22,7 @@ func TestPostgresContainer_KeepsItsDataInMemory(t *testing.T) {
 		_, err := postgres.Run(context.Background(), "postgres:16-alpine", append(postgresContainerOptions(), opts...)...)
 		return err
 	})
-	require.Contains(t, tmpfs, "/var/lib/postgresql/data")
+	require.Contains(t, tmpfs, "/var/lib/postgresql")
 }
 
 func TestMSSQLContainer_KeepsItsDataInMemory(t *testing.T) {

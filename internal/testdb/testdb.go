@@ -120,8 +120,11 @@ func postgresContainerOptions() []testcontainers.ContainerCustomizer {
 		postgres.WithPassword("secret"),
 		// Each test database is a copy of the template that is dropped when
 		// its test ends, so the data directory lives in memory and the copies
-		// never reach the disk.
-		testcontainers.WithTmpfs(map[string]string{"/var/lib/postgresql/data": "rw"}),
+		// never reach the disk. The mount covers the parent of the data
+		// directory, because the image keeps it in /var/lib/postgresql/data
+		// up to 17 and in a versioned folder from 18, and the 18 image
+		// refuses to start with a mount at the old path.
+		testcontainers.WithTmpfs(map[string]string{"/var/lib/postgresql": "rw"}),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
