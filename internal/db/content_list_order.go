@@ -41,7 +41,9 @@ type ListRange struct {
 
 // ListQuery is one page of an offset list: exact-match filters and ranges,
 // both keyed by column, the conditions with any other operator, and the
-// order.
+// order. A condition may name a path to a related entry's field, which
+// PathGate answers the caller's rights for, and with no PathGate a path is
+// an unknown key.
 type ListQuery struct {
 	Limit      int
 	Offset     int
@@ -49,6 +51,7 @@ type ListQuery struct {
 	Ranges     map[string]ListRange
 	Conditions []ListCondition
 	Sort       ListSort
+	PathGate   PathGate
 }
 
 // orderBy answers the ORDER BY terms for o over the table aliased r. A row

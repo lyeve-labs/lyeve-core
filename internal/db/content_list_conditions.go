@@ -118,23 +118,9 @@ func typedConditions(sc *domain.Schema, conds []ListCondition) ([]ListCondition,
 		if !ok {
 			return nil, fmt.Errorf("%w: unknown filter key %q", domain.ErrBadRequest, c.Column)
 		}
-		if !ListOperatorAllowed(f.FieldType, c.Op) {
-			return nil, fmt.Errorf("%w: filter %q does not take %s", domain.ErrBadRequest, c.Column, c.Op)
-		}
-		n := len(c.Values)
-		if c.Op == OpIn || c.Op == OpNotIn {
-			if n == 0 || n > MaxListValues {
-				return nil, fmt.Errorf("%w: filter %q takes 1 to %d values", domain.ErrBadRequest, c.Column, MaxListValues)
-			}
-		} else if n != 1 {
-			return nil, fmt.Errorf("%w: filter %q takes one value", domain.ErrBadRequest, c.Column)
-		}
-		typed := ListCondition{Column: c.Column, Op: c.Op, Values: make([]any, n)}
-		for i, v := range c.Values {
-			var err error
-			if typed.Values[i], err = conditionValue(f, c.Op, v); err != nil {
-				return nil, err
-			}
+		typed, err := typedCondition(f, c)
+		if err != nil {
+			return nil, err
 		}
 		out = append(out, typed)
 	}
@@ -142,6 +128,31 @@ func typedConditions(sc *domain.Schema, conds []ListCondition) ([]ListCondition,
 		return cmp.Or(cmp.Compare(a.Column, b.Column), cmp.Compare(a.Op, b.Op))
 	})
 	return out, nil
+}
+
+// typedCondition answers c on the field f with each value parsed by f's
+// type. An operator f does not take, a count of values the operator does not
+// take and a value f cannot hold are domain.ErrBadRequest.
+func typedCondition(f domain.SchemaField, c ListCondition) (ListCondition, error) {
+	if !ListOperatorAllowed(f.FieldType, c.Op) {
+		return ListCondition{}, fmt.Errorf("%w: filter %q does not take %s", domain.ErrBadRequest, c.Column, c.Op)
+	}
+	n := len(c.Values)
+	if c.Op == OpIn || c.Op == OpNotIn {
+		if n == 0 || n > MaxListValues {
+			return ListCondition{}, fmt.Errorf("%w: filter %q takes 1 to %d values", domain.ErrBadRequest, c.Column, MaxListValues)
+		}
+	} else if n != 1 {
+		return ListCondition{}, fmt.Errorf("%w: filter %q takes one value", domain.ErrBadRequest, c.Column)
+	}
+	typed := ListCondition{Column: c.Column, Op: c.Op, Values: make([]any, n)}
+	for i, v := range c.Values {
+		var err error
+		if typed.Values[i], err = conditionValue(f, c.Op, v); err != nil {
+			return ListCondition{}, err
+		}
+	}
+	return typed, nil
 }
 
 // conditionValue parses one value of a condition. empty takes true or false.

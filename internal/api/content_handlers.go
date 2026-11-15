@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -65,6 +66,10 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ranges := takeRanges(filters)
+	if conds, ok = takePaths(filters, ranges, conds); !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
+		return
+	}
 	sort, ok := parseListSort(r)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
@@ -85,6 +90,7 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.store.ListPage(r.Context(), schemaName, db.ListQuery{
 		Limit: limit, Offset: offset, Filters: filters, Ranges: ranges, Conditions: conds, Sort: sort,
+		PathGate: h.pathGate(w, r),
 	})
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
@@ -725,6 +731,60 @@ func takeConditions(query url.Values, filters map[string]any) ([]db.ListConditio
 		}
 	}
 	return conds, true
+}
+
+// takePaths moves each equality and bound whose key is a path, such as
+// filters[author.name]=Ann, into conds, with eq or the bound's name as its
+// operator, because the store reads a path only as a condition. It answers
+// false when the values of conds then pass maxConditionValues, so a path's
+// values count toward the list's limit.
+func takePaths(filters map[string]any, ranges map[string]db.ListRange, conds []db.ListCondition) ([]db.ListCondition, bool) {
+	for key, v := range filters {
+		if db.IsPath(key) {
+			conds = append(conds, db.ListCondition{Column: key, Op: db.OpEqual, Values: []any{v}})
+			delete(filters, key)
+		}
+	}
+	for key, bound := range ranges {
+		if !db.IsPath(key) {
+			continue
+		}
+		for _, b := range []struct {
+			op string
+			v  any
+		}{{"gte", bound.GTE}, {"lte", bound.LTE}, {"gt", bound.GT}, {"lt", bound.LT}} {
+			if b.v != nil {
+				conds = append(conds, db.ListCondition{Column: key, Op: b.op, Values: []any{b.v}})
+			}
+		}
+		delete(ranges, key)
+	}
+	total := 0
+	for _, c := range conds {
+		total += len(c.Values)
+	}
+	return conds, total <= maxConditionValues
+}
+
+// pathGate answers, for each content type a filter path reaches, whether the
+// caller may read it, the fields its mask hides there and whether its drafts
+// count, on the terms a direct read of that type gets. A type whose drafts
+// count marks the answer private, as a populated relation does.
+func (h *ContentHandler) pathGate(w http.ResponseWriter, r *http.Request) db.PathGate {
+	return func(_ context.Context, schema string) (func(string) bool, bool, bool, error) {
+		switch err := h.authorize(r, schema, "read"); {
+		case err == nil:
+		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
+			return nil, false, false, nil
+		default:
+			return nil, false, false, err
+		}
+		hidden, err := h.hiddenFields(r, schema)
+		if err != nil {
+			return nil, false, false, err
+		}
+		return hidden.Names, h.draftResponse(w, r, schema), true, nil
+	}
 }
 
 // parseListSort reads ?sort=field, or ?sort=-field for the reverse order.
