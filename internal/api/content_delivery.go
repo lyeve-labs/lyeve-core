@@ -624,9 +624,10 @@ func (h *ContentHandler) deliveryBeforeRequest(w http.ResponseWriter, r *http.Re
 // delivery does not serve are left out, and a target it serves comes back
 // with its own hidden fields left out and as null when it is not published.
 // A to-many relation would pull every entry it reaches, with no bound. A
-// definition or a relation that cannot be read answers 503, never an answer
-// with the relation left empty.
-func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request, d *deliveryReader, items []*domain.Content, cfg domain.PopulateConfig) bool {
+// relation field the caller's mask hides on the items' own type is not read.
+// A definition or a relation that cannot be read answers 503, never an
+// answer with the relation left empty.
+func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request, d *deliveryReader, items []*domain.Content, cfg domain.PopulateConfig, hidden core.HiddenFields) bool {
 	if cfg.IsEmpty() || len(items) == 0 {
 		return true
 	}
@@ -647,7 +648,7 @@ func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request
 		}
 		return publishedOnly(hidden.Apply), hidden.Names, false, true
 	}
-	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
+	err := h.store.PopulateStrict(r.Context(), items, cfg, hidden.Names, gate)
 	if gateErr == nil && errors.Is(err, db.ErrPopulateTooLarge) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, populateTooLarge)
 		return false
@@ -701,7 +702,7 @@ func (h *ContentHandler) DeliveryList(w http.ResponseWriter, r *http.Request) {
 		storeError(w, r, err, "failed to list content")
 		return
 	}
-	if !h.deliveryPopulate(w, r, d, items, q.populate) {
+	if !h.deliveryPopulate(w, r, d, items, q.populate, hidden) {
 		return
 	}
 	for _, item := range items {
@@ -756,7 +757,7 @@ func (h *ContentHandler) DeliveryGet(w http.ResponseWriter, r *http.Request) {
 		storeError(w, r, err, "failed to get content")
 		return
 	}
-	if !h.deliveryPopulate(w, r, d, []*domain.Content{item}, q.populate) {
+	if !h.deliveryPopulate(w, r, d, []*domain.Content{item}, q.populate, hidden) {
 		return
 	}
 	item.Data = hidden.Apply(item.Data)

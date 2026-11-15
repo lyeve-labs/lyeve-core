@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -188,6 +189,99 @@ func TestContentHandler_PopulateIntoADeletedTypeIsLeftOut(t *testing.T) {
 
 			rr = fx.listBooks(t, query)
 			require.Equal(t, http.StatusOK, rr.Code, "list %s: %s", query, rr.Body.String())
+		}
+	})
+}
+
+func init() {
+	// A type delivery serves with two belongs_to relations into one blob
+	// type, one marked private and one served.
+	contentDefaultSchemas["privatebound"] = []string{`{
+		"name": "pb_blobs",
+		"display_name": "Blobs",
+		"public_delivery": true,
+		"fields": [{"name": "body", "field_type": "text"}]
+	}`, `{
+		"name": "pb_items",
+		"display_name": "Items",
+		"public_delivery": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "blob", "field_type": "relation", "relation_to": "pb_blobs", "relation_type": "belongs_to", "private": true},
+			{"name": "shown", "field_type": "relation", "relation_to": "pb_blobs", "relation_type": "belongs_to"}
+		]
+	}`}
+}
+
+// A has_many a field rule hides on the type being read is not read, so the
+// entries below it never count toward the walk's bounds. The shelf's books
+// pass the byte bound together: a caller the rule hides them from reads the
+// shelf without them on every content read, and one it does not is refused.
+func TestContentHandler_PopulateSkipsARelationFieldTheMaskHides(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"shelves"}, func(t *testing.T, fx schemaContentFixture) {
+		shelf := createdID(t, fx.create(t, "shelves", map[string]any{"name": "s"}))
+		title := strings.Repeat("x", 1<<20)
+		for range 34 {
+			_, err := fx.content.store.Insert(fx.ctx, "books", map[string]any{"title": title, "shelves": shelf})
+			require.NoError(t, err)
+		}
+		ctx := asEditor(fx.ctx)
+		params := map[string]string{"schema": "shelves"}
+		get := func() *httptest.ResponseRecorder {
+			return fx.send(t, ctx, http.MethodGet, "/api/v1/content/shelves/"+shelf+"?populate=books",
+				map[string]string{"schema": "shelves", "id": shelf}, nil, fx.content.Get)
+		}
+
+		fx.content.perms = fakeProvider{schemaMask{"shelves": {"books"}}}
+		rr := get()
+		require.Equal(t, http.StatusOK, rr.Code, "body of %d bytes", rr.Body.Len())
+		assert.NotContains(t, dataOf(t, rr), "books")
+		for _, rr := range []*httptest.ResponseRecorder{
+			fx.send(t, ctx, http.MethodGet, "/api/v1/content/shelves?populate=books", params, nil, fx.content.List),
+			fx.send(t, ctx, http.MethodGet, "/api/v1/content/shelves/cursor?populate=books", params, nil, fx.content.ListCursor),
+		} {
+			require.Equal(t, http.StatusOK, rr.Code, "body of %d bytes", rr.Body.Len())
+			assert.NotContains(t, rr.Body.String(), `"books"`)
+		}
+
+		fx.content.perms = fakeProvider{schemaMask{}}
+		rr = get()
+		require.Equal(t, http.StatusBadRequest, rr.Code, "body of %d bytes", rr.Body.Len())
+		assert.Contains(t, rr.Body.String(), populateTooLargeHint)
+	})
+}
+
+// Delivery refuses a path that names a private relation, but a depth reaches
+// it without naming it. The private relation is not read, so the blob below
+// it never counts toward the bounds: an item that holds a blob past the byte
+// bound behind it is served, and one that holds it behind a served relation
+// is refused.
+func TestDelivery_DepthSkipsAPrivateRelation(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"privatebound"}, func(t *testing.T, fx schemaContentFixture) {
+		rg := newDeliveryRig(t, fx, nil)
+		blob, err := fx.content.store.Insert(fx.ctx, "pb_blobs", map[string]any{"body": strings.Repeat("x", 33<<20)})
+		require.NoError(t, err)
+		hidden, err := fx.content.store.Insert(fx.ctx, "pb_items", map[string]any{"title": "hidden", "blob": blob.ID.String()})
+		require.NoError(t, err)
+		shown, err := fx.content.store.Insert(fx.ctx, "pb_items", map[string]any{"title": "shown", "shown": blob.ID.String()})
+		require.NoError(t, err)
+		const items = "/api/v1/delivery/pb_items"
+
+		for _, target := range []string{
+			items + "/" + hidden.ID.String() + "?depth=1",
+			items + "?depth=1&filters[id]=" + hidden.ID.String(),
+		} {
+			rr := rg.get(t, deliveryHostA, target, nil)
+			require.Equal(t, http.StatusOK, rr.Code, "%s: body of %d bytes", target, rr.Body.Len())
+			assert.NotContains(t, rr.Body.String(), `"blob`, target)
+		}
+		for _, target := range []string{
+			items + "/" + shown.ID.String() + "?depth=1",
+			items + "?depth=1&filters[id]=" + shown.ID.String(),
+		} {
+			rr := rg.get(t, deliveryHostA, target, nil)
+			require.Equal(t, http.StatusBadRequest, rr.Code, "%s: body of %d bytes", target, rr.Body.Len())
+			assert.Contains(t, rr.Body.String(), populateTooLargeHint, target)
 		}
 	})
 }
