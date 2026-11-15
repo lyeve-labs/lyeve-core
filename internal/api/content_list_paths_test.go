@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -326,5 +327,44 @@ func TestContentList_PathGateIsAskedOncePerType(t *testing.T) {
 		})
 		require.NoError(t, err)
 		assert.Equal(t, map[string]int{"rf_posts": 1, "rf_authors": 1, "rf_companies": 1, "rf_comments": 1}, asked)
+	})
+}
+
+// A path through a has_one reads the entry a populated has_one serves the
+// caller. A newer draft is not that entry for a reader without draft
+// rights, so the published profile matches for the reader, and the draft
+// matches for an editor.
+func TestContentList_HasOnePathSkipsADraftTheCallerCannotRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"profiles"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = fakeProvider{editorChecker{}}
+		person := createdID(t, fx.create(t, "pf_people", map[string]any{"name": "p"}))
+		fx.createStatus(t, "pf_profiles", "published", map[string]any{"bio": "published", "person": person})
+		// SQL Server's clock ticks about every 15 ms, so two creates in a row
+		// can share a created_at, and the id would then decide.
+		time.Sleep(50 * time.Millisecond)
+		fx.createStatus(t, "pf_profiles", "draft", map[string]any{"bio": "draft", "person": person})
+
+		list := func(ctx context.Context, bio string) []string {
+			t.Helper()
+			rr := fx.send(t, ctx, http.MethodGet, "/api/v1/content/pf_people?filters[profile.bio]="+bio,
+				map[string]string{"schema": "pf_people"}, nil, fx.content.List)
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+			var out []struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out), rr.Body.String())
+			ids := []string{}
+			for _, it := range out {
+				ids = append(ids, it.ID)
+			}
+			return ids
+		}
+		assert.Equal(t, []string{person}, list(asReader(fx.ctx), "published"), "a reader matches the published profile")
+		assert.Empty(t, list(asReader(fx.ctx), "draft"), "a reader matched the draft")
+		assert.Equal(t, []string{person}, list(asEditor(fx.ctx), "draft"), "an editor matches the newer draft")
+		assert.Empty(t, list(asEditor(fx.ctx), "published"), "an editor matched the older profile")
 	})
 }

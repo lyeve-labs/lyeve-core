@@ -357,9 +357,10 @@ func pathAlias(k int) string {
 // stepExists answers the predicate that holds when the row step k leaves has
 // a related row through st, one this caller could be served, for which
 // inner holds: in the tenant, out of the trash, and published unless a
-// draft counts. A has_one serves the newest of its rows, by created_at and
-// then id, and only that one counts, so a draft newest row hides the
-// published one beneath it, as a populated has_one does.
+// draft counts. A has_one serves the newest of its rows the caller could be
+// served, by created_at and then id, and only that one counts, so a newer
+// draft hides a published row only from a caller whose drafts count there,
+// as a populated has_one does.
 func stepExists(engine string, st pathStep, k int, inner string) string {
 	d := dialect.Must(engine)
 	parent, a := pathAlias(k), pathAlias(k+1)
@@ -376,7 +377,7 @@ func stepExists(engine string, st pathStep, k int, inner string) string {
 		where := keyMatch(engine, st, a, parent) + served
 		if st.field.RelationType == domain.RelHasOne {
 			nb := fmt.Sprintf("rn%d", k+1)
-			where += " AND NOT EXISTS (SELECT 1 FROM " + st.table + " " + nb + " WHERE " + keyMatch(engine, st, nb, parent) + live(nb) +
+			where += " AND NOT EXISTS (SELECT 1 FROM " + st.table + " " + nb + " WHERE " + keyMatch(engine, st, nb, parent) + live(nb) + draftWhere(st.target, nb, st.drafts) +
 				" AND (" + nb + ".created_at > " + a + ".created_at OR (" + nb + ".created_at = " + a + ".created_at AND " + nb + ".id > " + a + ".id)))"
 		}
 		return "EXISTS (SELECT 1 FROM " + st.table + " " + a + " WHERE " + where + " AND " + inner + ")"
