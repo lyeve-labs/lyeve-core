@@ -438,8 +438,9 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 // repeat some and skip others, so the unique id breaks the tie, and it breaks
 // a tie on a sort field the same way. q.Filters maps column names to
 // exact-match values, q.Ranges to bounds and q.Conditions holds the other
-// operators (safe: column names come from schema). User-defined field values
-// are returned inside Content.Data.
+// operators (safe: column names come from schema). A condition whose key is
+// a path reads a related entry's field, under q.PathGate. User-defined field
+// values are returned inside Content.Data.
 func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQuery) ([]*domain.Content, error) {
 	limit, offset, filters := q.Limit, q.Offset, q.Filters
 	// limit<=0 means "no rows" per the pagination contract. MSSQL rejects
@@ -457,6 +458,7 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		table  string
 		err    error
 		ranges map[string]ListRange
+		paths  []pathCondition
 	)
 	if len(filters) > 0 || len(q.Ranges) > 0 || len(q.Conditions) > 0 || q.Sort.Column != "" {
 		if sc, table, err = s.table(ctx, schemaName); err != nil {
@@ -468,6 +470,9 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		if ranges, err = typedRanges(sc, q.Ranges); err != nil {
 			return nil, err
 		}
+		if q.Conditions, paths, err = s.pathConditions(ctx, schemaName, sc, q.Conditions, q.PathGate); err != nil {
+			return nil, err
+		}
 		if q.Conditions, err = typedConditions(sc, q.Conditions); err != nil {
 			return nil, err
 		}
@@ -477,9 +482,12 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		q.Filters, q.Ranges = filters, ranges
 	}
 
-	// Cache read
+	// Cache read. A list with a path is never cached: it reads rows of other
+	// types, whose writes flush only their own lists, and which of those rows
+	// count follows the caller's rights there.
 	tenantID := tenant.ID(ctx)
-	if s.listCache != nil && writeTx(ctx) == nil {
+	cached := s.listCache != nil && writeTx(ctx) == nil && len(paths) == 0
+	if cached {
 		key := cacheListKey(tenantID, schemaName, q)
 		if cached, ok := s.listCache.Get(ctx, key); ok {
 			s.ListCacheHits.Add(1)
@@ -550,6 +558,15 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 		args = append(args, cargs...)
 		i += len(cargs)
 	}
+	for _, p := range paths {
+		clause, pargs, err := pathClause(s.pool.Engine(), p, i)
+		if err != nil {
+			return nil, err
+		}
+		whereClauses = append(whereClauses, clause)
+		args = append(args, pargs...)
+		i += len(pargs)
+	}
 	where := ""
 	if len(whereClauses) > 0 {
 		where = "WHERE " + strings.Join(whereClauses, " AND ")
@@ -586,7 +603,7 @@ func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQu
 	}
 	// Cache write: skip for oversized limits (abusive or direct-caller paths).
 	// The handler clamps to ≤200. This guard covers unclamped callers.
-	if s.listCache != nil && limit <= 200 && writeTx(ctx) == nil {
+	if cached && limit <= 200 {
 		key := cacheListKey(tenantID, schemaName, q)
 		// The cache keeps its own copy so that what it holds stays as the
 		// database returned it, whatever the caller does to the page it got.
@@ -799,11 +816,16 @@ func filterField(sc *domain.Schema, col string) (domain.SchemaField, bool) {
 // column with or without it. PostgreSQL types the parameter from the NUMERIC
 // column it is compared with.
 func filterParam(engine string, sc *domain.Schema, col string, n int) string {
-	ph := fmt.Sprintf("$%d", n)
 	f, ok := filterField(sc, col)
 	if !ok {
-		return ph
+		return fmt.Sprintf("$%d", n)
 	}
+	return fieldParam(engine, f, n)
+}
+
+// fieldParam is filterParam for the field f.
+func fieldParam(engine string, f domain.SchemaField, n int) string {
+	ph := fmt.Sprintf("$%d", n)
 	if f.FieldType == "number" {
 		switch engine {
 		case "mysql":

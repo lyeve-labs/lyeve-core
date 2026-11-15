@@ -404,6 +404,57 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "extra", "field_type": "json"}
 		]
 	}`},
+	// The types a list filter path crosses: a belongs_to chain posts,
+	// authors, companies, countries, a many_to_many to tags, a has_many and
+	// a has_one to comments, a has_many with no key back, and a
+	// many_to_many from posts to posts. Authors have draft and publish and
+	// a trash.
+	"related": {`{
+		"name": "rf_countries",
+		"display_name": "Countries",
+		"fields": [{"name": "name", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "rf_companies",
+		"display_name": "Companies",
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "country", "field_type": "relation", "relation_to": "rf_countries", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "rf_authors",
+		"display_name": "Authors",
+		"with_draft_publish": true,
+		"with_soft_delete": true,
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "secret", "field_type": "text"},
+			{"name": "company", "field_type": "relation", "relation_to": "rf_companies", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "rf_tags",
+		"display_name": "Tags",
+		"fields": [{"name": "slug", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "rf_posts",
+		"display_name": "Posts",
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "author", "field_type": "relation", "relation_to": "rf_authors", "relation_type": "belongs_to"},
+			{"name": "tags", "field_type": "relation", "relation_to": "rf_tags", "relation_type": "many_to_many"},
+			{"name": "comments", "field_type": "relation", "relation_to": "rf_comments", "relation_type": "has_many"},
+			{"name": "lead", "field_type": "relation", "relation_to": "rf_comments", "relation_type": "has_one"},
+			{"name": "sources", "field_type": "relation", "relation_to": "rf_companies", "relation_type": "has_many"},
+			{"name": "related", "field_type": "relation", "relation_to": "rf_posts", "relation_type": "many_to_many"}
+		]
+	}`, `{
+		"name": "rf_comments",
+		"display_name": "Comments",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "rating", "field_type": "integer"},
+			{"name": "post", "field_type": "relation", "relation_to": "rf_posts", "relation_type": "belongs_to"}
+		]
+	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
 	// many_to_many, for the reads that follow a relation.
 	"essays": {`{
@@ -474,6 +525,10 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 					}
 					if id == "shelves" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("shelves", "pages"))
+					}
+					if id == "related" {
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("rf_posts", "rf_tags"))
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("rf_posts", "rf_posts"))
 					}
 					if id == "delivery" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("dl_posts", "dl_tags"))

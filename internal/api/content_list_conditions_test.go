@@ -90,3 +90,29 @@ func manyFields(n, per int) string {
 	}
 	return strings.Join(parts, "&")
 }
+
+// An equality or a bound whose key is a path moves into the conditions, with
+// eq or the bound's name as its operator, and its values count toward the
+// two hundred a list binds.
+func TestTakePaths_MovesPathKeysIntoConditions(t *testing.T) {
+	filters := map[string]any{"title": "a", "author.name": "Ann"}
+	ranges := map[string]db.ListRange{"rank": {GT: "1"}, "comments.rating": {GTE: "2", LT: "5"}}
+	conds, ok := takePaths(filters, ranges, []db.ListCondition{{Column: "tags.slug", Op: "ne", Values: []any{"go"}}})
+	require.True(t, ok)
+	assert.Equal(t, map[string]any{"title": "a"}, filters)
+	assert.Equal(t, map[string]db.ListRange{"rank": {GT: "1"}}, ranges)
+	assert.ElementsMatch(t, []db.ListCondition{
+		{Column: "tags.slug", Op: "ne", Values: []any{"go"}},
+		{Column: "author.name", Op: "eq", Values: []any{"Ann"}},
+		{Column: "comments.rating", Op: "gte", Values: []any{"2"}},
+		{Column: "comments.rating", Op: "lt", Values: []any{"5"}},
+	}, conds)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/content/x?"+manyFields(4, 50)+"&filters[author.name]=Ann", nil)
+	filters, err := parseFilters(r)
+	require.NoError(t, err)
+	conds, ok = takeConditions(r.URL.Query(), filters)
+	require.True(t, ok)
+	_, ok = takePaths(filters, takeRanges(filters), conds)
+	assert.False(t, ok, "a path's value did not count toward the two hundred")
+}

@@ -375,6 +375,7 @@ func TestDelivery_OperatorsWithinTheGrammar(t *testing.T) {
 		for _, q := range []string{
 			"filters[secret][contains]=x", "filters[secret][empty]=false", "filters[tally][in]=1",
 			"filters[title][eq]=blue", "filters[rank][in]=1&filters[rank][in]=1", "filters[rank][nin]=2&filters[rank][in]=1&filters[rank][nin]=2",
+			"filters[author.name]=x", "filters[tags.label][ne]=x", "filters[author.badge.label][contains]=x",
 		} {
 			rr := rg.get(t, deliveryHostA, deliveryPostsPath+"?"+q, nil)
 			assert.JSONEq(t, stripRequestID(t, unknown.Body.String()), stripRequestID(t, rr.Body.String()), q)
