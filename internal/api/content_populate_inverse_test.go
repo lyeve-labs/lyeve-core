@@ -91,3 +91,39 @@ func TestContentHandler_PopulateInverseReadsTheKeyByTheRule(t *testing.T) {
 		assert.Equal(t, http.StatusOK, listComments("populate=post.*").StatusCode, "a field a wildcard reaches one level down")
 	})
 }
+
+// A has_one or has_many whose key the caller's mask hides on its target is
+// left out, named or reached by a wildcard: the entries grouped under each
+// record would show which record each one points at. It is left out rather
+// than refused, so the answer does not say what the mask hides. A key the
+// mask leaves visible is still read, and a caller who may see the key gets
+// the relation.
+func TestContentHandler_PopulateInverseWithAHiddenKeyIsLeftOut(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"inverse"}, func(t *testing.T, fx schemaContentFixture) {
+		post := createdID(t, fx.create(t, "iv_posts", map[string]any{"title": "p"}))
+		other := createdID(t, fx.create(t, "iv_posts", map[string]any{"title": "q"}))
+		createdID(t, fx.create(t, "iv_comments", map[string]any{"body": "c1", "post": post}))
+		createdID(t, fx.create(t, "iv_replies", map[string]any{"body": "r1", "post": other, "reply_to": post}))
+		editor := asEditor(fx.ctx)
+		one := map[string]string{"schema": "iv_posts", "id": post}
+		read := func(t *testing.T, query string) map[string]any {
+			t.Helper()
+			rr := fx.send(t, editor, http.MethodGet, "/api/v1/content/iv_posts/"+post+"?"+query, one, nil, fx.content.Get)
+			require.Equal(t, http.StatusOK, rr.Code, "%s: %s", query, rr.Body.String())
+			return dataOf(t, rr)
+		}
+
+		fx.content.perms = fakeProvider{fakeChecker{allow: true, mask: []string{"post_id"}}}
+		for _, query := range []string{"populate=comments,lead,replies", "populate=*", "depth=1"} {
+			got := read(t, query)
+			assert.NotContains(t, got, "comments", "%s served a has_many by a hidden key", query)
+			assert.NotContains(t, got, "lead", "%s served a has_one by a hidden key", query)
+			assert.Contains(t, got, "replies", "%s left out a relation whose key is visible", query)
+		}
+
+		fx.content.perms = fakeProvider{fakeChecker{allow: true}}
+		got := read(t, "populate=comments,lead")
+		assert.Len(t, got["comments"], 1, "a caller who sees the key reads the relation")
+		assert.NotNil(t, got["lead"])
+	})
+}

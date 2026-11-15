@@ -378,14 +378,15 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 	}
 	var ruleErr error
 	type decision struct {
-		mask func(map[string]any) map[string]any
-		ok   bool
+		mask  func(map[string]any) map[string]any
+		hides func(string) bool
+		ok    bool
 	}
 	decided := map[string]decision{}
-	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool) {
 		target := f.RelationTo
 		if d, seen := decided[target]; seen {
-			return d.mask, d.ok
+			return d.mask, d.hides, d.ok
 		}
 		d := decision{}
 		// A relation into a content type that was deleted stays declared on
@@ -397,33 +398,34 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			switch {
 			case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
 				decided[target] = d
-				return nil, false
+				return nil, nil, false
 			case err != nil:
 				ruleErr = err
 				decided[target] = d
-				return nil, false
+				return nil, nil, false
 			}
 		}
 		switch err := h.authorize(r, target, "read"); {
 		case err == nil:
-			mask, mErr := h.fieldMask(r, target)
+			hidden, mErr := h.hiddenFields(r, target)
 			if mErr != nil {
 				ruleErr = mErr
 				break
 			}
+			mask := hidden.Apply
 			// A related row is held to the rule its own schema's reads
 			// follow: a draft is served to a caller who may read drafts
 			// there, and to anyone else it is absent.
 			if !h.draftResponse(w, r, target) {
 				mask = publishedOnly(mask)
 			}
-			d = decision{mask: mask, ok: true}
+			d = decision{mask: mask, hides: hidden.Names, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
 		}
 		decided[target] = d
-		return d.mask, d.ok
+		return d.mask, d.hides, d.ok
 	}
 	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
 	var keyErr *db.InverseKeyError

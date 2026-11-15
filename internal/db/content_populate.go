@@ -738,8 +738,10 @@ func (s *ContentStore) PopulateWithConfigBatch(ctx context.Context, items []*dom
 // ok false leaves the relation unpopulated. mask, when not nil, is applied to
 // every related record before it is written into the parent, and a nil from
 // it hides that record: a to-one relation is served as null and a to-many one
-// leaves it out.
-type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map[string]any) map[string]any, ok bool)
+// leaves it out. hides, when not nil, reports whether the caller's field mask
+// hides a column of the target, which a has_one or has_many must not read its
+// key from.
+type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map[string]any) map[string]any, hides func(column string) bool, ok bool)
 
 // PopulateGated is PopulateWithConfigBatch with every relation, at every
 // depth, put to gate before its target schema is read. A nil gate serves
@@ -834,14 +836,15 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 		}
 
 		var relMask func(map[string]any) map[string]any
+		var hides func(string) bool
 		if w.gate != nil {
-			m, ok := w.gate(ctx, f)
+			m, h, ok := w.gate(ctx, f)
 			if !ok {
 				continue
 			}
-			relMask = m
+			relMask, hides = m, h
 		}
-		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, walk: w, named: named[fieldName]}
+		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, hides: hides, walk: w, named: named[fieldName]}
 
 		nextCfg := nextPopulateConfig(fieldName, nestedPaths, nextDepth)
 
@@ -876,13 +879,15 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 
 // relationPopulate is one relation field being populated at one level: the
 // field, the name it is written under, the projection the request asked for,
-// the gate's mask for the target schema, the walk it belongs to, and whether
-// the request names it rather than reaching it by a wildcard or a depth.
+// the gate's mask for the target schema and the columns it hides there, the
+// walk it belongs to, and whether the request names it rather than reaching it
+// by a wildcard or a depth.
 type relationPopulate struct {
 	field   domain.SchemaField
 	name    string
 	masks   map[string][]string
 	relMask func(map[string]any) map[string]any
+	hides   func(column string) bool
 	walk    *populateWalk
 	named   bool
 }
@@ -1058,7 +1063,7 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 
 	fkCol, err := s.inverseKeyOf(ctx, rel, items[0].SchemaName)
 	if err == nil && fkCol == "" {
-		return loads, rel.unreadable()
+		return loads, nil
 	}
 	var relatedMap map[uuid.UUID][]*domain.Content
 	if err == nil {
@@ -1114,7 +1119,7 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
 	fkCol, err := s.inverseKeyOf(ctx, rel, items[0].SchemaName)
 	if err == nil && fkCol == "" {
-		return make([]populateLoad, len(items)), rel.unreadable()
+		return make([]populateLoad, len(items)), nil
 	}
 	var relatedMap map[uuid.UUID][]*domain.Content
 	if err == nil {
@@ -1124,25 +1129,28 @@ func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain
 }
 
 // inverseKeyOf is the key column the has_one or has_many rel of the type
-// source reads on its target, by inverseKey's rule. Empty is a definition
-// that gives none.
+// source reads on its target, by inverseKey's rule. Empty with no error is a
+// relation left out of every item:
+//
+//   - one whose key the caller's mask hides on the target, named or not. The
+//     entries grouped under each item would show which item each points at,
+//     and a refusal would say what the mask hides.
+//   - one the definition gives no key, reached by a wildcard or a depth,
+//     since that request asked for whatever can be read. Named, it is an
+//     InverseKeyError.
 func (s *ContentStore) inverseKeyOf(ctx context.Context, rel relationPopulate, source string) (string, error) {
 	target, err := s.schemas.GetByName(ctx, rel.field.RelationTo)
 	if err != nil {
 		return "", fmt.Errorf("resolve schema %q: %w", rel.field.RelationTo, err)
 	}
-	key, _ := inverseKey(source, rel.field, target)
-	return key, nil
-}
-
-// unreadable answers a has_one or has_many whose key cannot be read: refused
-// when the request names it, and left out of every item when a wildcard or a
-// depth reached it, since that request asked for whatever can be read.
-func (r relationPopulate) unreadable() error {
-	if r.named {
-		return &InverseKeyError{Field: r.name, Target: r.field.RelationTo}
+	key, ok := inverseKey(source, rel.field, target)
+	switch {
+	case !ok && rel.named:
+		return "", &InverseKeyError{Field: rel.name, Target: rel.field.RelationTo}
+	case !ok, rel.hides != nil && rel.hides(key):
+		return "", nil
 	}
-	return nil
+	return key, nil
 }
 
 // populateManyToManyBatch batch-resolves many_to_many relations across all items.
