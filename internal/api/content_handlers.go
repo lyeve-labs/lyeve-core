@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -57,13 +59,18 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
 		return
 	}
+	conds, ok := takeConditions(r.URL.Query(), filters)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
+		return
+	}
 	ranges := takeRanges(filters)
 	sort, ok := parseListSort(r)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
 		return
 	}
-	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(filters, ranges, sort)) {
+	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(filters, ranges, conds, sort)) {
 		return
 	}
 	loc, locale, ok := h.readLocale(w, r)
@@ -77,7 +84,7 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	h.draftResponse(w, r, schemaName)
 
 	items, err := h.store.ListPage(r.Context(), schemaName, db.ListQuery{
-		Limit: limit, Offset: offset, Filters: filters, Ranges: ranges, Sort: sort,
+		Limit: limit, Offset: offset, Filters: filters, Ranges: ranges, Conditions: conds, Sort: sort,
 	})
 	if err != nil {
 		storeError(w, r, err, "failed to list content")
@@ -439,7 +446,7 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
 		return
 	}
-	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(nil, nil, sort)) {
+	if !h.refuseHiddenFilters(w, r, schemaName, queriedColumns(nil, nil, nil, sort)) {
 		return
 	}
 	loc, locale, ok := h.readLocale(w, r)
@@ -619,12 +626,12 @@ func parseFilters(r *http.Request) (map[string]any, error) {
 }
 
 // rangeOps are the bounds a list filter may put on a column, written
-// filters[field][gte] and filters[field][lte].
-var rangeOps = []string{"gte", "lte"}
+// filters[field][gte] and so on.
+var rangeOps = []string{"gte", "lte", "gt", "lt"}
 
-// takeRanges moves each filters[field][gte] and filters[field][lte] that
-// parseFilters read out of filters and into the ranges it answers. Any other
-// bracketed key stays a filter, which the store refuses as an unknown column.
+// takeRanges moves each bound that parseFilters read out of filters and into
+// the ranges it answers. Any other bracketed key stays a filter, which the
+// store refuses as an unknown column.
 func takeRanges(filters map[string]any) map[string]db.ListRange {
 	var ranges map[string]db.ListRange
 	for key, v := range filters {
@@ -636,17 +643,88 @@ func takeRanges(filters map[string]any) map[string]db.ListRange {
 			if ranges == nil {
 				ranges = map[string]db.ListRange{}
 			}
-			bound := ranges[col]
-			if op == "gte" {
-				bound.GTE = v
-			} else {
-				bound.LTE = v
-			}
-			ranges[col] = bound
+			ranges[col] = withBound(ranges[col], op, v)
 			delete(filters, key)
 		}
 	}
 	return ranges
+}
+
+// withBound answers bound with the side op names set to v.
+func withBound(bound db.ListRange, op string, v any) db.ListRange {
+	switch op {
+	case "gte":
+		bound.GTE = v
+	case "lte":
+		bound.LTE = v
+	case "gt":
+		bound.GT = v
+	case "lt":
+		bound.LT = v
+	}
+	return bound
+}
+
+// conditionOps are the operators a list filter may name besides equality
+// and the bounds, written filters[field][op]=value.
+var conditionOps = []string{db.OpNotEqual, db.OpContains, db.OpNotContains, db.OpIn, db.OpNotIn, db.OpEmpty}
+
+// maxConditionValues caps the values all of a list's conditions bind
+// together. Fifty values on each of many fields would pass the 2100
+// parameters SQL Server takes in one statement, and the list would fail
+// there alone.
+const maxConditionValues = 200
+
+// takeConditions moves each filters[field][op] that parseFilters read out of
+// filters. filters[field][eq] becomes the equality filters[field] is, and
+// every other operator a condition. in and nin take every value of their
+// key, so filters[field][in]=a&filters[field][in]=b is one condition with
+// two values, and more than db.MaxListValues answers false, as do more than
+// maxConditionValues across every condition. So does an eq beside an
+// equality on the same field, which would be two answers to one question.
+// An eq after another operator, as in filters[field][gt][eq], stays a filter
+// the store refuses as an unknown column. Whether the field takes the
+// operator is the store's question.
+func takeConditions(query url.Values, filters map[string]any) ([]db.ListCondition, bool) {
+	var conds []db.ListCondition
+	total := 0
+	// The keys are read before the loop moves any, so a field named like an
+	// operator key is never read a second time.
+	for _, key := range slices.Collect(maps.Keys(filters)) {
+		v := filters[key]
+		if col, ok := strings.CutSuffix(key, "][eq"); ok && col != "" && !strings.Contains(col, "][") {
+			if _, both := filters[col]; both {
+				return nil, false
+			}
+			filters[col] = v
+			delete(filters, key)
+			continue
+		}
+		for _, op := range conditionOps {
+			col, ok := strings.CutSuffix(key, "]["+op)
+			if !ok || col == "" {
+				continue
+			}
+			values := []any{v}
+			if op == db.OpIn || op == db.OpNotIn {
+				all := query["filters["+key+"]"]
+				if len(all) > db.MaxListValues {
+					return nil, false
+				}
+				values = make([]any, len(all))
+				for i, one := range all {
+					values[i] = one
+				}
+			}
+			total += len(values)
+			if total > maxConditionValues {
+				return nil, false
+			}
+			conds = append(conds, db.ListCondition{Column: col, Op: op, Values: values})
+			delete(filters, key)
+		}
+	}
+	return conds, true
 }
 
 // parseListSort reads ?sort=field, or ?sort=-field for the reverse order.
@@ -669,14 +747,17 @@ func parseListSort(r *http.Request) (db.ListSort, bool) {
 }
 
 // queriedColumns answers every column a list query reads a value of: each
-// filter, each range and the sort.
-func queriedColumns(filters map[string]any, ranges map[string]db.ListRange, sort db.ListSort) []string {
-	out := make([]string, 0, len(filters)+len(ranges)+1)
+// filter, each range, each condition and the sort.
+func queriedColumns(filters map[string]any, ranges map[string]db.ListRange, conds []db.ListCondition, sort db.ListSort) []string {
+	out := make([]string, 0, len(filters)+len(ranges)+len(conds)+1)
 	for col := range filters {
 		out = append(out, col)
 	}
 	for col := range ranges {
 		out = append(out, col)
+	}
+	for _, c := range conds {
+		out = append(out, c.Column)
 	}
 	if sort.Column != "" {
 		out = append(out, sort.Column)
