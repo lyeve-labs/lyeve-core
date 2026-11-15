@@ -225,9 +225,9 @@ func FKColumn(fieldName, override string) string {
 //     on target toward source.
 //  2. Without it, the key column of the one belongs_to on target toward
 //     source.
-//  3. Without one, a declared field on target whose column is <source>_id,
-//     the key every inverse field read before the rule. A system column
-//     never counts, so a type named tenant does not read tenant_id.
+//  3. Without one, a declared field on target whose column is the legacy
+//     <source>_id key. A system column never counts, so a type named tenant
+//     does not read tenant_id.
 //
 // Two belongs_to toward source and no relation_fk_name give no key, since a
 // guess would serve one relation's entries under the other.
