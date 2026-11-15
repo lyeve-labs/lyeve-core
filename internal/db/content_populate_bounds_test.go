@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -196,6 +197,70 @@ func TestContentStore_PopulateSkipsAHiddenRelationField_AllDialects(t *testing.T
 		assert.NotContains(t, read.Data, "notes")
 
 		editor := post()
+		require.ErrorIs(t, store.PopulateStrict(ctx, []*domain.Content{editor}, cfg, nil, nil), db.ErrPopulateTooLarge)
+	})
+}
+
+// A many_to_many target the caller's mask hides is not walked below. A
+// published post links a draft tag that carries more bytes below it than a
+// walk may read: a reader who may not read drafts gets the post with no
+// tags, and a caller with no gate still meets the bound.
+func TestContentStore_PopulateSkipsBelowAHiddenManyToManyEntry_AllDialects(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		schemas := newTestRegistry(t, pool)
+		tags := &domain.Schema{
+			Name:             "draft_tags",
+			WithDraftPublish: true,
+			Fields:           []domain.SchemaField{{Name: "name", FieldType: "text"}},
+		}
+		require.NoError(t, schemas.Upsert(ctx, tags))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "draft_tags") })
+		require.NoError(t, schemas.Upsert(ctx, &domain.Schema{
+			Name: "draft_tag_notes",
+			Fields: []domain.SchemaField{
+				{Name: "body", FieldType: "text"},
+				{Name: "tag", FieldType: "relation", RelationTo: "draft_tags", RelationType: domain.RelBelongsTo},
+			},
+		}))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "draft_tag_notes") })
+		tags.Fields = append(tags.Fields, domain.SchemaField{Name: "notes", FieldType: "relation", RelationTo: "draft_tag_notes", RelationType: domain.RelHasMany})
+		require.NoError(t, schemas.Upsert(ctx, tags))
+		tagsField := domain.SchemaField{Name: "tags", FieldType: "relation", RelationTo: "draft_tags", RelationType: domain.RelManyToMany}
+		require.NoError(t, schemas.Upsert(ctx, &domain.Schema{
+			Name:             "draft_tag_posts",
+			WithDraftPublish: true,
+			Fields:           []domain.SchemaField{{Name: "title", FieldType: "text"}, tagsField},
+		}))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "draft_tag_posts") })
+
+		store := db.NewContentStore(pool, schemas.Source())
+		tag, err := store.Insert(ctx, "draft_tags", map[string]any{"name": "t", "_status": "draft"})
+		require.NoError(t, err)
+		body := strings.Repeat("x", 1<<20)
+		for range 34 {
+			_, err := store.Insert(ctx, "draft_tag_notes", map[string]any{"body": body, "tag": tag.ID.String()})
+			require.NoError(t, err)
+		}
+		post, err := store.Insert(ctx, "draft_tag_posts", map[string]any{"title": "p", "_status": "published"})
+		require.NoError(t, err)
+		require.NoError(t, store.SetRelations(ctx, "draft_tag_posts", post.ID, tagsField, []uuid.UUID{tag.ID}))
+		cfg := domain.PopulateConfig{Paths: []string{"tags.notes"}}
+
+		published := func(context.Context, domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
+			mask := func(data map[string]any) map[string]any {
+				if !core.ContentPublished(data) {
+					return nil
+				}
+				return data
+			}
+			return mask, nil, false, true
+		}
+		reader := &domain.Content{ID: post.ID, SchemaName: "draft_tag_posts", Data: map[string]any{}}
+		require.NoError(t, store.PopulateStrict(ctx, []*domain.Content{reader}, cfg, nil, published))
+		assert.Empty(t, reader.Data["tags"])
+
+		editor := &domain.Content{ID: post.ID, SchemaName: "draft_tag_posts", Data: map[string]any{}}
 		require.ErrorIs(t, store.PopulateStrict(ctx, []*domain.Content{editor}, cfg, nil, nil), db.ErrPopulateTooLarge)
 	})
 }
