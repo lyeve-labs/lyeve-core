@@ -37,36 +37,60 @@ func threadCPUTime(t testing.TB) time.Duration {
 
 // A password compare measured while other work holds every processor costs
 // what it costs on a quiet runner, so the sign-in timing tests hold on a
-// loaded one.
+// loaded one. The quiet and busy samples alternate, and each round swaps
+// which goes first, so a change in the host's own load during the test
+// reaches both sides alike. A thread's CPU time still depends on the core it
+// lands on and on whether a hyperthread sibling is busy, so one sample can
+// read twice another. The medians over many rounds compare the two
+// conditions rather than two placements.
 func TestSignInCost_ABusyRunnerDoesNotMoveIt(t *testing.T) {
 	compare := func() { _ = auth.VerifyPassword("bcrypt", "", "not-the-password") }
-	measure := func() time.Duration {
-		samples := make([]time.Duration, 3)
-		for i := range samples {
-			samples[i] = signInCost(t, compare)
+	const rounds = 15
+	quiet := make([]time.Duration, 0, rounds)
+	busy := make([]time.Duration, 0, rounds)
+	measureBusy := func() {
+		stop := occupyEveryProcessor()
+		busy = append(busy, signInCost(t, compare))
+		stop()
+	}
+	for i := range rounds {
+		if i%2 == 0 {
+			quiet = append(quiet, signInCost(t, compare))
+			measureBusy()
+		} else {
+			measureBusy()
+			quiet = append(quiet, signInCost(t, compare))
 		}
-		return median(samples)
 	}
 
-	quiet := measure()
-	var stop atomic.Bool
+	q, b := median(quiet), median(busy)
+	ratio := float64(b) / float64(q)
+	assert.True(t, ratio >= 0.5 && ratio <= 2.0, "busy runner: ratio %.2f, quiet %v, busy %v", ratio, q, b)
+}
+
+// occupyEveryProcessor starts two spinning goroutines per processor and
+// returns once every one of them has started. The function it returns stops
+// them and waits until they have.
+func occupyEveryProcessor() (stop func()) {
+	var halt atomic.Bool
 	var spins atomic.Int64
-	var wg sync.WaitGroup
+	var started, done sync.WaitGroup
 	for range 2 * runtime.GOMAXPROCS(0) {
-		wg.Add(1)
+		started.Add(1)
+		done.Add(1)
 		go func() {
-			defer wg.Done()
+			defer done.Done()
+			started.Done()
 			n := int64(0)
-			for !stop.Load() {
+			for !halt.Load() {
 				n++
 			}
 			spins.Add(n)
 		}()
 	}
-	busy := measure()
-	stop.Store(true)
-	wg.Wait()
-
-	ratio := float64(busy) / float64(quiet)
-	assert.True(t, ratio >= 0.5 && ratio <= 2.0, "busy runner: ratio %.2f, quiet %v, busy %v", ratio, quiet, busy)
+	started.Wait()
+	return func() {
+		halt.Store(true)
+		done.Wait()
+	}
 }
