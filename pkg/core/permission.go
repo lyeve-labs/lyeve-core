@@ -222,7 +222,7 @@ var _ PermissionChecker = RoleOnlyPermissionChecker{}
 
 // Allowed implements PermissionChecker. It reads no table, so it never fails.
 func (RoleOnlyPermissionChecker) Allowed(_ context.Context, roles []string, resource, _ string) (bool, error) {
-	admitsAdmin := adminByDefault(resource)
+	admitsAdmin := AdminByDefault(resource)
 	for _, role := range roles {
 		switch role {
 		case RoleSuperAdmin:
@@ -236,14 +236,16 @@ func (RoleOnlyPermissionChecker) Allowed(_ context.Context, roles []string, reso
 	return false, nil
 }
 
-// adminByDefault reports whether the admin role may do every action on
+// AdminByDefault reports whether the admin role may do every action on
 // resource while no rule names admin for it: a resource of a kind registered
 // with AdminByDefault, a schema name, or the wildcard. A resource of a kind
 // is judged by its kind even where it would pass as a schema name, so a kind
 // registered without AdminByDefault stays closed to admin. A name that is
 // neither, such as a kind's prefix with a slug the kind refuses, is not a
-// resource anybody may act on by default.
-func adminByDefault(resource string) bool {
+// resource anybody may act on by default. Every PermissionChecker that gives
+// admin a default asks this, so the kernel and a rule engine agree on where
+// the default holds.
+func AdminByDefault(resource string) bool {
 	if kind, ok := permissionKindOf(resource); ok {
 		return kind.AdminByDefault
 	}
