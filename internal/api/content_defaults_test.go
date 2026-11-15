@@ -267,6 +267,24 @@ var contentDefaultSchemas = map[string][]string{
 	// one belongs_to back, a named key among two, two with no name, a named
 	// key that is no belongs_to back, a column named for the source type, and
 	// nothing to read.
+	// A has_one into a type with draft and publish: a person's profile is
+	// the newest profile pointing back that the caller may read.
+	"profiles": {`{
+		"name": "pf_people",
+		"display_name": "People",
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "profile", "field_type": "relation", "relation_to": "pf_profiles", "relation_type": "has_one"}
+		]
+	}`, `{
+		"name": "pf_profiles",
+		"display_name": "Profiles",
+		"with_draft_publish": true,
+		"fields": [
+			{"name": "bio", "field_type": "text", "required": true},
+			{"name": "person", "field_type": "relation", "relation_to": "pf_people", "relation_type": "belongs_to"}
+		]
+	}`},
 	"inverse": {`{
 		"name": "iv_posts",
 		"display_name": "Posts",

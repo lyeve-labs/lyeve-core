@@ -378,15 +378,16 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 	}
 	var ruleErr error
 	type decision struct {
-		mask  func(map[string]any) map[string]any
-		hides func(string) bool
-		ok    bool
+		mask   func(map[string]any) map[string]any
+		hides  func(string) bool
+		drafts bool
+		ok     bool
 	}
 	decided := map[string]decision{}
-	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
 		target := f.RelationTo
 		if d, seen := decided[target]; seen {
-			return d.mask, d.hides, d.ok
+			return d.mask, d.hides, d.drafts, d.ok
 		}
 		d := decision{}
 		// A relation into a content type that was deleted stays declared on
@@ -398,11 +399,11 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			switch {
 			case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
 				decided[target] = d
-				return nil, nil, false
+				return nil, nil, false, false
 			case err != nil:
 				ruleErr = err
 				decided[target] = d
-				return nil, nil, false
+				return nil, nil, false, false
 			}
 		}
 		switch err := h.authorize(r, target, "read"); {
@@ -416,16 +417,17 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			// A related row is held to the rule its own schema's reads
 			// follow: a draft is served to a caller who may read drafts
 			// there, and to anyone else it is absent.
-			if !h.draftResponse(w, r, target) {
+			drafts := h.draftResponse(w, r, target)
+			if !drafts {
 				mask = publishedOnly(mask)
 			}
-			d = decision{mask: mask, hides: hidden.Names, ok: true}
+			d = decision{mask: mask, hides: hidden.Names, drafts: drafts, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
 		}
 		decided[target] = d
-		return d.mask, d.hides, d.ok
+		return d.mask, d.hides, d.drafts, d.ok
 	}
 	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
 	var keyErr *db.InverseKeyError

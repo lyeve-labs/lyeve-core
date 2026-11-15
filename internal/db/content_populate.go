@@ -512,8 +512,10 @@ func (s *ContentStore) getByIDs(ctx context.Context, schemaName string, ids []uu
 // matches one of the given parent IDs. Results are grouped by parent ID.
 // Used for batch resolution of has_one and has_many relations. Each query
 // reads at most what w may still read and one row more, so a relation past
-// the bound is refused without being read whole.
-func (s *ContentStore) GetByFKs(ctx context.Context, w *populateWalk, schemaName string, fkCol string, parentIDs []uuid.UUID) (map[uuid.UUID][]*domain.Content, error) {
+// the bound is refused without being read whole. An unpublished row is read
+// only when drafts is true. Rows come newest first, the id breaking a
+// created_at tie as the list does, so a has_one takes the same row each time.
+func (s *ContentStore) GetByFKs(ctx context.Context, w *populateWalk, schemaName string, fkCol string, parentIDs []uuid.UUID, drafts bool) (map[uuid.UUID][]*domain.Content, error) {
 	parentIDs = distinctIDs(parentIDs)
 	if len(parentIDs) == 0 {
 		return map[uuid.UUID][]*domain.Content{}, nil
@@ -531,9 +533,9 @@ func (s *ContentStore) GetByFKs(ctx context.Context, w *populateWalk, schemaName
 	tenantID := tenant.ID(ctx)
 	// A child in the trash is not served, as GetByIDs serves no trashed
 	// parent.
-	visible := ""
+	visible := draftWhere(sc, "r", drafts)
 	if sc.WithSoftDelete {
-		visible = " AND r.deleted_at IS NULL"
+		visible += " AND r.deleted_at IS NULL"
 	}
 
 	for start := 0; start < len(parentIDs); start += maxBatchSize {
@@ -559,7 +561,7 @@ func (s *ContentStore) GetByFKs(ctx context.Context, w *populateWalk, schemaName
 			       %s
 			FROM %s r
 			WHERE %s IN (%s) AND tenant_id = $%d%s
-			ORDER BY created_at DESC
+			ORDER BY created_at DESC, id DESC
 			%s`,
 			dataExpr, table, fkColQuoted, strings.Join(phs, ", "), len(chunk)+1, visible,
 			dialect.LimitOffset(d, w.limit(), 0))
@@ -740,8 +742,11 @@ func (s *ContentStore) PopulateWithConfigBatch(ctx context.Context, items []*dom
 // it hides that record: a to-one relation is served as null and a to-many one
 // leaves it out. hides, when not nil, reports whether the caller's field mask
 // hides a column of the target, which a has_one or has_many must not read its
-// key from.
-type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map[string]any) map[string]any, hides func(column string) bool, ok bool)
+// key from. drafts reports whether the caller may read drafts of the target.
+// When it is false, a has_one or has_many reads only the published entries,
+// so a has_one serves the newest entry the caller may read rather than null
+// behind a newer draft.
+type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map[string]any) map[string]any, hides func(column string) bool, drafts bool, ok bool)
 
 // PopulateGated is PopulateWithConfigBatch with every relation, at every
 // depth, put to gate before its target schema is read. A nil gate serves
@@ -837,14 +842,15 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 
 		var relMask func(map[string]any) map[string]any
 		var hides func(string) bool
+		drafts := true
 		if w.gate != nil {
-			m, h, ok := w.gate(ctx, f)
+			m, h, d, ok := w.gate(ctx, f)
 			if !ok {
 				continue
 			}
-			relMask, hides = m, h
+			relMask, hides, drafts = m, h, d
 		}
-		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, hides: hides, walk: w, named: named[fieldName]}
+		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, hides: hides, drafts: drafts, walk: w, named: named[fieldName]}
 
 		nextCfg := nextPopulateConfig(fieldName, nestedPaths, nextDepth)
 
@@ -879,15 +885,16 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 
 // relationPopulate is one relation field being populated at one level: the
 // field, the name it is written under, the projection the request asked for,
-// the gate's mask for the target schema and the columns it hides there, the
-// walk it belongs to, and whether the request names it rather than reaching it
-// by a wildcard or a depth.
+// the gate's mask for the target schema, the columns it hides there and
+// whether drafts there count, the walk it belongs to, and whether the request
+// names it rather than reaching it by a wildcard or a depth.
 type relationPopulate struct {
 	field   domain.SchemaField
 	name    string
 	masks   map[string][]string
 	relMask func(map[string]any) map[string]any
 	hides   func(column string) bool
+	drafts  bool
 	walk    *populateWalk
 	named   bool
 }
@@ -1067,7 +1074,7 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 	}
 	var relatedMap map[uuid.UUID][]*domain.Content
 	if err == nil {
-		relatedMap, err = s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
+		relatedMap, err = s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items), rel.drafts)
 	}
 	if err != nil {
 		if err := rel.readFailed(ctx, "has_one", err); err != nil {
@@ -1123,7 +1130,7 @@ func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain
 	}
 	var relatedMap map[uuid.UUID][]*domain.Content
 	if err == nil {
-		relatedMap, err = s.GetByFKs(ctx, rel.walk, rel.field.RelationTo, fkCol, itemIDs(items))
+		relatedMap, err = s.GetByFKs(ctx, rel.walk, rel.field.RelationTo, fkCol, itemIDs(items), rel.drafts)
 	}
 	return s.assignToMany(ctx, items, rel, nextCfg, currentDepth, "has_many", relatedMap, err)
 }

@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -125,5 +127,36 @@ func TestContentHandler_PopulateInverseWithAHiddenKeyIsLeftOut(t *testing.T) {
 		got := read(t, "populate=comments,lead")
 		assert.Len(t, got["comments"], 1, "a caller who sees the key reads the relation")
 		assert.NotNil(t, got["lead"])
+	})
+}
+
+// A has_one serves the newest entry pointing back that the caller may read.
+// A newer draft is not that entry for a reader without draft rights, who gets
+// the published one, and an editor gets the draft.
+func TestContentHandler_PopulateHasOneSkipsADraftTheCallerCannotRead(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"profiles"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = fakeProvider{editorChecker{}}
+		person := createdID(t, fx.create(t, "pf_people", map[string]any{"name": "p"}))
+		published := fx.createStatus(t, "pf_profiles", "published", map[string]any{"bio": "published", "person": person})
+		// SQL Server's clock ticks about every 15 ms, so two creates in a row
+		// can share a created_at, and the id would then decide.
+		time.Sleep(50 * time.Millisecond)
+		draft := fx.createStatus(t, "pf_profiles", "draft", map[string]any{"bio": "draft", "person": person})
+
+		profile := func(ctx context.Context) any {
+			t.Helper()
+			rr := fx.send(t, ctx, http.MethodGet, "/api/v1/content/pf_people/"+person+"?populate=profile",
+				map[string]string{"schema": "pf_people", "id": person}, nil, fx.content.Get)
+			require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+			var out struct {
+				Data map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
+			got, _ := out.Data["profile"].(map[string]any)
+			require.NotNil(t, got, "profile served as %v", out.Data["profile"])
+			return got["id"]
+		}
+		assert.Equal(t, published, profile(asReader(fx.ctx)), "a reader gets the published profile")
+		assert.Equal(t, draft, profile(asEditor(fx.ctx)), "an editor gets the newer draft")
 	})
 }
