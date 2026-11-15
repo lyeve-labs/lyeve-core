@@ -1419,21 +1419,28 @@ func (j *jsonColumn) Scan(src any) error {
 
 // scanFullRow scans a row that returns (id, created_at, updated_at, data::jsonb).
 func scanFullRow(engine string, row interface{ Scan(...any) error }, schemaName string, sc *domain.Schema) (*domain.Content, error) {
+	c, _, err := scanSizedRow(engine, row, schemaName, sc)
+	return c, err
+}
+
+// scanSizedRow is scanFullRow that also reports the bytes the database
+// answered the row's data in, which the populate walk holds to its bound.
+func scanSizedRow(engine string, row interface{ Scan(...any) error }, schemaName string, sc *domain.Schema) (*domain.Content, int, error) {
 	c := &domain.Content{SchemaName: schemaName}
 	var rawData jsonColumn
 	if err := row.Scan(scanUUID(engine, &c.ID), &c.CreatedAt, &c.UpdatedAt, &rawData); err != nil {
-		return nil, fmt.Errorf("scan content row: %w", err)
+		return nil, 0, fmt.Errorf("scan content row: %w", err)
 	}
 	if len(rawData.raw) > 0 {
 		if err := json.Unmarshal(rawData.raw, &c.Data); err != nil {
-			return nil, fmt.Errorf("unmarshal content data: %w", err)
+			return nil, 0, fmt.Errorf("unmarshal content data: %w", err)
 		}
 	}
 	if c.Data == nil {
 		c.Data = make(map[string]any)
 	}
 	normalizeContentData(engine, sc, c.Data)
-	return c, nil
+	return c, len(rawData.raw), nil
 }
 
 // contentTimeLayout is how a datetime reads on every dialect. It is the form

@@ -557,6 +557,10 @@ func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request
 		return publishedOnly(hidden.Apply), true
 	}
 	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
+	if gateErr == nil && errors.Is(err, db.ErrPopulateTooLarge) {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, populateTooLarge)
+		return false
+	}
 	if err = errors.Join(gateErr, err); err != nil {
 		storeError(w, r, err, "content delivery is unavailable")
 		return false

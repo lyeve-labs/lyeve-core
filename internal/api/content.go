@@ -361,11 +361,16 @@ func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.Hidd
 // or by the rules, is left out of the entry, and one it may read comes back
 // with the target's field mask applied.
 //
-// Population stays best-effort for a relation the store cannot read. A rule
-// store that cannot answer is different: the read answers 503 rather than
-// guess, and populate reports false after writing it.
+// A relation the store cannot read, or a rule store that cannot answer,
+// fails the read rather than serving the relation empty, and a walk past its
+// bounds is refused rather than cut short. populate reports false after
+// writing the answer.
 func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content) bool {
-	cfg := parsePopulateFromQuery(r)
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: depth")
+		return false
+	}
 	if cfg.IsEmpty() || len(items) == 0 {
 		return true
 	}
@@ -381,6 +386,22 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			return d.mask, d.ok
 		}
 		d := decision{}
+		// A relation into a content type that was deleted stays declared on
+		// the type that pointed at it, so a wildcard read of that type would
+		// otherwise fail for good. It is left out, as the delivery routes
+		// leave it out.
+		if h.schemas != nil {
+			sc, err := h.schemas.GetByName(r.Context(), target)
+			switch {
+			case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
+				decided[target] = d
+				return nil, false
+			case err != nil:
+				ruleErr = err
+				decided[target] = d
+				return nil, false
+			}
+		}
 		switch err := h.authorize(r, target, "read"); {
 		case err == nil:
 			mask, mErr := h.fieldMask(r, target)
@@ -402,13 +423,24 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 		decided[target] = d
 		return d.mask, d.ok
 	}
-	_ = h.store.PopulateGated(r.Context(), items, cfg, gate) // err suppressed: a relation the store cannot read is served empty
-	if ruleErr != nil {
+	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
+	switch {
+	case ruleErr != nil:
 		httpx.StoreError(w, r, ruleErr, "database error")
+		return false
+	case errors.Is(err, db.ErrPopulateTooLarge):
+		httpx.ErrorReq(w, r, http.StatusBadRequest, populateTooLarge)
+		return false
+	case err != nil:
+		httpx.StoreError(w, r, err, "related entries could not be read")
 		return false
 	}
 	return true
 }
+
+// populateTooLarge refuses a walk past its bounds with what the caller can
+// narrow.
+const populateTooLarge = "populate reaches more related entries than one read serves: name fewer relations, a smaller depth or a smaller page"
 
 // publishedOnly wraps a field mask so an unpublished record is hidden, which
 // the populate walk serves as a null relation or leaves out of a list.
