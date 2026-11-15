@@ -915,16 +915,23 @@ func (r relationPopulate) readFailed(ctx context.Context, kind string, err error
 
 // recurse populates the records one relation fetched, one level down, and
 // returns what each of them carries from there. A record several parents
-// share is walked once. A failure there is returned only when the walk is
-// strict or refused the request.
+// share is walked once. A record the gate's mask hides is not walked, so
+// what lies below an entry the caller is never served neither costs reads
+// nor counts toward the bounds, where a refusal would tell the caller how
+// much it holds. A failure there is returned only when the walk is strict or
+// refused the request.
 func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetched []*domain.Content, nextCfg domain.PopulateConfig, currentDepth int) (map[*domain.Content]populateLoad, error) {
 	seen := make(map[*domain.Content]bool, len(fetched))
 	distinct := make([]*domain.Content, 0, len(fetched))
 	for _, c := range fetched {
-		if !seen[c] {
-			seen[c] = true
-			distinct = append(distinct, c)
+		if seen[c] {
+			continue
 		}
+		seen[c] = true
+		if rel.relMask != nil && rel.relMask(flattenContent(c)) == nil {
+			continue
+		}
+		distinct = append(distinct, c)
 	}
 	loads, err := s.populateRecursiveBatch(ctx, rel.walk, distinct, nextCfg, currentDepth+1)
 	if err != nil {
