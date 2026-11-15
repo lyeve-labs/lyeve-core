@@ -51,7 +51,7 @@ func TestContentStore_PopulateBelongsToStopsReadingAtTheByteBound_AllDialects(t 
 
 		itemCache := &countingItemCache{Cache: cache.NewMemory[string, *domain.Content](1000, 0)}
 		store := db.NewContentStoreWithCache(pool, schemas.Source(), itemCache, cache.NewMemory[string, []*domain.Content](100, 0))
-		err := store.PopulateStrict(ctx, items, domain.PopulateConfig{Paths: []string{"blob"}}, nil)
+		err := store.PopulateStrict(ctx, items, domain.PopulateConfig{Paths: []string{"blob"}}, nil, nil)
 		require.ErrorIs(t, err, db.ErrPopulateTooLarge)
 
 		read := int(itemCache.sets.Load())
@@ -119,11 +119,84 @@ func TestContentStore_PopulateSkipsBelowAHiddenEntry_AllDialects(t *testing.T) {
 			return mask, nil, false, true
 		}
 		reader := post()
-		require.NoError(t, store.PopulateStrict(ctx, []*domain.Content{reader}, cfg, published))
+		require.NoError(t, store.PopulateStrict(ctx, []*domain.Content{reader}, cfg, nil, published))
 		assert.Nil(t, reader.Data["author"])
 
 		editor := post()
-		require.ErrorIs(t, store.PopulateStrict(ctx, []*domain.Content{editor}, cfg, nil), db.ErrPopulateTooLarge)
+		require.ErrorIs(t, store.PopulateStrict(ctx, []*domain.Content{editor}, cfg, nil, nil), db.ErrPopulateTooLarge)
+	})
+}
+
+// A relation field the holder's mask hides is not walked, so the entries
+// below it never count toward the bounds. Notes here hang under an author
+// whose notes field the reader may not see, with more bytes below it than a
+// walk may read: the reader gets the author without its notes, whether the
+// author is populated or read itself, and a caller with no gate still meets
+// the bound.
+func TestContentStore_PopulateSkipsAHiddenRelationField_AllDialects(t *testing.T) {
+	eachDialect(t, func(t *testing.T, pool db.DB) {
+		ctx := context.Background()
+		schemas := newTestRegistry(t, pool)
+		authors := &domain.Schema{
+			Name:   "masked_authors",
+			Fields: []domain.SchemaField{{Name: "name", FieldType: "text"}},
+		}
+		require.NoError(t, schemas.Upsert(ctx, authors))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "masked_authors") })
+		require.NoError(t, schemas.Upsert(ctx, &domain.Schema{
+			Name: "masked_notes",
+			Fields: []domain.SchemaField{
+				{Name: "body", FieldType: "text"},
+				{Name: "author", FieldType: "relation", RelationTo: "masked_authors", RelationType: domain.RelBelongsTo},
+			},
+		}))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "masked_notes") })
+		authors.Fields = append(authors.Fields, domain.SchemaField{Name: "notes", FieldType: "relation", RelationTo: "masked_notes", RelationType: domain.RelHasMany})
+		require.NoError(t, schemas.Upsert(ctx, authors))
+		require.NoError(t, schemas.Upsert(ctx, &domain.Schema{
+			Name: "masked_posts",
+			Fields: []domain.SchemaField{
+				{Name: "author", FieldType: "relation", RelationTo: "masked_authors", RelationType: domain.RelBelongsTo},
+			},
+		}))
+		t.Cleanup(func() { _ = schemas.Delete(context.Background(), "masked_posts") })
+
+		store := db.NewContentStore(pool, schemas.Source())
+		author, err := store.Insert(ctx, "masked_authors", map[string]any{"name": "a"})
+		require.NoError(t, err)
+		body := strings.Repeat("x", 1<<20)
+		for range 34 {
+			_, err := store.Insert(ctx, "masked_notes", map[string]any{"body": body, "author": author.ID.String()})
+			require.NoError(t, err)
+		}
+		post := func() *domain.Content {
+			return &domain.Content{
+				SchemaName: "masked_posts",
+				Data:       map[string]any{domain.FKColumn("author", ""): author.ID.String()},
+			}
+		}
+		cfg := domain.PopulateConfig{Paths: []string{"author.notes"}}
+
+		hidden := core.HiddenFields{"notes": {}}
+		gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
+			if f.RelationTo == "masked_authors" {
+				return hidden.Apply, hidden.Names, true, true
+			}
+			return nil, nil, true, true
+		}
+		reader := post()
+		require.NoError(t, store.PopulateStrict(ctx, []*domain.Content{reader}, cfg, nil, gate))
+		got, ok := reader.Data["author"].(map[string]any)
+		require.True(t, ok, "the author is served")
+		assert.Equal(t, "a", got["name"])
+		assert.NotContains(t, got, "notes")
+
+		read := &domain.Content{ID: author.ID, SchemaName: "masked_authors", Data: map[string]any{}}
+		require.NoError(t, store.PopulateStrict(ctx, []*domain.Content{read}, domain.PopulateConfig{Paths: []string{"notes"}}, hidden.Names, nil))
+		assert.NotContains(t, read.Data, "notes")
+
+		editor := post()
+		require.ErrorIs(t, store.PopulateStrict(ctx, []*domain.Content{editor}, cfg, nil, nil), db.ErrPopulateTooLarge)
 	})
 }
 

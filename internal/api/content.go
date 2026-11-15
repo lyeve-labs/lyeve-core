@@ -365,9 +365,10 @@ func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.Hidd
 // fails the read rather than serving the relation empty, and a walk past its
 // bounds is refused rather than cut short. A has_one or has_many whose key
 // cannot be read is refused when the request names it, and left out when a
-// wildcard or a depth reaches it. populate reports false after
-// writing the answer.
-func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content) bool {
+// wildcard or a depth reaches it. A relation field hidden names on the
+// items' own schema is not read. populate reports false after writing the
+// answer.
+func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content, hidden core.HiddenFields) bool {
 	cfg, ok := parsePopulateFromQuery(r)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: depth")
@@ -429,7 +430,7 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 		decided[target] = d
 		return d.mask, d.hides, d.drafts, d.ok
 	}
-	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
+	err := h.store.PopulateStrict(r.Context(), items, cfg, hidden.Names, gate)
 	var keyErr *db.InverseKeyError
 	switch {
 	case ruleErr != nil:

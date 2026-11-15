@@ -103,7 +103,7 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ?populate=author,tags&depth=2: resolve related records inline
-	if !h.populate(w, r, items) {
+	if !h.populate(w, r, items, hidden) {
 		return
 	}
 
@@ -163,7 +163,7 @@ func (h *ContentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.populate(w, r, []*domain.Content{item}) {
+	if !h.populate(w, r, []*domain.Content{item}, hidden) {
 		return
 	}
 
@@ -472,7 +472,7 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ?populate=author,tags&depth=2: resolve related records inline
-	if !h.populate(w, r, items) {
+	if !h.populate(w, r, items, hidden) {
 		return
 	}
 

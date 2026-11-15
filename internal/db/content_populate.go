@@ -616,7 +616,8 @@ func (s *ContentStore) PopulateWithConfigBatch(ctx context.Context, items []*dom
 // it hides that record: a to-one relation is served as null and a to-many one
 // leaves it out. hides, when not nil, reports whether the caller's field mask
 // hides a column of the target, which a has_one or has_many must not read its
-// key from. drafts reports whether the caller may read drafts of the target.
+// key from, and a relation field of the target, which the walk does not read
+// below. drafts reports whether the caller may read drafts of the target.
 // When it is false, a has_one or has_many reads only the published entries,
 // so a has_one serves the newest entry the caller may read rather than null
 // behind a newer draft.
@@ -632,25 +633,27 @@ type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map
 // relations no request names, so a check of the requested paths alone would
 // miss the schemas the walk discovers on its own.
 func (s *ContentStore) PopulateGated(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate) error {
-	return s.populateWalk(ctx, items, cfg, gate, false)
+	return s.populateWalk(ctx, items, cfg, nil, gate, false)
 }
 
 // PopulateStrict is PopulateGated with a relation the database fails to read
 // returned as an error rather than served empty, for a caller that has to
-// refuse an answer it cannot complete.
-func (s *ContentStore) PopulateStrict(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate) error {
-	return s.populateWalk(ctx, items, cfg, gate, true)
+// refuse an answer it cannot complete. hidden, when not nil, reports whether
+// the caller's field mask hides a field of the items' own schema, and a
+// relation field it hides is not read.
+func (s *ContentStore) PopulateStrict(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, hidden func(field string) bool, gate RelationGate) error {
+	return s.populateWalk(ctx, items, cfg, hidden, gate, true)
 }
 
 // populateWalk starts one walk over items. The bounds hold the walk as a
 // whole, so the served count is checked again at the top, where every copy
 // of an entry the answer carries has been counted.
-func (s *ContentStore) populateWalk(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate, strict bool) error {
+func (s *ContentStore) populateWalk(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, hidden func(string) bool, gate RelationGate, strict bool) error {
 	if cfg.IsEmpty() || len(items) == 0 {
 		return nil
 	}
 	w := &populateWalk{gate: gate, strict: strict, sizes: map[*domain.Content]int{}}
-	_, err := s.populateRecursiveBatch(ctx, w, items, cfg, 1)
+	_, err := s.populateRecursiveBatch(ctx, w, items, cfg, hidden, 1)
 	return err
 }
 
@@ -659,7 +662,8 @@ func (s *ContentStore) populateWalk(ctx context.Context, items []*domain.Content
 // At each level, it batches FK resolution across all items before recursing
 // into the fetched related records. It returns what each item now carries:
 // the related entries served under it at every level below, and their bytes.
-func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWalk, items []*domain.Content, cfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
+// hidden reports the fields of the items' schema the caller's mask hides.
+func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWalk, items []*domain.Content, cfg domain.PopulateConfig, hidden func(string) bool, currentDepth int) ([]populateLoad, error) {
 	carried := make([]populateLoad, len(items))
 	if cfg.IsEmpty() || currentDepth > MaxPopulateDepth || len(items) == 0 {
 		return carried, nil
@@ -711,6 +715,12 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 	for _, fieldName := range populateFields {
 		f, ok := fieldsByName[fieldName]
 		if !ok || f.FieldType != "relation" || f.RelationTo == "" {
+			continue
+		}
+		// The mask strips a hidden relation field from the entry that holds
+		// it, so what lies below it is never served, and counting it toward
+		// the bounds would let a refusal say how much it holds.
+		if hidden != nil && hidden(fieldName) {
 			continue
 		}
 
@@ -789,10 +799,10 @@ func (r relationPopulate) readFailed(ctx context.Context, kind string, err error
 
 // recurse populates the records one relation fetched, one level down, and
 // returns what each of them carries from there. A record several parents
-// share is walked once. A record the gate's mask hides is not walked, so
-// what lies below an entry the caller is never served neither costs reads
-// nor counts toward the bounds, where a refusal would tell the caller how
-// much it holds. A failure there is returned only when the walk is strict or
+// share is walked once. A record the gate's mask hides is not walked, and
+// neither is a relation field the mask hides, so what lies below either
+// neither costs reads nor counts toward the bounds, where a refusal would
+// tell the caller how much it holds. A failure there is returned only when the walk is strict or
 // refused the request.
 func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetched []*domain.Content, nextCfg domain.PopulateConfig, currentDepth int) (map[*domain.Content]populateLoad, error) {
 	seen := make(map[*domain.Content]bool, len(fetched))
@@ -807,7 +817,7 @@ func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetche
 		}
 		distinct = append(distinct, c)
 	}
-	loads, err := s.populateRecursiveBatch(ctx, rel.walk, distinct, nextCfg, currentDepth+1)
+	loads, err := s.populateRecursiveBatch(ctx, rel.walk, distinct, nextCfg, rel.hides, currentDepth+1)
 	if err != nil {
 		if rel.walk.strict || errors.Is(err, domain.ErrBadRequest) {
 			return nil, err
