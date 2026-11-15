@@ -540,21 +540,21 @@ func (h *ContentHandler) deliveryPopulate(w http.ResponseWriter, r *http.Request
 		return true
 	}
 	var gateErr error
-	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
 		if f.RelationType != core.RelBelongsTo && f.RelationType != "" {
-			return nil, false
+			return nil, nil, false, false
 		}
 		sc, err := d.schema(f.RelationTo)
 		if err != nil || sc == nil {
 			gateErr = errors.Join(gateErr, err)
-			return nil, false
+			return nil, nil, false, false
 		}
 		hidden, err := d.hiddenFields(sc)
 		if err != nil {
 			gateErr = errors.Join(gateErr, err)
-			return nil, false
+			return nil, nil, false, false
 		}
-		return publishedOnly(hidden.Apply), true
+		return publishedOnly(hidden.Apply), hidden.Names, false, true
 	}
 	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
 	if gateErr == nil && errors.Is(err, db.ErrPopulateTooLarge) {

@@ -223,9 +223,11 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 			// is a table of its own. Which one depends on the cardinality, and
 			// the content path reads whichever the definition declares, so an
 			// engine that creates neither leaves every relation read failing
-			// against a column that does not exist.
+			// against a column that does not exist. A has_one and a has_many
+			// keep nothing here, as the engine an install runs keeps nothing:
+			// they read the key of a belongs_to on their target.
 			switch f.RelationType {
-			case core.RelBelongsTo, core.RelHasOne:
+			case core.RelBelongsTo:
 				// The column alone is not the relation. What happens to a row
 				// whose target is deleted is declared by the key, and the
 				// content store relies on the database to apply it, so a

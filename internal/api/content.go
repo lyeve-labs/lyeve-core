@@ -363,7 +363,9 @@ func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.Hidd
 //
 // A relation the store cannot read, or a rule store that cannot answer,
 // fails the read rather than serving the relation empty, and a walk past its
-// bounds is refused rather than cut short. populate reports false after
+// bounds is refused rather than cut short. A has_one or has_many whose key
+// cannot be read is refused when the request names it, and left out when a
+// wildcard or a depth reaches it. populate reports false after
 // writing the answer.
 func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content) bool {
 	cfg, ok := parsePopulateFromQuery(r)
@@ -376,14 +378,16 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 	}
 	var ruleErr error
 	type decision struct {
-		mask func(map[string]any) map[string]any
-		ok   bool
+		mask   func(map[string]any) map[string]any
+		hides  func(string) bool
+		drafts bool
+		ok     bool
 	}
 	decided := map[string]decision{}
-	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
 		target := f.RelationTo
 		if d, seen := decided[target]; seen {
-			return d.mask, d.ok
+			return d.mask, d.hides, d.drafts, d.ok
 		}
 		d := decision{}
 		// A relation into a content type that was deleted stays declared on
@@ -395,41 +399,52 @@ func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items 
 			switch {
 			case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
 				decided[target] = d
-				return nil, false
+				return nil, nil, false, false
 			case err != nil:
 				ruleErr = err
 				decided[target] = d
-				return nil, false
+				return nil, nil, false, false
 			}
 		}
 		switch err := h.authorize(r, target, "read"); {
 		case err == nil:
-			mask, mErr := h.fieldMask(r, target)
+			hidden, mErr := h.hiddenFields(r, target)
 			if mErr != nil {
 				ruleErr = mErr
 				break
 			}
+			mask := hidden.Apply
 			// A related row is held to the rule its own schema's reads
 			// follow: a draft is served to a caller who may read drafts
 			// there, and to anyone else it is absent.
-			if !h.draftResponse(w, r, target) {
+			drafts := h.draftResponse(w, r, target)
+			if !drafts {
 				mask = publishedOnly(mask)
 			}
-			d = decision{mask: mask, ok: true}
+			d = decision{mask: mask, hides: hidden.Names, drafts: drafts, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
 		}
 		decided[target] = d
-		return d.mask, d.ok
+		return d.mask, d.hides, d.drafts, d.ok
 	}
 	err := h.store.PopulateStrict(r.Context(), items, cfg, gate)
+	var keyErr *db.InverseKeyError
 	switch {
 	case ruleErr != nil:
 		httpx.StoreError(w, r, ruleErr, "database error")
 		return false
 	case errors.Is(err, db.ErrPopulateTooLarge):
 		httpx.ErrorReq(w, r, http.StatusBadRequest, populateTooLarge)
+		return false
+	case errors.As(err, &keyErr):
+		// The names come from the type's definition, which the caller may
+		// read, and say which part of populate to drop or which field's
+		// relation_fk_name to set.
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fmt.Sprintf(
+			"invalid query parameter: populate names %s, and no single key on %s points back to read it by: set its relation_fk_name or leave it out",
+			keyErr.Field, keyErr.Target))
 		return false
 	case err != nil:
 		httpx.StoreError(w, r, err, "related entries could not be read")
