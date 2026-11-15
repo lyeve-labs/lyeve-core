@@ -331,6 +331,13 @@ const maxBatchSize = 500
 // silently omitted from the result map (same behavior as GetByID returning
 // ErrNotFound for a missing ID: the caller assigns nil to that field).
 func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uuid.UUID) (map[uuid.UUID]*domain.Content, error) {
+	return s.getByIDs(ctx, schemaName, ids, nil)
+}
+
+// getByIDs is GetByIDs with each row handed to take as it is read, with the
+// bytes of its data, so a caller can stop the read part way. A row from the
+// item cache has no size from the database, so its data is measured as JSON.
+func (s *ContentStore) getByIDs(ctx context.Context, schemaName string, ids []uuid.UUID, take func(c *domain.Content, size int) error) (map[uuid.UUID]*domain.Content, error) {
 	if len(ids) == 0 {
 		return map[uuid.UUID]*domain.Content{}, nil
 	}
@@ -344,7 +351,17 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 		if s.itemCache != nil && writeTx(ctx) == nil {
 			key := cacheItemKey(tenantID, schemaName, id)
 			if cached, ok := s.itemCache.Get(ctx, key); ok {
-				result[id] = cloneContent(cached)
+				c := cloneContent(cached)
+				if take != nil {
+					data, err := json.Marshal(c.Data)
+					if err != nil {
+						return nil, fmt.Errorf("content get by ids %s: measure row: %w", schemaName, err)
+					}
+					if err := take(c, len(data)); err != nil {
+						return nil, err
+					}
+				}
+				result[id] = c
 				continue
 			}
 		}
@@ -393,10 +410,16 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 		}
 
 		for rows.Next() {
-			c, scanErr := scanFullRow(s.pool.Engine(), rows, schemaName, sc)
+			c, size, scanErr := scanSizedRow(s.pool.Engine(), rows, schemaName, sc)
 			if scanErr != nil {
 				rows.Close()
 				return nil, scanErr
+			}
+			if take != nil {
+				if err := take(c, size); err != nil {
+					rows.Close()
+					return nil, err
+				}
 			}
 			result[c.ID] = c
 			if s.itemCache != nil && writeTx(ctx) == nil {
@@ -926,30 +949,21 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 	return loads, nil
 }
 
-// getByIDsCounted is GetByIDs with the rows it answers counted against the
-// walk. A belongs_to reads at most one row for each item, so the items bound
-// the read. A row from the item cache has no size from the database, so its
-// data is measured as JSON.
+// getByIDsCounted is GetByIDs with each row counted against the walk as it
+// is read, so a read past the bound stops at the row that passes it rather
+// than after every row is in memory. A belongs_to reads at most one row for
+// each id, so an id list longer than the entries the walk may still read is
+// refused before any query.
 func (s *ContentStore) getByIDsCounted(ctx context.Context, w *populateWalk, schemaName string, ids []uuid.UUID) (map[uuid.UUID]*domain.Content, error) {
+	if len(ids) > maxPopulateEntries-w.read.entries {
+		return nil, ErrPopulateTooLarge
+	}
 	for range (len(ids) + maxBatchSize - 1) / maxBatchSize {
 		if err := w.query(); err != nil {
 			return nil, err
 		}
 	}
-	found, err := s.GetByIDs(ctx, schemaName, ids)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range found {
-		data, err := json.Marshal(c.Data)
-		if err != nil {
-			return nil, fmt.Errorf("populate %s: measure row: %w", schemaName, err)
-		}
-		if err := w.take(c, len(data)); err != nil {
-			return nil, err
-		}
-	}
-	return found, nil
+	return s.getByIDs(ctx, schemaName, ids, w.take)
 }
 
 // itemIDs is the id of each item.
