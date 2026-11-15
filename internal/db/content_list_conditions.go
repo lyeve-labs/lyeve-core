@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -26,6 +27,11 @@ const (
 
 // MaxListValues caps the values of one in or nin condition.
 const MaxListValues = 50
+
+// MaxContainsValue caps the characters of a contains or ncontains value. The
+// match has no anchor, so every row is scanned against the whole value, and
+// SQL Server has no statement timeout to end a long one.
+const MaxContainsValue = 255
 
 // ListCondition is one list filter with an operator. Values holds the one
 // value of ne, contains, ncontains and empty, and each value of in and nin.
@@ -140,7 +146,8 @@ func typedConditions(sc *domain.Schema, conds []ListCondition) ([]ListCondition,
 
 // conditionValue parses one value of a condition. empty takes true or false.
 // contains and ncontains take any text but the empty string, which every
-// value contains on two dialects and none on SQL Server. The others take a
+// value contains on two dialects and none on SQL Server, up to
+// MaxContainsValue characters. The others take a
 // value of the field's type: text but the empty string, which empty asks
 // about, a UUID for a uid or a relation, true or false for a boolean, and a
 // number, a date or a datetime as a bound parses it.
@@ -158,6 +165,9 @@ func conditionValue(f domain.SchemaField, op string, v any) (any, error) {
 	case OpContains, OpNotContains:
 		if !isStr || str == "" {
 			return nil, bad("a value")
+		}
+		if utf8.RuneCountInString(str) > MaxContainsValue {
+			return nil, bad(fmt.Sprintf("at most %d characters", MaxContainsValue))
 		}
 		return str, nil
 	}

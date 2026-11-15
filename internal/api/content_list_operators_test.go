@@ -244,6 +244,25 @@ func TestContentList_RefusesAnOperatorItCannotRun(t *testing.T) {
 	})
 }
 
+// A contains or ncontains value scans every row it cannot anchor, so one
+// past 255 characters is refused with the list's 400, as the delivery list
+// refuses one. A value of 255 characters runs.
+func TestContentList_ContainsValuePast255CharactersIsRefused(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"operators"}, func(t *testing.T, fx schemaContentFixture) {
+		seedOperatorRows(t, fx)
+		for _, op := range []string{"contains", "ncontains"} {
+			rr := fx.listItems(t, "filters[title]["+op+"]="+strings.Repeat("a", 256))
+			assert.Equal(t, http.StatusBadRequest, rr.Code, "%s of 256 characters: %s", op, rr.Body.String())
+
+			rr = fx.listItems(t, "filters[title]["+op+"]="+url.QueryEscape(strings.Repeat("\u00e9", 255)))
+			assert.Equal(t, http.StatusOK, rr.Code, "%s of 255 characters: %s", op, rr.Body.String())
+		}
+	})
+}
+
 // A caller who cannot read drafts reaches no draft through an operator: eq on
 // the status answers 403 as the bare filter does, and every other operator
 // on it 400. A field the caller's mask hides answers 403 for every operator,
