@@ -754,7 +754,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// that silently has no rule engine is the shape this is meant to prevent.
 	if pcp, ok := hostBase.(core.PermissionCheckerProvider); ok {
 		if _, roleOnly := pcp.PermissionChecker().(core.RoleOnlyPermissionChecker); roleOnly {
-			logger.Info("no plugin supplies a permission checker, so authorization is roles only: a super admin is allowed everything, an admin is allowed the resources of kinds a plugin opens to admins, and every other role is refused")
+			logger.Info("no plugin supplies a permission checker, so authorization is roles only: a super admin is allowed everything, an admin is allowed every content type and the resources of kinds a plugin opens to admins, and every other role is refused")
 		}
 	}
 

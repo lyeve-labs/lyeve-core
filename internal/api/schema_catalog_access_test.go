@@ -152,18 +152,22 @@ func TestSchemaCatalog_HonorsKeySchemasAndRules(t *testing.T) {
 		assert.Equal(t, http.StatusServiceUnavailable, call(t, failing, http.MethodGet, "lyv_every", "/api/v1/schemas/forms", nil).Code)
 	})
 
-	t.Run("no rule engine admits super_admin alone", func(t *testing.T) {
+	t.Run("no rule engine admits super_admin and admin alone", func(t *testing.T) {
 		bare := catalogRouter(nil, map[string]*core.AuthClaims{
 			"lyv_every":       {Roles: []string{"viewer"}, Scopes: []string{"schemas:read", "content:read"}},
+			"lyv_admin":       {Roles: []string{core.RoleAdmin}, Scopes: []string{"schemas:read"}},
 			"lyv_super_admin": {Roles: []string{core.RoleSuperAdmin}, Scopes: []string{"schemas:read"}},
 		})
 		rr := call(t, bare, http.MethodGet, "lyv_every", "/api/v1/schemas", nil)
 		require.Equal(t, http.StatusOK, rr.Code)
 		assert.Empty(t, catalogNames(t, rr.Body.Bytes()))
-		rr = call(t, bare, http.MethodGet, "lyv_super_admin", "/api/v1/schemas", nil)
-		require.Equal(t, http.StatusOK, rr.Code)
-		assert.Equal(t, []string{"blog", "forms", "staff"}, catalogNames(t, rr.Body.Bytes()))
-		assert.Equal(t, http.StatusNotFound, call(t, bare, http.MethodGet, "lyv_super_admin", "/api/v1/schemas/nope", nil).Code)
+		for _, key := range []string{"lyv_admin", "lyv_super_admin"} {
+			rr = call(t, bare, http.MethodGet, key, "/api/v1/schemas", nil)
+			require.Equal(t, http.StatusOK, rr.Code, key)
+			assert.Equal(t, []string{"blog", "forms", "staff"}, catalogNames(t, rr.Body.Bytes()), key)
+			assert.Equal(t, http.StatusOK, call(t, bare, http.MethodGet, key, "/api/v1/schemas/blog", nil).Code, key)
+			assert.Equal(t, http.StatusNotFound, call(t, bare, http.MethodGet, key, "/api/v1/schemas/nope", nil).Code, key)
+		}
 	})
 }
 

@@ -18,6 +18,11 @@ import (
 // one, and the admin's Permissions page is where the rule is written. Every
 // registered kind follows one set of rules, and a plugin resource is any
 // resource of a registered kind.
+//
+// A content type is admin-by-default: an admin may do every action on it, and
+// reads it unmasked, until a rule names admin on that schema or on "*". From
+// then on the rule decides. A super admin is allowed everything, and every
+// other role is refused until a rule grants it.
 
 const (
 	// RoleSuperAdmin is the role every authorization gate exempts: it is the
@@ -25,8 +30,9 @@ const (
 	// rules has to admit it or nobody could write the first one.
 	RoleSuperAdmin = "super_admin"
 
-	// RoleAdmin is allowed every action on a resource of a kind registered
-	// with AdminByDefault, until a rule names it for that resource.
+	// RoleAdmin is allowed every action on a schema, on the wildcard and on a
+	// resource of a kind registered with AdminByDefault, until a rule names it
+	// for that resource. A rule naming it on "*" names it on every schema.
 	RoleAdmin = "admin"
 
 	// PermissionResourceAll is the wildcard rule that applies to every
@@ -111,11 +117,12 @@ func ValidPermissionAction(resource, action string) bool {
 // resource of a registered kind the rule for that resource is consulted
 // first and the rule for the kind's General second, and the more specific
 // one wins outright, so a rule for one resource with no actions denies it.
-// On a resource of a kind registered with AdminByDefault the admin role is
-// allowed everything while no rule names admin for it, so an install that
-// has written no rule still lets its admins manage the plugin's resources.
-// Any other role with no rule is refused. The wildcard "*" reaches schemas
-// only.
+// On a schema, on the wildcard and on a resource of a kind registered with
+// AdminByDefault the admin role is allowed everything while no rule names
+// admin for it, so an install that has written no rule still lets its admins
+// manage its content and the plugin's resources. On a schema a rule names
+// admin when it is written for admin on that schema or on "*". Any other role
+// with no rule is refused. The wildcard "*" reaches schemas only.
 //
 // The error is a store failure and nothing else. A refusal is false with a
 // nil error. A handler answers a store failure as 503 and a refusal as 403
@@ -194,16 +201,18 @@ type FieldMasker interface {
 //   - super_admin is allowed everything, because only a super_admin can write
 //     a rule and a fresh install has none. Refusing it would leave the one
 //     role able to grant access as the one being refused.
-//   - admin is allowed a resource of a kind registered with AdminByDefault
-//     while no rule names admin for it, so an install with no rules still
-//     lets its admins manage them.
+//   - admin is allowed every schema, the wildcard and a resource of a kind
+//     registered with AdminByDefault, because no rule names admin for any
+//     of them. An install with no rules still lets its admins manage its
+//     content and the plugin's resources. A resource of a kind registered
+//     without AdminByDefault, and a name no schema can carry, stay refused.
 //   - every other role is refused every action on every resource.
 //
 // It is deliberately neither of the two easy answers. Allowing everything
 // would make a build with no rule engine an open database, and denying
 // everything would leave no caller able to write the first rule. It masks no
 // field, because a mask only ever comes from a rule, so it does not implement
-// FieldMasker.
+// FieldMasker and an admin reads every field.
 //
 // A build in this state says so once at boot. An operator who wants rules
 // installs the plugin that owns them.
@@ -213,17 +222,30 @@ var _ PermissionChecker = RoleOnlyPermissionChecker{}
 
 // Allowed implements PermissionChecker. It reads no table, so it never fails.
 func (RoleOnlyPermissionChecker) Allowed(_ context.Context, roles []string, resource, _ string) (bool, error) {
-	kind, ok := permissionKindOf(resource)
-	adminByDefault := ok && kind.AdminByDefault
+	admitsAdmin := adminByDefault(resource)
 	for _, role := range roles {
 		switch role {
 		case RoleSuperAdmin:
 			return true, nil
 		case RoleAdmin:
-			if adminByDefault {
+			if admitsAdmin {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
+}
+
+// adminByDefault reports whether the admin role may do every action on
+// resource while no rule names admin for it: a resource of a kind registered
+// with AdminByDefault, a schema name, or the wildcard. A resource of a kind
+// is judged by its kind even where it would pass as a schema name, so a kind
+// registered without AdminByDefault stays closed to admin. A name that is
+// neither, such as a kind's prefix with a slug the kind refuses, is not a
+// resource anybody may act on by default.
+func adminByDefault(resource string) bool {
+	if kind, ok := permissionKindOf(resource); ok {
+		return kind.AdminByDefault
+	}
+	return resource == PermissionResourceAll || schemaNameRe.MatchString(resource)
 }

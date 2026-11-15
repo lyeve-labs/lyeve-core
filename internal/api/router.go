@@ -487,9 +487,9 @@ func WithContentStoreSink(sink func(*db.ContentStore)) RouterOption {
 //
 // Absent the option, and on a build with no such plugin, the kernel's
 // core.RoleOnlyPermissionChecker answers instead: super_admin is allowed
-// everything, admin is allowed a resource of a kind registered with
-// AdminByDefault, and every other role is refused. That is what an install with no rules
-// written enforces.
+// everything, admin is allowed every schema and a resource of a kind
+// registered with AdminByDefault, and every other role is refused. That is
+// what an install with no rules written enforces.
 func WithPermissionChecker(p core.PermissionCheckerProvider) RouterOption {
 	return func(o *routerOptions) { o.permissionChecker = p }
 }
