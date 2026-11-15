@@ -263,6 +263,52 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "shelves", "field_type": "relation", "relation_to": "shelves", "relation_type": "belongs_to"}
 		]
 	}`},
+	// The inverse relation kinds, one field for each row of the key rule:
+	// one belongs_to back, a named key among two, two with no name, a named
+	// key that is no belongs_to back, a column named for the source type, and
+	// nothing to read.
+	"inverse": {`{
+		"name": "iv_posts",
+		"display_name": "Posts",
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "comments", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_many"},
+			{"name": "lead", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_one"},
+			{"name": "replies", "field_type": "relation", "relation_to": "iv_replies", "relation_type": "has_many", "relation_fk_name": "reply_to_id"},
+			{"name": "ambiguous", "field_type": "relation", "relation_to": "iv_replies", "relation_type": "has_many"},
+			{"name": "wrongkey", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_many", "relation_fk_name": "author_id"},
+			{"name": "legacy", "field_type": "relation", "relation_to": "iv_legacy", "relation_type": "has_many"},
+			{"name": "orphans", "field_type": "relation", "relation_to": "iv_orphans", "relation_type": "has_many"},
+			{"name": "lone", "field_type": "relation", "relation_to": "iv_orphans", "relation_type": "has_one"}
+		]
+	}`, `{
+		"name": "iv_comments",
+		"display_name": "Comments",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "post", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"},
+			{"name": "author_id", "field_type": "text"}
+		]
+	}`, `{
+		"name": "iv_replies",
+		"display_name": "Replies",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "post", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"},
+			{"name": "reply_to", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "iv_legacy",
+		"display_name": "Legacy",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "iv_posts_id", "field_type": "text"}
+		]
+	}`, `{
+		"name": "iv_orphans",
+		"display_name": "Orphans",
+		"fields": [{"name": "body", "field_type": "text", "required": true}]
+	}`},
 	// The public delivery routes: a marked type with a private field, typed
 	// fields, a relation into another marked type and into an unmarked one,
 	// and a many_to_many. dl_tags is marked and has no draft and publish.

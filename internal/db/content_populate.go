@@ -314,6 +314,79 @@ func distinctIDs(ids []uuid.UUID) []uuid.UUID {
 	return out
 }
 
+// InverseKeyError is a has_one or has_many the request names whose key on
+// its target cannot be read by the rule inverseKey follows.
+type InverseKeyError struct {
+	Field, Target string
+}
+
+func (e *InverseKeyError) Error() string {
+	return fmt.Sprintf("populate %s: no single key on %s points back", e.Field, e.Target)
+}
+
+// Unwrap makes the refusal a bad request: the request named a field the
+// definition gives no way to read.
+func (e *InverseKeyError) Unwrap() error { return domain.ErrBadRequest }
+
+// inverseKey is the column on target that a has_one or has_many f of the type
+// source reads, and false when the definition gives none:
+//
+//  1. relation_fk_name on f, which has to be the key column of a belongs_to
+//     on target toward source.
+//  2. Without it, the key column of the one belongs_to on target toward
+//     source.
+//  3. Without one, a declared field on target whose column is <source>_id,
+//     the key every inverse field read before the rule. A system column
+//     never counts, so a type named tenant does not read tenant_id.
+//
+// Two belongs_to toward source and no relation_fk_name give no key.
+func inverseKey(source string, f domain.SchemaField, target *domain.Schema) (string, bool) {
+	var back []string
+	for _, tf := range target.Fields {
+		if tf.FieldType == "relation" && (tf.RelationType == domain.RelBelongsTo || tf.RelationType == "") && tf.RelationTo == source {
+			back = append(back, fieldColumn(tf))
+		}
+	}
+	if f.RelationFKName != "" {
+		for _, col := range back {
+			if strings.EqualFold(col, f.RelationFKName) {
+				return col, true
+			}
+		}
+		return "", false
+	}
+	switch len(back) {
+	case 0:
+	case 1:
+		return back[0], true
+	default:
+		return "", false
+	}
+	legacy := domain.FKColumn(source, "")
+	for _, tf := range target.Fields {
+		if tf.System || isVirtualRelationField(tf) {
+			continue
+		}
+		if col := fieldColumn(tf); strings.EqualFold(col, legacy) {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+// namedFields is the relations cfg names at its level, as against the ones a
+// wildcard or a depth reaches there.
+func namedFields(cfg domain.PopulateConfig) map[string]bool {
+	named := map[string]bool{}
+	for _, path := range cfg.Paths {
+		root, _, _ := strings.Cut(path, ".")
+		if name, _ := parsePopulateField(strings.TrimSpace(root)); name != "" && !strings.HasPrefix(name, "*") {
+			named[name] = true
+		}
+	}
+	return named
+}
+
 // maxBatchSize limits the number of IDs in a single IN (...) clause to avoid
 // excessively large queries. If a batch exceeds this, it is split into chunks.
 // 500 is chosen as a safe upper bound that works across all three dialects
@@ -752,6 +825,7 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 		nextDepth = 0
 	}
 
+	named := namedFields(cfg)
 	var total populateLoad
 	for _, fieldName := range populateFields {
 		f, ok := fieldsByName[fieldName]
@@ -767,7 +841,7 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 			}
 			relMask = m
 		}
-		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, walk: w}
+		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, walk: w, named: named[fieldName]}
 
 		nextCfg := nextPopulateConfig(fieldName, nestedPaths, nextDepth)
 
@@ -802,20 +876,22 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWa
 
 // relationPopulate is one relation field being populated at one level: the
 // field, the name it is written under, the projection the request asked for,
-// the gate's mask for the target schema, and the walk it belongs to.
+// the gate's mask for the target schema, the walk it belongs to, and whether
+// the request names it rather than reaching it by a wildcard or a depth.
 type relationPopulate struct {
 	field   domain.SchemaField
 	name    string
 	masks   map[string][]string
 	relMask func(map[string]any) map[string]any
 	walk    *populateWalk
+	named   bool
 }
 
 // readFailed answers a relation read that failed: the error when the walk is
-// strict or passed a bound, and nil once it is logged otherwise, so the
+// strict or refused the request, and nil once it is logged otherwise, so the
 // caller serves the relation empty.
 func (r relationPopulate) readFailed(ctx context.Context, kind string, err error) error {
-	if r.walk.strict || errors.Is(err, ErrPopulateTooLarge) {
+	if r.walk.strict || errors.Is(err, domain.ErrBadRequest) {
 		return fmt.Errorf("populate %s %s: %w", kind, r.name, err)
 	}
 	// Logged because the caller sees a 200 either way and cannot tell a
@@ -828,7 +904,7 @@ func (r relationPopulate) readFailed(ctx context.Context, kind string, err error
 // recurse populates the records one relation fetched, one level down, and
 // returns what each of them carries from there. A record several parents
 // share is walked once. A failure there is returned only when the walk is
-// strict or passed a bound.
+// strict or refused the request.
 func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetched []*domain.Content, nextCfg domain.PopulateConfig, currentDepth int) (map[*domain.Content]populateLoad, error) {
 	seen := make(map[*domain.Content]bool, len(fetched))
 	distinct := make([]*domain.Content, 0, len(fetched))
@@ -840,7 +916,7 @@ func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetche
 	}
 	loads, err := s.populateRecursiveBatch(ctx, rel.walk, distinct, nextCfg, currentDepth+1)
 	if err != nil {
-		if rel.walk.strict || errors.Is(err, ErrPopulateTooLarge) {
+		if rel.walk.strict || errors.Is(err, domain.ErrBadRequest) {
 			return nil, err
 		}
 		return nil, nil
@@ -978,10 +1054,16 @@ func itemIDs(items []*domain.Content) []uuid.UUID {
 // populateHasOneBatch batch-resolves has_one relations across all items.
 func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
 	f, fieldName := rel.field, rel.name
-	fkCol := domain.FKColumn(items[0].SchemaName, "") // FK column on the target table pointing back to source.
 	loads := make([]populateLoad, len(items))
 
-	relatedMap, err := s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
+	fkCol, err := s.inverseKeyOf(ctx, rel, items[0].SchemaName)
+	if err == nil && fkCol == "" {
+		return loads, rel.unreadable()
+	}
+	var relatedMap map[uuid.UUID][]*domain.Content
+	if err == nil {
+		relatedMap, err = s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
+	}
 	if err != nil {
 		if err := rel.readFailed(ctx, "has_one", err); err != nil {
 			return nil, err
@@ -1030,11 +1112,37 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 
 // populateHasManyBatch batch-resolves has_many relations across all items.
 func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
-	f := rel.field
-	fkCol := domain.FKColumn(items[0].SchemaName, "")
-
-	relatedMap, err := s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
+	fkCol, err := s.inverseKeyOf(ctx, rel, items[0].SchemaName)
+	if err == nil && fkCol == "" {
+		return make([]populateLoad, len(items)), rel.unreadable()
+	}
+	var relatedMap map[uuid.UUID][]*domain.Content
+	if err == nil {
+		relatedMap, err = s.GetByFKs(ctx, rel.walk, rel.field.RelationTo, fkCol, itemIDs(items))
+	}
 	return s.assignToMany(ctx, items, rel, nextCfg, currentDepth, "has_many", relatedMap, err)
+}
+
+// inverseKeyOf is the key column the has_one or has_many rel of the type
+// source reads on its target, by inverseKey's rule. Empty is a definition
+// that gives none.
+func (s *ContentStore) inverseKeyOf(ctx context.Context, rel relationPopulate, source string) (string, error) {
+	target, err := s.schemas.GetByName(ctx, rel.field.RelationTo)
+	if err != nil {
+		return "", fmt.Errorf("resolve schema %q: %w", rel.field.RelationTo, err)
+	}
+	key, _ := inverseKey(source, rel.field, target)
+	return key, nil
+}
+
+// unreadable answers a has_one or has_many whose key cannot be read: refused
+// when the request names it, and left out of every item when a wildcard or a
+// depth reached it, since that request asked for whatever can be read.
+func (r relationPopulate) unreadable() error {
+	if r.named {
+		return &InverseKeyError{Field: r.name, Target: r.field.RelationTo}
+	}
+	return nil
 }
 
 // populateManyToManyBatch batch-resolves many_to_many relations across all items.
