@@ -220,8 +220,99 @@ func nextPopulateConfig(fieldName string, nestedPaths map[string][]string, nextD
 	return cfg
 }
 
-// maxPopulateDepth guards against infinite recursion (e.g., circular relations).
-const maxPopulateDepth = 10
+// The bounds of one populate walk. ?depth= and the wildcard reach relations
+// no request names, and a level serves a related entry once under every
+// record that points at it, so a walk with no bound turns one page into
+// every row of a relation, many times over.
+const (
+	// MaxPopulateDepth is the deepest level a walk reaches. It also ends a
+	// walk around a circular relation.
+	MaxPopulateDepth = 10
+	// maxPopulateEntries is the most related entries one walk reads, and the
+	// most it serves. An entry served under several records counts once for
+	// each, since the answer carries a copy under each.
+	maxPopulateEntries = 5000
+	// maxPopulateBytes bounds the related entries one walk reads, and the
+	// ones it serves, by the bytes of their data, since a rich text or JSON
+	// field can hold a whole request body.
+	maxPopulateBytes = 32 << 20
+	// maxPopulateReads is the most queries one walk runs. A wildcard at every
+	// level of a deep walk reads each relation again at each level.
+	maxPopulateReads = 1000
+)
+
+// ErrPopulateTooLarge is a walk that would pass one of its bounds. The read
+// is refused whole, because a relation cut short reads as complete.
+var ErrPopulateTooLarge = fmt.Errorf("populate reaches past its bounds: %w", domain.ErrBadRequest)
+
+// populateLoad is an amount of related entries and the bytes of their data.
+type populateLoad struct {
+	entries, bytes int
+}
+
+func (l populateLoad) plus(o populateLoad) populateLoad {
+	return populateLoad{entries: l.entries + o.entries, bytes: l.bytes + o.bytes}
+}
+
+// within refuses a load past the walk's bounds.
+func (l populateLoad) within() error {
+	if l.entries > maxPopulateEntries || l.bytes > maxPopulateBytes {
+		return ErrPopulateTooLarge
+	}
+	return nil
+}
+
+// populateWalk is one request's walk: the gate every relation is put to,
+// whether a failed read is returned, and what the walk has read so far.
+type populateWalk struct {
+	gate   RelationGate
+	strict bool
+	read   populateLoad
+	reads  int
+	sizes  map[*domain.Content]int
+}
+
+// query counts one query against the walk's bound.
+func (w *populateWalk) query() error {
+	if w.reads++; w.reads > maxPopulateReads {
+		return ErrPopulateTooLarge
+	}
+	return nil
+}
+
+// take counts a related row the walk read, size being the bytes of its data.
+func (w *populateWalk) take(c *domain.Content, size int) error {
+	w.sizes[c] = size
+	w.read = w.read.plus(populateLoad{entries: 1, bytes: size})
+	return w.read.within()
+}
+
+// limit is the most rows a to-many query reads: what the walk may still read
+// and one more, which tells a relation past the bound from one that ends at it
+// without reading the rest.
+func (w *populateWalk) limit() int {
+	return maxPopulateEntries - w.read.entries + 1
+}
+
+// served is what one related entry carries in the answer: itself, the bytes
+// of its data, and what the levels below served under it.
+func (w *populateWalk) served(c *domain.Content, below map[*domain.Content]populateLoad) populateLoad {
+	return populateLoad{entries: 1, bytes: w.sizes[c]}.plus(below[c])
+}
+
+// distinctIDs is ids with each one once, in the order first seen, so an IN
+// list never names a parent twice and no parent gets its children twice.
+func distinctIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]bool, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}
 
 // maxBatchSize limits the number of IDs in a single IN (...) clause to avoid
 // excessively large queries. If a batch exceeds this, it is split into chunks.
@@ -323,8 +414,11 @@ func (s *ContentStore) GetByIDs(ctx context.Context, schemaName string, ids []uu
 
 // GetByFKs returns content rows from the target schema whose fkCol value
 // matches one of the given parent IDs. Results are grouped by parent ID.
-// Used for batch resolution of has_one and has_many relations.
-func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol string, parentIDs []uuid.UUID) (map[uuid.UUID][]*domain.Content, error) {
+// Used for batch resolution of has_one and has_many relations. Each query
+// reads at most what w may still read and one row more, so a relation past
+// the bound is refused without being read whole.
+func (s *ContentStore) GetByFKs(ctx context.Context, w *populateWalk, schemaName string, fkCol string, parentIDs []uuid.UUID) (map[uuid.UUID][]*domain.Content, error) {
+	parentIDs = distinctIDs(parentIDs)
 	if len(parentIDs) == 0 {
 		return map[uuid.UUID][]*domain.Content{}, nil
 	}
@@ -336,7 +430,8 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 
 	result := make(map[uuid.UUID][]*domain.Content, len(parentIDs))
 	dataExpr := dataColumnExpr(s.pool.Engine(), sc, "r")
-	fkColQuoted := dialect.Must(s.pool.Engine()).QuoteIdentifier(fkCol)
+	d := dialect.Must(s.pool.Engine())
+	fkColQuoted := d.QuoteIdentifier(fkCol)
 	tenantID := tenant.ID(ctx)
 	// A child in the trash is not served, as GetByIDs serves no trashed
 	// parent.
@@ -360,13 +455,18 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 		}
 		args[len(chunk)] = tenantID
 
+		if err := w.query(); err != nil {
+			return nil, err
+		}
 		query := fmt.Sprintf(`
 			SELECT id, created_at, updated_at,
 			       %s
 			FROM %s r
 			WHERE %s IN (%s) AND tenant_id = $%d%s
-			ORDER BY created_at DESC`,
-			dataExpr, table, fkColQuoted, strings.Join(phs, ", "), len(chunk)+1, visible)
+			ORDER BY created_at DESC
+			%s`,
+			dataExpr, table, fkColQuoted, strings.Join(phs, ", "), len(chunk)+1, visible,
+			dialect.LimitOffset(d, w.limit(), 0))
 
 		rows, qErr := s.pool.Query(ctx, query, args...)
 		if qErr != nil {
@@ -374,10 +474,14 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 		}
 
 		for rows.Next() {
-			c, scanErr := scanFullRow(s.pool.Engine(), rows, schemaName, sc)
+			c, size, scanErr := scanSizedRow(s.pool.Engine(), rows, schemaName, sc)
 			if scanErr != nil {
 				rows.Close()
 				return nil, scanErr
+			}
+			if err := w.take(c, size); err != nil {
+				rows.Close()
+				return nil, err
 			}
 			// Extract the FK value to determine which parent this row belongs to.
 			fkVal, ok := c.Data[fkCol]
@@ -405,8 +509,10 @@ func (s *ContentStore) GetByFKs(ctx context.Context, schemaName string, fkCol st
 
 // ListRelatedBatch returns items from the target schema that are related to
 // multiple source IDs via a many_to_many pivot table. Results are grouped
-// by source ID.
-func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, sourceIDs []uuid.UUID, f domain.SchemaField) (map[uuid.UUID][]*domain.Content, error) {
+// by source ID. Each query reads at most what w may still read and one row
+// more, as GetByFKs does.
+func (s *ContentStore) ListRelatedBatch(ctx context.Context, w *populateWalk, schemaName string, sourceIDs []uuid.UUID, f domain.SchemaField) (map[uuid.UUID][]*domain.Content, error) {
+	sourceIDs = distinctIDs(sourceIDs)
 	if len(sourceIDs) == 0 {
 		return map[uuid.UUID][]*domain.Content{}, nil
 	}
@@ -454,17 +560,22 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 		args[len(chunk)] = tenantID
 		args[len(chunk)+1] = tenantID
 
+		if err := w.query(); err != nil {
+			return nil, err
+		}
 		rows, qErr := s.pool.Query(ctx, fmt.Sprintf(`
 			SELECT p.%s AS source_id, t.id, t.created_at, t.updated_at,
 			       %s
 			FROM %s t
 			JOIN %s p ON p.%s = t.id
 			WHERE p.%s IN (%s) AND p.tenant_id = $%d AND t.tenant_id = $%d%s
-			ORDER BY t.created_at DESC`,
+			ORDER BY t.created_at DESC
+			%s`,
 			aCol,
 			dataColumnExpr(s.pool.Engine(), relSchema, "t"),
 			targetTable, pivotName, bCol, aCol,
 			strings.Join(phs, ", "), len(chunk)+1, len(chunk)+2, visible,
+			dialect.LimitOffset(dialect.Must(s.pool.Engine()), w.limit(), 0),
 		), args...)
 		if qErr != nil {
 			return nil, fmt.Errorf("list related batch %s->%s: %w", schemaName, f.RelationTo, qErr)
@@ -488,6 +599,10 @@ func (s *ContentStore) ListRelatedBatch(ctx context.Context, schemaName string, 
 				c.Data = make(map[string]any)
 			}
 			normalizeContentData(s.pool.Engine(), relSchema, c.Data)
+			if err := w.take(c, len(rawData.raw)); err != nil {
+				rows.Close()
+				return nil, err
+			}
 			result[sourceID] = append(result[sourceID], c)
 		}
 		if err := rows.Err(); err != nil {
@@ -533,43 +648,51 @@ type RelationGate func(ctx context.Context, f domain.SchemaField) (mask func(map
 // PopulateGated is PopulateWithConfigBatch with every relation, at every
 // depth, put to gate before its target schema is read. A nil gate serves
 // every relation whole, which is the ungated behavior. A relation the
-// database fails to read is logged and served empty.
+// database fails to read is logged and served empty. A walk past its bounds
+// is ErrPopulateTooLarge, and the items are then partly populated.
 //
 // The gate runs inside the recursion because ?depth= and the wildcard reach
 // relations no request names, so a check of the requested paths alone would
 // miss the schemas the walk discovers on its own.
 func (s *ContentStore) PopulateGated(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate) error {
-	if cfg.IsEmpty() || len(items) == 0 {
-		return nil
-	}
-	return s.populateRecursiveBatch(ctx, items, cfg, 1, gate, false)
+	return s.populateWalk(ctx, items, cfg, gate, false)
 }
 
 // PopulateStrict is PopulateGated with a relation the database fails to read
 // returned as an error rather than served empty, for a caller that has to
 // refuse an answer it cannot complete.
 func (s *ContentStore) PopulateStrict(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate) error {
+	return s.populateWalk(ctx, items, cfg, gate, true)
+}
+
+// populateWalk starts one walk over items. The bounds hold the walk as a
+// whole, so the served count is checked again at the top, where every copy
+// of an entry the answer carries has been counted.
+func (s *ContentStore) populateWalk(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, gate RelationGate, strict bool) error {
 	if cfg.IsEmpty() || len(items) == 0 {
 		return nil
 	}
-	return s.populateRecursiveBatch(ctx, items, cfg, 1, gate, true)
+	w := &populateWalk{gate: gate, strict: strict, sizes: map[*domain.Content]int{}}
+	_, err := s.populateRecursiveBatch(ctx, w, items, cfg, 1)
+	return err
 }
 
 // populateRecursiveBatch is the internal recursive batch implementation.
-// currentDepth tracks recursion depth (1-indexed) to enforce maxPopulateDepth.
+// currentDepth tracks recursion depth (1-indexed) to enforce MaxPopulateDepth.
 // At each level, it batches FK resolution across all items before recursing
-// into the fetched related records. strict returns a failed relation read
-// instead of serving the relation empty.
-func (s *ContentStore) populateRecursiveBatch(ctx context.Context, items []*domain.Content, cfg domain.PopulateConfig, currentDepth int, gate RelationGate, strict bool) error {
-	if cfg.IsEmpty() || currentDepth > maxPopulateDepth || len(items) == 0 {
-		return nil
+// into the fetched related records. It returns what each item now carries:
+// the related entries served under it at every level below, and their bytes.
+func (s *ContentStore) populateRecursiveBatch(ctx context.Context, w *populateWalk, items []*domain.Content, cfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
+	carried := make([]populateLoad, len(items))
+	if cfg.IsEmpty() || currentDepth > MaxPopulateDepth || len(items) == 0 {
+		return carried, nil
 	}
 
 	// All items must share the same schema (enforced by callers).
 	schemaName := items[0].SchemaName
 	sc, err := s.schemas.GetByName(ctx, schemaName)
 	if err != nil {
-		return fmt.Errorf("bulk populate %s: %w", schemaName, err)
+		return nil, fmt.Errorf("bulk populate %s: %w", schemaName, err)
 	}
 
 	// Build field lookup map and relation field list once for all items.
@@ -580,7 +703,7 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, items []*doma
 
 	allRelFields := domain.RelationFields(sc.Fields)
 	if len(allRelFields) == 0 {
-		return nil // no relations to populate
+		return carried, nil // no relations to populate
 	}
 
 	// Determine which fields to populate at this level.
@@ -606,6 +729,7 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, items []*doma
 		nextDepth = 0
 	}
 
+	var total populateLoad
 	for _, fieldName := range populateFields {
 		f, ok := fieldsByName[fieldName]
 		if !ok || f.FieldType != "relation" || f.RelationTo == "" {
@@ -613,56 +737,62 @@ func (s *ContentStore) populateRecursiveBatch(ctx context.Context, items []*doma
 		}
 
 		var relMask func(map[string]any) map[string]any
-		if gate != nil {
-			m, ok := gate(ctx, f)
+		if w.gate != nil {
+			m, ok := w.gate(ctx, f)
 			if !ok {
 				continue
 			}
 			relMask = m
 		}
-		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, gate: gate, strict: strict}
+		rel := relationPopulate{field: f, name: fieldName, masks: fieldMasks, relMask: relMask, walk: w}
 
 		nextCfg := nextPopulateConfig(fieldName, nestedPaths, nextDepth)
 
+		var loads []populateLoad
 		var err error
 		switch f.RelationType {
 		case domain.RelBelongsTo, "":
-			err = s.populateBelongsToBatch(ctx, items, rel, nextCfg, currentDepth)
+			loads, err = s.populateBelongsToBatch(ctx, items, rel, nextCfg, currentDepth)
 
 		case domain.RelHasOne:
-			err = s.populateHasOneBatch(ctx, items, rel, nextCfg, currentDepth)
+			loads, err = s.populateHasOneBatch(ctx, items, rel, nextCfg, currentDepth)
 
 		case domain.RelHasMany:
-			err = s.populateHasManyBatch(ctx, items, rel, nextCfg, currentDepth)
+			loads, err = s.populateHasManyBatch(ctx, items, rel, nextCfg, currentDepth)
 
 		case domain.RelManyToMany:
-			err = s.populateManyToManyBatch(ctx, items, rel, nextCfg, currentDepth)
+			loads, err = s.populateManyToManyBatch(ctx, items, rel, nextCfg, currentDepth)
 		}
 		if err != nil {
-			return err
+			return nil, err
+		}
+		for i, l := range loads {
+			carried[i] = carried[i].plus(l)
+			total = total.plus(l)
+		}
+		if err := total.within(); err != nil {
+			return nil, err
 		}
 	}
-	return nil
+	return carried, nil
 }
 
 // relationPopulate is one relation field being populated at one level: the
 // field, the name it is written under, the projection the request asked for,
-// the gate's mask for the target schema, and whether a failed read is
-// returned rather than served empty.
+// the gate's mask for the target schema, and the walk it belongs to.
 type relationPopulate struct {
 	field   domain.SchemaField
 	name    string
 	masks   map[string][]string
 	relMask func(map[string]any) map[string]any
-	gate    RelationGate
-	strict  bool
+	walk    *populateWalk
 }
 
 // readFailed answers a relation read that failed: the error when the walk is
-// strict, and nil once it is logged otherwise, so the caller serves the
-// relation empty.
+// strict or passed a bound, and nil once it is logged otherwise, so the
+// caller serves the relation empty.
 func (r relationPopulate) readFailed(ctx context.Context, kind string, err error) error {
-	if r.strict {
+	if r.walk.strict || errors.Is(err, ErrPopulateTooLarge) {
 		return fmt.Errorf("populate %s %s: %w", kind, r.name, err)
 	}
 	// Logged because the caller sees a 200 either way and cannot tell a
@@ -672,14 +802,31 @@ func (r relationPopulate) readFailed(ctx context.Context, kind string, err error
 	return nil
 }
 
-// recurse populates the records one relation fetched, one level down. A
-// failure there is returned only when the walk is strict.
-func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetched []*domain.Content, nextCfg domain.PopulateConfig, currentDepth int) error {
-	err := s.populateRecursiveBatch(ctx, fetched, nextCfg, currentDepth+1, rel.gate, rel.strict)
-	if rel.strict {
-		return err
+// recurse populates the records one relation fetched, one level down, and
+// returns what each of them carries from there. A record several parents
+// share is walked once. A failure there is returned only when the walk is
+// strict or passed a bound.
+func (s *ContentStore) recurse(ctx context.Context, rel relationPopulate, fetched []*domain.Content, nextCfg domain.PopulateConfig, currentDepth int) (map[*domain.Content]populateLoad, error) {
+	seen := make(map[*domain.Content]bool, len(fetched))
+	distinct := make([]*domain.Content, 0, len(fetched))
+	for _, c := range fetched {
+		if !seen[c] {
+			seen[c] = true
+			distinct = append(distinct, c)
+		}
 	}
-	return nil
+	loads, err := s.populateRecursiveBatch(ctx, rel.walk, distinct, nextCfg, currentDepth+1)
+	if err != nil {
+		if rel.walk.strict || errors.Is(err, ErrPopulateTooLarge) {
+			return nil, err
+		}
+		return nil, nil
+	}
+	below := make(map[*domain.Content]populateLoad, len(distinct))
+	for i, c := range distinct {
+		below[c] = loads[i]
+	}
+	return below, nil
 }
 
 // mask applies the gate's mask, then the requested projection, to one
@@ -700,9 +847,10 @@ func (r relationPopulate) mask(flat map[string]any) map[string]any {
 }
 
 // populateBelongsToBatch batch-resolves belongs_to relations across all items.
-func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) error {
+func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
 	f, fieldName := rel.field, rel.name
 	fkCol := domain.FKColumn(f.Name, f.RelationFKName)
+	loads := make([]populateLoad, len(items))
 
 	// Collect all unique FK IDs across items.
 	// Map: item index -> FK ID (each item has at most one belongs_to FK).
@@ -725,7 +873,7 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 	}
 
 	if len(fkSet) == 0 {
-		return nil
+		return loads, nil
 	}
 
 	// Batch fetch all related records.
@@ -733,15 +881,15 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 	for id := range fkSet {
 		fkList = append(fkList, id)
 	}
-	relatedMap, err := s.GetByIDs(ctx, f.RelationTo, fkList)
+	relatedMap, err := s.getByIDsCounted(ctx, rel.walk, f.RelationTo, fkList)
 	if err != nil {
 		if err := rel.readFailed(ctx, "belongs_to", err); err != nil {
-			return err
+			return nil, err
 		}
 		for i := range itemFKs {
 			items[i].Data[fieldName] = nil
 		}
-		return nil
+		return loads, nil
 	}
 
 	// Collect fetched records for recursive population.
@@ -756,8 +904,9 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 	}
 
 	// Recurse into fetched records first.
-	if err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth); err != nil {
-		return err
+	below, err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth)
+	if err != nil {
+		return nil, err
 	}
 
 	// Assign results back to items.
@@ -769,33 +918,64 @@ func (s *ContentStore) populateBelongsToBatch(ctx context.Context, items []*doma
 		}
 		if flat := rel.mask(flattenContent(related)); flat != nil {
 			items[i].Data[fieldName] = flat
+			loads[i] = rel.walk.served(related, below)
 		} else {
 			items[i].Data[fieldName] = nil
 		}
 	}
-	return nil
+	return loads, nil
+}
+
+// getByIDsCounted is GetByIDs with the rows it answers counted against the
+// walk. A belongs_to reads at most one row for each item, so the items bound
+// the read. A row from the item cache has no size from the database, so its
+// data is measured as JSON.
+func (s *ContentStore) getByIDsCounted(ctx context.Context, w *populateWalk, schemaName string, ids []uuid.UUID) (map[uuid.UUID]*domain.Content, error) {
+	for range (len(ids) + maxBatchSize - 1) / maxBatchSize {
+		if err := w.query(); err != nil {
+			return nil, err
+		}
+	}
+	found, err := s.GetByIDs(ctx, schemaName, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range found {
+		data, err := json.Marshal(c.Data)
+		if err != nil {
+			return nil, fmt.Errorf("populate %s: measure row: %w", schemaName, err)
+		}
+		if err := w.take(c, len(data)); err != nil {
+			return nil, err
+		}
+	}
+	return found, nil
+}
+
+// itemIDs is the id of each item.
+func itemIDs(items []*domain.Content) []uuid.UUID {
+	ids := make([]uuid.UUID, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	return ids
 }
 
 // populateHasOneBatch batch-resolves has_one relations across all items.
-func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) error {
+func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
 	f, fieldName := rel.field, rel.name
 	fkCol := domain.FKColumn(items[0].SchemaName, "") // FK column on the target table pointing back to source.
+	loads := make([]populateLoad, len(items))
 
-	// Collect all source IDs.
-	parentIDs := make([]uuid.UUID, len(items))
-	for i, item := range items {
-		parentIDs[i] = item.ID
-	}
-
-	relatedMap, err := s.GetByFKs(ctx, f.RelationTo, fkCol, parentIDs)
+	relatedMap, err := s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
 	if err != nil {
 		if err := rel.readFailed(ctx, "has_one", err); err != nil {
-			return err
+			return nil, err
 		}
 		for _, item := range items {
 			item.Data[fieldName] = nil
 		}
-		return nil
+		return loads, nil
 	}
 
 	// Collect fetched records for recursion.
@@ -812,12 +992,13 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 	}
 
 	// Recurse into fetched records.
-	if err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth); err != nil {
-		return err
+	below, err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth)
+	if err != nil {
+		return nil, err
 	}
 
 	// Assign results back.
-	for _, item := range items {
+	for i, item := range items {
 		children, ok := relatedMap[item.ID]
 		if !ok || len(children) == 0 {
 			item.Data[fieldName] = nil
@@ -825,85 +1006,43 @@ func (s *ContentStore) populateHasOneBatch(ctx context.Context, items []*domain.
 		}
 		if flat := rel.mask(flattenContent(children[0])); flat != nil {
 			item.Data[fieldName] = flat
+			loads[i] = rel.walk.served(children[0], below)
 		} else {
 			item.Data[fieldName] = nil
 		}
 	}
-	return nil
+	return loads, nil
 }
 
 // populateHasManyBatch batch-resolves has_many relations across all items.
-func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) error {
-	f, fieldName := rel.field, rel.name
+func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
+	f := rel.field
 	fkCol := domain.FKColumn(items[0].SchemaName, "")
 
-	parentIDs := make([]uuid.UUID, len(items))
-	for i, item := range items {
-		parentIDs[i] = item.ID
-	}
-
-	relatedMap, err := s.GetByFKs(ctx, f.RelationTo, fkCol, parentIDs)
-	if err != nil {
-		if err := rel.readFailed(ctx, "has_many", err); err != nil {
-			return err
-		}
-		for _, item := range items {
-			item.Data[fieldName] = []map[string]any{}
-		}
-		return nil
-	}
-
-	// Collect all fetched records for recursive population.
-	var fetched []*domain.Content
-	for _, item := range items {
-		children, ok := relatedMap[item.ID]
-		if !ok {
-			item.Data[fieldName] = []map[string]any{}
-			continue
-		}
-		fetched = append(fetched, children...)
-	}
-
-	// Recurse into all fetched children.
-	if err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth); err != nil {
-		return err
-	}
-
-	// Assign results back.
-	for _, item := range items {
-		children, ok := relatedMap[item.ID]
-		if !ok {
-			item.Data[fieldName] = []map[string]any{}
-			continue
-		}
-		out := make([]map[string]any, 0, len(children))
-		for _, r := range children {
-			if flat := rel.mask(flattenContent(r)); flat != nil {
-				out = append(out, flat)
-			}
-		}
-		item.Data[fieldName] = out
-	}
-	return nil
+	relatedMap, err := s.GetByFKs(ctx, rel.walk, f.RelationTo, fkCol, itemIDs(items))
+	return s.assignToMany(ctx, items, rel, nextCfg, currentDepth, "has_many", relatedMap, err)
 }
 
 // populateManyToManyBatch batch-resolves many_to_many relations across all items.
-func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) error {
-	f, fieldName := rel.field, rel.name
-	sourceIDs := make([]uuid.UUID, len(items))
-	for i, item := range items {
-		sourceIDs[i] = item.ID
-	}
+func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int) ([]populateLoad, error) {
+	relatedMap, err := s.ListRelatedBatch(ctx, rel.walk, items[0].SchemaName, itemIDs(items), rel.field)
+	return s.assignToMany(ctx, items, rel, nextCfg, currentDepth, "many_to_many", relatedMap, err)
+}
 
-	relatedMap, err := s.ListRelatedBatch(ctx, items[0].SchemaName, sourceIDs, f)
-	if err != nil {
-		if err := rel.readFailed(ctx, "many_to_many", err); err != nil {
-			return err
+// assignToMany serves a to-many relation read under kind: it populates the
+// related records one level down, then writes each item's list, and returns
+// what each item carries. An entry two items share counts under each.
+func (s *ContentStore) assignToMany(ctx context.Context, items []*domain.Content, rel relationPopulate, nextCfg domain.PopulateConfig, currentDepth int, kind string, relatedMap map[uuid.UUID][]*domain.Content, readErr error) ([]populateLoad, error) {
+	fieldName := rel.name
+	loads := make([]populateLoad, len(items))
+	if readErr != nil {
+		if err := rel.readFailed(ctx, kind, readErr); err != nil {
+			return nil, err
 		}
 		for _, item := range items {
 			item.Data[fieldName] = []map[string]any{}
 		}
-		return nil
+		return loads, nil
 	}
 
 	// Collect all fetched records for recursive population.
@@ -918,12 +1057,13 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 	}
 
 	// Recurse into all fetched children.
-	if err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth); err != nil {
-		return err
+	below, err := s.recurse(ctx, rel, fetched, nextCfg, currentDepth)
+	if err != nil {
+		return nil, err
 	}
 
 	// Assign results back.
-	for _, item := range items {
+	for i, item := range items {
 		children, ok := relatedMap[item.ID]
 		if !ok {
 			item.Data[fieldName] = []map[string]any{}
@@ -933,11 +1073,12 @@ func (s *ContentStore) populateManyToManyBatch(ctx context.Context, items []*dom
 		for _, r := range children {
 			if flat := rel.mask(flattenContent(r)); flat != nil {
 				out = append(out, flat)
+				loads[i] = loads[i].plus(rel.walk.served(r, below))
 			}
 		}
 		item.Data[fieldName] = out
 	}
-	return nil
+	return loads, nil
 }
 
 // ListRelated returns items from the target schema related to id via a

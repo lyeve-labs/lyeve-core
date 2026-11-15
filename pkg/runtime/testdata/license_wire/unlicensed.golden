@@ -2501,6 +2501,7 @@ body (json, newline):
             "name": "depth",
             "required": false,
             "schema": {
+              "maximum": 10,
               "minimum": 0,
               "type": "integer"
             }
@@ -2962,6 +2963,7 @@ body (json, newline):
             "name": "depth",
             "required": false,
             "schema": {
+              "maximum": 10,
               "minimum": 0,
               "type": "integer"
             }
@@ -4964,6 +4966,7 @@ body (json, newline):
             "name": "depth",
             "required": false,
             "schema": {
+              "maximum": 10,
               "minimum": 0,
               "type": "integer"
             }
@@ -5425,6 +5428,7 @@ body (json, newline):
             "name": "depth",
             "required": false,
             "schema": {
+              "maximum": 10,
               "minimum": 0,
               "type": "integer"
             }

@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -488,9 +487,9 @@ func (h *ContentHandler) ListCursor(w http.ResponseWriter, r *http.Request) {
 //	?populate=author.* - wildcard: all relations within author
 //	?depth=2 - auto-populate all relations up to N levels
 //	?populate=author.avatar&depth=1 - combine explicit paths + auto-depth
-func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
-	cfg := domain.PopulateConfig{}
-
+//
+// ok is false for a depth that is not an integer from 0 to db.MaxPopulateDepth.
+func parsePopulateFromQuery(r *http.Request) (cfg domain.PopulateConfig, ok bool) {
 	// Parse ?populate=  (comma-separated, dot-notation for nesting)
 	if pop := r.URL.Query().Get("populate"); pop != "" {
 		cfg.Paths = strings.Split(pop, ",")
@@ -501,12 +500,14 @@ func parsePopulateFromQuery(r *http.Request) domain.PopulateConfig {
 
 	// Parse ?depth=  (auto-populate up to N levels, Payload CMS style)
 	if d := r.URL.Query().Get("depth"); d != "" {
-		if n, err := strconv.Atoi(d); err == nil && n > 0 {
-			cfg.MaxDepth = n
+		n, ok := plainInt(d, 0, db.MaxPopulateDepth)
+		if !ok {
+			return cfg, false
 		}
+		cfg.MaxDepth = n
 	}
 
-	return cfg
+	return cfg, true
 }
 
 // withoutStatus returns data without the publication status. A status moves

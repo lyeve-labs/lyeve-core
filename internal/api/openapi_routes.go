@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
@@ -111,7 +112,7 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	field := openAPIParameter{Name: "field", In: "path", Required: true, Description: "A relation field of the content type", Schema: map[string]any{"type": "string"}}
 	body := &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object"}}}}
 	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, or * for all.", Schema: map[string]any{"type": "string"}}
-	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
+	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0, "maximum": db.MaxPopulateDepth}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
 	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.", Schema: map[string]any{"type": "string"}}
 	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value, or lies within a bound, written filters[field][gte]=value and filters[field][lte]=value, inclusive. A bound applies to created_at, updated_at and number, integer, decimal, date and datetime fields. A field the content type does not have, or a bound on any other field, answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
