@@ -10,6 +10,7 @@ import (
 
 	"github.com/lyeve-labs/lyeve-core/internal/db/dialect"
 	"github.com/lyeve-labs/lyeve-core/internal/domain"
+	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/sqldialect"
 )
 
@@ -138,8 +139,8 @@ func (s *ContentStore) pathCondition(ctx context.Context, schemaName string, sc 
 // reached, whose mask hides what hides names. ok is false for a step the
 // path may not take: no such relation, a relation or key the mask hides, a
 // target the caller may not read or that no longer exists, a has_one or
-// has_many with no key inverseKey can read, and a many_to_many from a type
-// to itself, whose pivot cannot tell its two sides apart.
+// has_many with no key core.InverseKey can read, and a many_to_many from a
+// type to itself, whose pivot cannot tell its two sides apart.
 func (s *ContentStore) pathStep(ctx context.Context, sourceName string, source *domain.Schema, name string, hides func(string) bool, gate PathGate) (pathStep, func(string) bool, bool, error) {
 	f, ok := relationNamed(source, name)
 	if !ok || hides(f.Name) {
@@ -165,7 +166,7 @@ func (s *ContentStore) pathStep(ctx context.Context, sourceName string, source *
 			return pathStep{}, nil, false, nil
 		}
 	case domain.RelHasOne, domain.RelHasMany:
-		key, ok := inverseKey(sourceName, f, target)
+		key, ok := core.InverseKey(sourceName, f, target)
 		if !ok || targetHides(key) {
 			return pathStep{}, nil, false, nil
 		}
@@ -391,9 +392,9 @@ func stepExists(engine string, st pathStep, k int, inner string) string {
 
 // keyMatch answers the predicate that the has_one or has_many key of st on
 // the row alias holds the id of the row parent. A key held as text, the
-// column named for the source type that inverseKey reads last, compares as
-// text on PostgreSQL, which has no comparison of text with a UUID, and as a
-// UUID on SQL Server, which writes one in capitals.
+// column named for the source type that core.InverseKey reads last, compares
+// as text on PostgreSQL, which has no comparison of text with a UUID, and as
+// a UUID on SQL Server, which writes one in capitals.
 func keyMatch(engine string, st pathStep, alias, parent string) string {
 	col := alias + "." + dialect.Must(engine).QuoteIdentifier(st.key)
 	if st.keyText {

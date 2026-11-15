@@ -218,6 +218,65 @@ func FKColumn(fieldName, override string) string {
 	return strings.ToLower(strings.ReplaceAll(fieldName, "-", "_")) + "_id"
 }
 
+// InverseKey is the column on target that a has_one or has_many f of the type
+// source reads, and false when the definition gives none or target is nil:
+//
+//  1. relation_fk_name on f, which has to be the key column of a belongs_to
+//     on target toward source.
+//  2. Without it, the key column of the one belongs_to on target toward
+//     source.
+//  3. Without one, a declared field on target whose column is the legacy
+//     <source>_id key. A system column never counts, so a type named tenant
+//     does not read tenant_id.
+//
+// Two belongs_to toward source and no relation_fk_name give no key, since a
+// guess would serve one relation's entries under the other.
+func InverseKey(source string, f SchemaField, target *Schema) (string, bool) {
+	if target == nil {
+		return "", false
+	}
+	var back []string
+	for _, tf := range target.Fields {
+		if tf.FieldType == "relation" && (tf.RelationType == RelBelongsTo || tf.RelationType == "") && tf.RelationTo == source {
+			back = append(back, storedColumn(tf))
+		}
+	}
+	if f.RelationFKName != "" {
+		for _, col := range back {
+			if col == f.RelationFKName {
+				return col, true
+			}
+		}
+		return "", false
+	}
+	switch len(back) {
+	case 0:
+	case 1:
+		return back[0], true
+	default:
+		return "", false
+	}
+	legacy := FKColumn(source, "")
+	for _, tf := range target.Fields {
+		if col := storedColumn(tf); !tf.System && col != "" && col == legacy {
+			return col, true
+		}
+	}
+	return "", false
+}
+
+// storedColumn is the column f is kept in: a belongs_to in its key column,
+// the other relations in none, and every other field in its name.
+func storedColumn(f SchemaField) string {
+	if f.FieldType != "relation" {
+		return f.Name
+	}
+	if f.RelationType == RelBelongsTo || f.RelationType == "" {
+		return FKColumn(f.Name, f.RelationFKName)
+	}
+	return ""
+}
+
 // TableName returns the physical table name for a schema. Every
 // per-collection table carries a leading underscore: _{name}. The engine's own
 // sys_ tables are not affected.

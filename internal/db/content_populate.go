@@ -15,86 +15,6 @@ import (
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 )
 
-// Populate resolves relation fields listed in populateFields and attaches
-// the related records directly inside content.Data[fieldName].
-// For belongs_to / has_one -> the related object (or nil).
-// For has_many / many_to_many -> []map[string]any.
-func (s *ContentStore) Populate(ctx context.Context, c *domain.Content, populateFields []string) error {
-	sc, err := s.schemas.GetByName(ctx, c.SchemaName)
-	if err != nil {
-		return fmt.Errorf("populate %s: %w", c.SchemaName, err)
-	}
-	fieldsByName := make(map[string]domain.SchemaField, len(sc.Fields))
-	for _, f := range sc.Fields {
-		fieldsByName[f.Name] = f
-	}
-
-	for _, fieldName := range populateFields {
-		f, ok := fieldsByName[fieldName]
-		if !ok || f.FieldType != "relation" || f.RelationTo == "" {
-			continue
-		}
-
-		switch f.RelationType {
-		case domain.RelBelongsTo, "":
-			fkCol := domain.FKColumn(f.Name, f.RelationFKName)
-			rawID := c.Data[fkCol]
-			idStr, _ := rawID.(string)
-			if idStr == "" {
-				c.Data[fieldName] = nil
-				continue
-			}
-			relID, err := uuid.Parse(idStr)
-			if err != nil {
-				c.Data[fieldName] = nil
-				continue
-			}
-			related, err := s.GetByID(ctx, f.RelationTo, relID)
-			if err != nil {
-				c.Data[fieldName] = nil
-				continue
-			}
-			c.Data[fieldName] = flattenContent(related)
-
-		case domain.RelHasOne:
-			// FK is on the other table: {schemaName}_id -> this record's id
-			fkCol := domain.FKColumn(c.SchemaName, "")
-			results, err := s.List(ctx, f.RelationTo, 1, 0, map[string]any{fkCol: c.ID.String()})
-			if err != nil || len(results) == 0 {
-				c.Data[fieldName] = nil
-				continue
-			}
-			c.Data[fieldName] = flattenContent(results[0])
-
-		case domain.RelHasMany:
-			fkCol := domain.FKColumn(c.SchemaName, "")
-			results, err := s.List(ctx, f.RelationTo, 500, 0, map[string]any{fkCol: c.ID.String()})
-			if err != nil {
-				c.Data[fieldName] = []map[string]any{}
-				continue
-			}
-			out := make([]map[string]any, 0, len(results))
-			for _, r := range results {
-				out = append(out, flattenContent(r))
-			}
-			c.Data[fieldName] = out
-
-		case domain.RelManyToMany:
-			related, _, err := s.ListRelated(ctx, c.SchemaName, c.ID, f, 500, 0, true)
-			if err != nil {
-				c.Data[fieldName] = []map[string]any{}
-				continue
-			}
-			out := make([]map[string]any, 0, len(related))
-			for _, r := range related {
-				out = append(out, flattenContent(r))
-			}
-			c.Data[fieldName] = out
-		}
-	}
-	return nil
-}
-
 // parsePopulateField extracts the field name and optional field mask from a
 // populate path segment. Supports "field{id,name}" syntax for field selection.
 // Returns the bare field name and the list of fields to include (nil = all fields).
@@ -315,7 +235,7 @@ func distinctIDs(ids []uuid.UUID) []uuid.UUID {
 }
 
 // InverseKeyError is a has_one or has_many the request names whose key on
-// its target cannot be read by the rule inverseKey follows.
+// its target cannot be read by the rule core.InverseKey follows.
 type InverseKeyError struct {
 	Field, Target string
 }
@@ -327,52 +247,6 @@ func (e *InverseKeyError) Error() string {
 // Unwrap makes the refusal a bad request: the request named a field the
 // definition gives no way to read.
 func (e *InverseKeyError) Unwrap() error { return domain.ErrBadRequest }
-
-// inverseKey is the column on target that a has_one or has_many f of the type
-// source reads, and false when the definition gives none:
-//
-//  1. relation_fk_name on f, which has to be the key column of a belongs_to
-//     on target toward source.
-//  2. Without it, the key column of the one belongs_to on target toward
-//     source.
-//  3. Without one, a declared field on target whose column is <source>_id,
-//     the key every inverse field read before the rule. A system column
-//     never counts, so a type named tenant does not read tenant_id.
-//
-// Two belongs_to toward source and no relation_fk_name give no key.
-func inverseKey(source string, f domain.SchemaField, target *domain.Schema) (string, bool) {
-	var back []string
-	for _, tf := range target.Fields {
-		if tf.FieldType == "relation" && (tf.RelationType == domain.RelBelongsTo || tf.RelationType == "") && tf.RelationTo == source {
-			back = append(back, fieldColumn(tf))
-		}
-	}
-	if f.RelationFKName != "" {
-		for _, col := range back {
-			if strings.EqualFold(col, f.RelationFKName) {
-				return col, true
-			}
-		}
-		return "", false
-	}
-	switch len(back) {
-	case 0:
-	case 1:
-		return back[0], true
-	default:
-		return "", false
-	}
-	legacy := domain.FKColumn(source, "")
-	for _, tf := range target.Fields {
-		if tf.System || isVirtualRelationField(tf) {
-			continue
-		}
-		if col := fieldColumn(tf); strings.EqualFold(col, legacy) {
-			return col, true
-		}
-	}
-	return "", false
-}
 
 // namedFields is the relations cfg names at its level, as against the ones a
 // wildcard or a depth reaches there.
@@ -1143,7 +1017,7 @@ func (s *ContentStore) populateHasManyBatch(ctx context.Context, items []*domain
 }
 
 // inverseKeyOf is the key column the has_one or has_many rel of the type
-// source reads on its target, by inverseKey's rule. Empty with no error is a
+// source reads on its target, by core.InverseKey's rule. Empty with no error is a
 // relation left out of every item:
 //
 //   - one whose key the caller's mask hides on the target, named or not. The
@@ -1157,7 +1031,7 @@ func (s *ContentStore) inverseKeyOf(ctx context.Context, rel relationPopulate, s
 	if err != nil {
 		return "", fmt.Errorf("resolve schema %q: %w", rel.field.RelationTo, err)
 	}
-	key, ok := inverseKey(source, rel.field, target)
+	key, ok := core.InverseKey(source, rel.field, target)
 	switch {
 	case !ok && rel.named:
 		return "", &InverseKeyError{Field: rel.name, Target: rel.field.RelationTo}
