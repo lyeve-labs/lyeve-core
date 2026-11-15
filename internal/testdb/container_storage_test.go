@@ -18,32 +18,34 @@ import (
 // read as the module builds it, and the run stops before any container starts.
 func TestPostgresContainer_KeepsItsDataInMemory(t *testing.T) {
 	testdialect.Require(t, "postgres")
-	tmpfs := requestedTmpfs(t, func(opts ...testcontainers.ContainerCustomizer) error {
+	req := requested(t, func(opts ...testcontainers.ContainerCustomizer) error {
 		_, err := postgres.Run(context.Background(), "postgres:16-alpine", append(postgresContainerOptions(), opts...)...)
 		return err
 	})
-	require.Contains(t, tmpfs, "/var/lib/postgresql")
+	require.Contains(t, req.Tmpfs, "/var/lib/postgresql", "the volume the 18 image declares")
+	require.Contains(t, req.Tmpfs, "/var/lib/postgresql/data", "the volume the images up to 17 declare")
+	require.Equal(t, "/var/lib/postgresql/data", req.Env["PGDATA"], "the data directory is in a mount on every image")
 }
 
 func TestMSSQLContainer_KeepsItsDataInMemory(t *testing.T) {
 	testdialect.Require(t, "mssql")
-	tmpfs := requestedTmpfs(t, func(opts ...testcontainers.ContainerCustomizer) error {
+	req := requested(t, func(opts ...testcontainers.ContainerCustomizer) error {
 		_, err := tcmssql.Run(context.Background(), testdialect.MSSQLImage, append(mssqlContainerOptions(), opts...)...)
 		return err
 	})
-	require.Contains(t, tmpfs, "/var/opt/mssql")
+	require.Contains(t, req.Tmpfs, "/var/opt/mssql")
 }
 
-// requestedTmpfs runs a module with one more option that records the request's
-// tmpfs mounts and stops the run.
-func requestedTmpfs(t *testing.T, run func(...testcontainers.ContainerCustomizer) error) map[string]string {
+// requested runs a module with one more option that records the request and
+// stops the run.
+func requested(t *testing.T, run func(...testcontainers.ContainerCustomizer) error) testcontainers.GenericContainerRequest {
 	t.Helper()
 	stop := errors.New("request read")
-	var tmpfs map[string]string
+	var got testcontainers.GenericContainerRequest
 	err := run(testcontainers.CustomizeRequestOption(func(req *testcontainers.GenericContainerRequest) error {
-		tmpfs = req.Tmpfs
+		got = *req
 		return stop
 	}))
 	require.ErrorIs(t, err, stop)
-	return tmpfs
+	return got
 }
