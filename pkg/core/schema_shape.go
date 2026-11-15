@@ -219,7 +219,7 @@ func FKColumn(fieldName, override string) string {
 }
 
 // InverseKey is the column on target that a has_one or has_many f of the type
-// source reads, and false when the definition gives none:
+// source reads, and false when the definition gives none or target is nil:
 //
 //  1. relation_fk_name on f, which has to be the key column of a belongs_to
 //     on target toward source.
@@ -232,6 +232,9 @@ func FKColumn(fieldName, override string) string {
 // Two belongs_to toward source and no relation_fk_name give no key, since a
 // guess would serve one relation's entries under the other.
 func InverseKey(source string, f SchemaField, target *Schema) (string, bool) {
+	if target == nil {
+		return "", false
+	}
 	var back []string
 	for _, tf := range target.Fields {
 		if tf.FieldType == "relation" && (tf.RelationType == RelBelongsTo || tf.RelationType == "") && tf.RelationTo == source {
