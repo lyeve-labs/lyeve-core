@@ -230,9 +230,7 @@ func FKColumn(fieldName, override string) string {
 //     never counts, so a type named tenant does not read tenant_id.
 //
 // Two belongs_to toward source and no relation_fk_name give no key, since a
-// guess would serve one relation's entries under the other. Columns compare
-// without regard to case, and the column answered is spelled as target
-// declares it.
+// guess would serve one relation's entries under the other.
 func InverseKey(source string, f SchemaField, target *Schema) (string, bool) {
 	var back []string
 	for _, tf := range target.Fields {
@@ -242,7 +240,7 @@ func InverseKey(source string, f SchemaField, target *Schema) (string, bool) {
 	}
 	if f.RelationFKName != "" {
 		for _, col := range back {
-			if strings.EqualFold(col, f.RelationFKName) {
+			if col == f.RelationFKName {
 				return col, true
 			}
 		}
@@ -257,7 +255,7 @@ func InverseKey(source string, f SchemaField, target *Schema) (string, bool) {
 	}
 	legacy := FKColumn(source, "")
 	for _, tf := range target.Fields {
-		if col := storedColumn(tf); !tf.System && col != "" && strings.EqualFold(col, legacy) {
+		if col := storedColumn(tf); !tf.System && col != "" && col == legacy {
 			return col, true
 		}
 	}

@@ -35,6 +35,8 @@ func TestInverseKey_FollowsTheRule(t *testing.T) {
 		{"a belongs_to toward another type is not read", "posts", "", []SchemaField{belongsTo("author", "people", "")}, "", false},
 		{"a system column is never the key", "tenant", "", []SchemaField{text("body"), {Name: "tenant_id", FieldType: "text", System: true}}, "", false},
 		{"an inverse field named for the source type keeps no column", "posts", "", []SchemaField{{Name: "posts_id", FieldType: "relation", RelationType: RelHasMany, RelationTo: "posts"}}, "", false},
+		{"a key spelled in another case names no belongs_to back", "posts", "Post_Id", []SchemaField{belongsTo("post", "posts", "")}, "", false},
+		{"a column named for the source type in another case is not the key", "posts", "", []SchemaField{text("Posts_Id")}, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
