@@ -38,7 +38,9 @@ func PermissionCheckerOf(v any) PermissionChecker {
 // it reads or writes an entry of schema. A caller limited to a list of
 // schemas is refused one outside it, an API key whose scopes do not grant
 // action on schema is refused next, and then the caller's roles go through
-// checker for action.
+// checker for action. With no rule naming it, an admin is allowed every
+// action on every schema, and a rule naming admin on the schema or on "*"
+// decides from then on. A role other than admin and super_admin needs a rule.
 //
 // The scope is asked here and not only at the route. A route's scope gate
 // reads the schema its path names. A relation, a populated field and a

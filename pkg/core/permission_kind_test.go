@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -173,14 +174,15 @@ func TestPermissionKinds_ReturnsCopies(t *testing.T) {
 }
 
 // The role-only checker reads the registry: super_admin everywhere, admin on
-// every resource of a kind registered with AdminByDefault and nowhere else,
-// and every other role nowhere.
+// every content type, the wildcard and every resource of a kind registered
+// with AdminByDefault, and every other role nowhere. A name that is neither a
+// resource of a kind nor a schema name admits nobody but super_admin.
 func TestRoleOnlyPermissionChecker_AnswersFromTheRegisteredKinds(t *testing.T) {
 	registerReportsAndVaults(t)
 	adminResources := map[string]bool{
 		"reports": true, "report:weekly": true, "vaults": true, "vault:main": true,
-		"*": false, "articles": false, "report": false, "report:": false, "report:Bad": false,
-		"vault": false, "vault:": false, "vault:-x": false,
+		"*": true, "articles": true, "report": true, "vault": true,
+		"report:": false, "report:Bad": false, "vault:": false, "vault:-x": false,
 	}
 	checker := RoleOnlyPermissionChecker{}
 	ctx := context.Background()
@@ -203,4 +205,36 @@ func TestRoleOnlyPermissionChecker_AnswersFromTheRegisteredKinds(t *testing.T) {
 			assert.False(t, ok, "no roles %s on %q", action, resource)
 		}
 	}
+}
+
+// An admin may do every action on a content type and on the wildcard while no
+// rule names it, the way it may on a kind registered with AdminByDefault. A
+// resource of a kind registered without it stays refused, even where its
+// General would pass as a schema name, and so does a name no schema can
+// carry. The checker masks nothing, so an admin reads every field.
+func TestRoleOnlyPermissionChecker_AdminByDefaultOnContentTypes(t *testing.T) {
+	keepPermissionKinds(t)
+	RegisterPermissionKind(PermissionKind{General: "vaults", Prefix: "vault:", ValidSlug: testSlugRe.MatchString})
+
+	adminResources := map[string]bool{
+		"posts": true, "_drafts": true, "Posts2": true, strings.Repeat("a", 63): true, "*": true,
+		"vaults": false, "vault:main": false,
+		"": false, "1posts": false, "blog-posts": false, "a.b": false, "vault:-x": false,
+		strings.Repeat("a", 64): false,
+	}
+	checker := RoleOnlyPermissionChecker{}
+	ctx := context.Background()
+	for resource, adminAllowed := range adminResources {
+		for _, action := range []string{"create", "read", "update", "delete"} {
+			ok, err := checker.Allowed(ctx, []string{"editor", RoleAdmin}, resource, action)
+			require.NoError(t, err)
+			assert.Equal(t, adminAllowed, ok, "admin %s on %q", action, resource)
+
+			ok, err = checker.Allowed(ctx, []string{"editor", "viewer"}, resource, action)
+			require.NoError(t, err)
+			assert.False(t, ok, "editor %s on %q", action, resource)
+		}
+	}
+	_, masks := any(checker).(FieldMasker)
+	assert.False(t, masks, "the role-only checker hides a field")
 }

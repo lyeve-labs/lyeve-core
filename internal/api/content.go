@@ -226,8 +226,8 @@ func (h *ContentHandler) runAfterResponse(r *http.Request, schema, method string
 
 // checker is the authorization this handler enforces. Never nil: with no rule
 // engine supplied it is the kernel's role-only checker, which allows
-// super_admin everything and refuses every other role on a schema, so an
-// install without a rule engine is closed, not open.
+// super_admin everything and admin every schema, and refuses every other role
+// on a schema, so an install without a rule engine is closed, not open.
 //
 // Read per request, never held: the plugin that owns the rules registers its
 // checker when it starts and clears it when it stops, so a request served

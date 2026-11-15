@@ -64,13 +64,15 @@ type fakeProvider struct{ c core.PermissionChecker }
 
 func (p fakeProvider) PermissionChecker() core.PermissionChecker { return p.c }
 
-// A build with no plugin supplying a rule engine is the ordinary shape of the kernel on its own, not an error path. It has to be neither an open database
+// A build with no plugin supplying a rule engine is the ordinary shape of the
+// kernel on its own, not an error path. It has to be neither an open database
 // nor a closed one: super_admin reaches everything, because only a super_admin
-// can write the first rule, and every other role is refused a schema.
+// can write the first rule, admin reaches every schema, and every other role
+// is refused a schema.
 //
-// A plugin's resources are the exception for admin: a kind registered with
-// AdminByDefault admits admin while no rule names it, the way a plugin that
-// owns such a kind registers it from init.
+// A plugin's resources admit admin only when their kind is registered with
+// AdminByDefault, the way a plugin that owns such a kind registers it from
+// init.
 func TestContentHandler_Authorization_NoRuleEngine(t *testing.T) {
 	for _, general := range []string{"reports", "vaults"} {
 		core.RegisterPermissionKind(core.PermissionKind{
@@ -90,7 +92,8 @@ func TestContentHandler_Authorization_NoRuleEngine(t *testing.T) {
 		want     bool
 	}{
 		{"super admin reaches a schema", []string{"super_admin"}, "posts", true},
-		{"admin does not reach a schema", []string{"admin"}, "posts", false},
+		{"admin reaches a schema", []string{"admin"}, "posts", true},
+		{"admin reaches every schema", []string{"admin"}, "*", true},
 		{"editor does not reach a schema", []string{"editor"}, "posts", false},
 		{"no role reaches a schema", []string{}, "posts", false},
 		{"admin still reaches every report", []string{"admin"}, "reports", true},
@@ -113,18 +116,21 @@ func TestContentHandler_Authorization_NoRuleEngine(t *testing.T) {
 }
 
 // The kernel's own checker has no rules, so it has no field masks either. A
-// read on a build without the plugin serves every field it stored.
+// read on a build without the plugin serves every field it stored, to an
+// admin as to every other role.
 func TestContentHandler_MaskFor_NoRuleEngine(t *testing.T) {
 	h := &ContentHandler{hooks: hooks.NewRegistry()}
-	rr := httptest.NewRecorder()
-	mask, ok := h.maskFor(rr, withRoles("editor"), "posts")
-	if !ok {
-		t.Fatalf("mask refused: %d %s", rr.Code, rr.Body.String())
-	}
-	data := map[string]any{"title": "hello", "secret": "shh"}
-	got := mask(data)
-	if len(got) != 2 {
-		t.Errorf("fields = %d, want 2: %v", len(got), got)
+	for _, role := range []string{"editor", "admin"} {
+		rr := httptest.NewRecorder()
+		mask, ok := h.maskFor(rr, withRoles(role), "posts")
+		if !ok {
+			t.Fatalf("%s: mask refused: %d %s", role, rr.Code, rr.Body.String())
+		}
+		data := map[string]any{"title": "hello", "secret": "shh"}
+		got := mask(data)
+		if len(got) != 2 {
+			t.Errorf("%s: fields = %d, want 2: %v", role, len(got), got)
+		}
 	}
 }
 
