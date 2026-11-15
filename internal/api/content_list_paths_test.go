@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	apimw "github.com/lyeve-labs/lyeve-core/internal/middleware"
 	"github.com/lyeve-labs/lyeve-core/internal/tenant"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
@@ -279,5 +280,51 @@ func TestContentList_PathsHoldTheCallersReadRights(t *testing.T) {
 		refusedLike("reader", "filters[author.name][eq]=Ann", "filters[author.company.name][eq]=Acme", "filters[comments.body][eq]=old", "filters[lead.body][empty]=false")
 		assert.Equal(t, http.StatusForbidden, get("reader", "filters[author_id]="+rows.ids["P1"]).Code, "the listed type's hidden field")
 		assert.ElementsMatch(t, []string{"P1"}, rows.names(t, get("reader", "filters[tags.slug][eq]=go")))
+	})
+}
+
+// A list takes at most four conditions on a related entry's fields, because
+// each reads its relations in a subquery per row. A fifth answers 400 with
+// the reason, and four run.
+func TestContentList_RefusesAFifthPathCondition(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"related"}, func(t *testing.T, fx schemaContentFixture) {
+		rows := seedPathRows(t, fx)
+		four := "filters[author.name][contains]=a&filters[tags.slug][ne]=x&filters[comments.body][ncontains]=x&filters[author.company.name][ne]=x"
+		assert.ElementsMatch(t, []string{"P1", "P4"}, rows.names(t, fx.listPosts(t, four)))
+
+		rr := fx.listPosts(t, four+"&filters[lead.body][ne]=x")
+		require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+		assert.Contains(t, rr.Body.String(), "at most 4 conditions on a related entry")
+	})
+}
+
+// A list asks the gate about each type its paths reach once, however many
+// paths reach it.
+func TestContentList_PathGateIsAskedOncePerType(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	forEachDialectWithSchemas(t, []string{"related"}, func(t *testing.T, fx schemaContentFixture) {
+		seedPathRows(t, fx)
+		asked := map[string]int{}
+		gate := func(_ context.Context, schema string) (func(string) bool, bool, bool, error) {
+			asked[schema]++
+			return nil, true, true, nil
+		}
+		_, err := fx.content.store.ListPage(fx.ctx, "rf_posts", db.ListQuery{
+			Limit: 50,
+			Conditions: []db.ListCondition{
+				{Column: "author.name", Op: db.OpContains, Values: []any{"a"}},
+				{Column: "author.company.name", Op: db.OpNotEqual, Values: []any{"x"}},
+				{Column: "comments.body", Op: db.OpNotContains, Values: []any{"x"}},
+				{Column: "lead.body", Op: db.OpNotEqual, Values: []any{"x"}},
+			},
+			PathGate: gate,
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]int{"rf_posts": 1, "rf_authors": 1, "rf_companies": 1, "rf_comments": 1}, asked)
 	})
 }

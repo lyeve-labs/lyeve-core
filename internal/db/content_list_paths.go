@@ -25,6 +25,11 @@ var pathBounds = map[string]string{"gt": ">", "gte": ">=", "lt": "<", "lte": "<=
 // the path ends on.
 const maxPathRelations = 2
 
+// MaxPathConditions caps the path conditions of one list. Each one reads its
+// relations in a subquery for every row the list scans, and each type it
+// reaches is put to the caller's rights.
+const MaxPathConditions = 4
+
 // PathGate answers what the caller may read of a content type a list filter
 // path reaches: whether it may read the type at all, the columns its mask
 // hides there, and whether a draft of the type counts as an entry it could be
@@ -76,6 +81,7 @@ func (s *ContentStore) pathConditions(ctx context.Context, schemaName string, sc
 		own   []ListCondition
 		paths []pathCondition
 	)
+	gate = onceEach(gate)
 	for _, c := range conds {
 		if !IsPath(c.Column) {
 			own = append(own, c)
@@ -182,6 +188,28 @@ func (s *ContentStore) pathStep(ctx context.Context, sourceName string, source *
 		return pathStep{}, nil, false, nil
 	}
 	return step, targetHides, true, nil
+}
+
+// onceEach is gate asking about each type once, however many paths of one
+// list reach it, and answering later asks from the first answer.
+func onceEach(gate PathGate) PathGate {
+	if gate == nil {
+		return nil
+	}
+	type answer struct {
+		hides      func(string) bool
+		drafts, ok bool
+		err        error
+	}
+	asked := map[string]answer{}
+	return func(ctx context.Context, schemaName string) (func(string) bool, bool, bool, error) {
+		a, seen := asked[schemaName]
+		if !seen {
+			a.hides, a.drafts, a.ok, a.err = gate(ctx, schemaName)
+			asked[schemaName] = a
+		}
+		return a.hides, a.drafts, a.ok, a.err
+	}
 }
 
 // orNone is hides, or a mask that hides nothing when there is none.

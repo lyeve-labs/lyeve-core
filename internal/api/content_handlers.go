@@ -70,6 +70,11 @@ func (h *ContentHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: filters")
 		return
 	}
+	if pathConditions(conds) > db.MaxPathConditions {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fmt.Sprintf(
+			"invalid query parameter: filters: a list takes at most %d conditions on a related entry's fields", db.MaxPathConditions))
+		return
+	}
 	sort, ok := parseListSort(r)
 	if !ok {
 		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: sort")
@@ -764,6 +769,17 @@ func takePaths(filters map[string]any, ranges map[string]db.ListRange, conds []d
 		total += len(c.Values)
 	}
 	return conds, total <= maxConditionValues
+}
+
+// pathConditions counts the conditions of conds whose key is a path.
+func pathConditions(conds []db.ListCondition) int {
+	n := 0
+	for _, c := range conds {
+		if db.IsPath(c.Column) {
+			n++
+		}
+	}
+	return n
 }
 
 // pathGate answers, for each content type a filter path reaches, whether the
