@@ -48,7 +48,9 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     session stops signing in once the password changes.
 //   - core.CapTenantRoles, because the plugin acts for a person long after
 //     their session ended and re-checks the roles they hold in the tenant
-//     on every call: builder, for each call a connection signs.
+//     on every call: builder, for each call a connection signs, and
+//     data-export, for each scheduled export it runs as the account that
+//     saved it.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -63,7 +65,7 @@ var capPolicy = map[string]core.Capability{
 	"cluster":              core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"content":              core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapRoutes | core.CapHooks | core.CapContentEntryWriter | core.CapRecordRevisionStore,
 	"cron":                 core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"data-export":          core.CapDBWrite | core.CapRawDB | core.CapRoutes,
+	"data-export":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapTenantRoles,
 	"data-residency":       core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"device-fingerprint":   core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"email":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapEmailSender | core.CapSessionKey,
