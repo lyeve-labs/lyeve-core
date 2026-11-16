@@ -1251,6 +1251,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// built-in one for the life of the process.
 	contentSchemaSource := core.LazySchemaSource(hostBase.(core.SchemaSourceProvider).SchemaSource)
 	contentRules := core.LazyContentRules(hostBase.(core.ContentRulesProvider).ContentRules)
+	contentValueShaper := core.LazyContentValueShaper(hostBase.(core.ContentValueShaperProvider).ContentValueShaper)
 
 	// Router option builder
 	// Closure so both the initial construction and the hot-reload callback
@@ -1339,6 +1340,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
 			api.WithContentRules(contentRules),
+			api.WithContentValueShaper(contentValueShaper),
 			// The content reads ask the host per request for the registered
 			// core.ContentLocalizer, so a locale is honored while a plugin
 			// provides one and ignored otherwise.

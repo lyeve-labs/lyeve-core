@@ -292,6 +292,14 @@ func (h *engineHost) ContentRules() core.ContentRules {
 	return core.ContentRulesOf(h.Schema())
 }
 
+// ContentValueShaper implements core.ContentValueShaperProvider. It answers
+// the shaper of whatever engine a plugin registered, and the absent shaper,
+// which refuses a document value, when none has or the registered one
+// supplies none.
+func (h *engineHost) ContentValueShaper() core.ContentValueShaper {
+	return core.ContentValueShaperOf(h.Schema())
+}
+
 // WithContentStore replaces the host's content store with the one the API
 // router serves reads from. They must be the same instance: a plugin write
 // through a different ContentStore cannot drop the read path's cached lists,

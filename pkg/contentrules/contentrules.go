@@ -6,6 +6,9 @@
 // The rules come from the schema engine registered on the host, as they do for
 // the Content API. A host with no engine, or with one that supplies no rules,
 // answers core.ErrNoContentRules, and the writer refuses the write.
+//
+// ShapeValues answers the values the Content API stores, from the shaper the
+// registered engine supplies, for a writer that stores rows itself.
 package contentrules
 
 import (
@@ -47,6 +50,36 @@ func ValidatePatch(ctx context.Context, host core.Host, sc *core.Schema, patch, 
 		return nil, err
 	}
 	return i18n.LocalizeValidation(i18n.LocaleFromCtx(ctx), errs), nil
+}
+
+// ShapeValues answers the values to store for a create or a partial update,
+// as the Content API's store shapes them before it writes: a rich_text field's
+// value comes back in the form the registered engine stores it. A writer that
+// keeps its own SQL calls it after the rules pass and stores what it returns.
+//
+// It returns the data to write, and the failures with each message in the
+// locale the request on ctx resolved. No failures and no error means the write
+// may go ahead with the data returned. An error means the values could not be
+// shaped, and the write must not go ahead. A host whose engine supplies no
+// shaper answers core.ErrNoContentValueShaper for data naming a rich_text
+// field stored as a document, and data unchanged otherwise.
+func ShapeValues(ctx context.Context, host core.Host, sc *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	data, errs, err := shaperOf(host).ShapeValues(ctx, sc, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, i18n.LocalizeValidation(i18n.LocaleFromCtx(ctx), errs), nil
+}
+
+// shaperOf asks the host for the registered engine's shaper on every call, as
+// rulesOf does.
+func shaperOf(host core.Host) core.ContentValueShaper {
+	if p, ok := host.(core.ContentValueShaperProvider); ok {
+		if s := p.ContentValueShaper(); s != nil {
+			return s
+		}
+	}
+	return core.AbsentContentValueShaper{}
 }
 
 // rulesOf asks the host for the registered engine's rules on every call, so a

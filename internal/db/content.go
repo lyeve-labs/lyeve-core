@@ -40,6 +40,10 @@ type ContentStore struct {
 
 	onInvalidate func(ctx context.Context, schemaName string) // nullable
 
+	// shaper turns every write's values into the ones stored. Nil is
+	// core.AbsentContentValueShaper, which refuses a document value.
+	shaper core.ContentValueShaper
+
 	// ensured records the generated tables this process has already verified
 	// to carry the tenant_id column, so the conditional ALTER runs once per
 	// table instead of once per request.
@@ -73,21 +77,57 @@ func NewContentStoreWithCache(
 	return &ContentStore{pool: pool, schemas: schemas, itemCache: itemCache, listCache: listCache}
 }
 
+// WithValueShaper sets the shaper every write's values pass before the row
+// is written, and returns s. Call it before the store serves a
+// write. A store without one refuses a write that names a document field.
+func (s *ContentStore) WithValueShaper(shaper core.ContentValueShaper) *ContentStore {
+	s.shaper = shaper
+	return s
+}
+
+// shape answers the values a write stores, from the registered shaper. A
+// refusal wraps domain.ErrValidation and a *core.ContentValueError naming
+// each field. A shaper that could not answer, or no shaper for a document
+// value, is the shaper's error, which wraps core.ErrNoSchemaEngine when none
+// is registered.
+func (s *ContentStore) shape(ctx context.Context, sc *domain.Schema, data map[string]any) (map[string]any, error) {
+	shaper := s.shaper
+	if shaper == nil {
+		shaper = core.AbsentContentValueShaper{}
+	}
+	shaped, failures, err := shaper.ShapeValues(ctx, sc, data)
+	if err != nil {
+		return nil, fmt.Errorf("shape content values: %w", err)
+	}
+	if len(failures) > 0 {
+		return nil, fmt.Errorf("%w: %w", domain.ErrValidation, &core.ContentValueError{Failures: failures})
+	}
+	return shaped, nil
+}
+
+// schema answers a content type's definition. A supplied engine reports an
+// unknown content type with the public sentinel. Joining the kernel's own
+// keeps every caller's errors.Is(err, domain.ErrNotFound) working, so a name
+// nobody defined is a 404 rather than an outage.
+func (s *ContentStore) schema(ctx context.Context, schemaName string) (*domain.Schema, error) {
+	sc, err := s.schemas.GetByName(ctx, schemaName)
+	if err != nil {
+		if errors.Is(err, core.ErrSchemaNotFound) {
+			return nil, fmt.Errorf("%w: %w", domain.ErrNotFound, err)
+		}
+		return nil, err
+	}
+	return sc, nil
+}
+
 // table returns the physical table name for a schema, validating the schema
 // exists. The returned name is engine-qualified so it resolves on a
 // tenant-scoped MySQL/MSSQL connection. Postgres resolves through search_path.
 // Tables created by engines without tenant isolation get their tenant_id
 // column added on first use (once per process).
 func (s *ContentStore) table(ctx context.Context, schemaName string) (*domain.Schema, string, error) {
-	sc, err := s.schemas.GetByName(ctx, schemaName)
+	sc, err := s.schema(ctx, schemaName)
 	if err != nil {
-		// A supplied engine reports an unknown content type with the public
-		// sentinel. Joining the kernel's own keeps every caller's
-		// errors.Is(err, domain.ErrNotFound) working, so a name nobody
-		// defined is a 404 rather than an outage.
-		if errors.Is(err, core.ErrSchemaNotFound) {
-			return nil, "", fmt.Errorf("%w: %w", domain.ErrNotFound, err)
-		}
 		return nil, "", err
 	}
 	table := domain.TableName(schemaName)
@@ -219,6 +259,9 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 
 	if _, _, err := contentStatus(sc, data); err != nil {
 		return nil, fmt.Errorf("content insert: %w", err)
@@ -289,6 +332,18 @@ func (s *ContentStore) insertRow(ctx context.Context, sc *domain.Schema, schemaN
 // the mirrored row shares its id with the source record and later updates and
 // deletes land on the same row.
 func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return nil, fmt.Errorf("content insert: resolve table: %w", err)
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
+	return s.insertShapedWithID(ctx, schemaName, id, data)
+}
+
+// insertShapedWithID is InsertWithID for data the shaper already answered.
+func (s *ContentStore) insertShapedWithID(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
@@ -373,6 +428,13 @@ func (s *ContentStore) UpsertContent(ctx context.Context, schemaName string, id 
 // either comes back as it is, and nothing is written. Nil for both is
 // UpsertContent.
 func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, beforeUpdate func(context.Context, map[string]any) error, beforeInsert func(context.Context) error) error {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return fmt.Errorf("content upsert: resolve table: %w", err)
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return fmt.Errorf("content upsert: %w", err)
+	}
 	if beforeUpdate != nil {
 		existing, err := s.GetByID(ctx, schemaName, id)
 		switch {
@@ -384,7 +446,7 @@ func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName stri
 			return err
 		}
 	}
-	if _, err := s.Update(ctx, schemaName, id, data, time.Time{}); err == nil {
+	if _, err := s.updateShaped(ctx, schemaName, id, data, time.Time{}); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrContentConflict) && !errors.Is(err, domain.ErrNotFound) {
 		return err
@@ -401,7 +463,7 @@ func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName stri
 			return err
 		}
 	}
-	_, err = s.InsertWithID(ctx, schemaName, id, data)
+	_, err = s.insertShapedWithID(ctx, schemaName, id, data)
 	return err
 }
 
@@ -938,6 +1000,18 @@ func softDeleteWhere(sc *domain.Schema) string {
 // reach the caller as a 503 on a write that never happened. Inside a caller's
 // transaction the deadlock goes to the caller instead, as retryOwnTx says.
 func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return nil, err
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content update: %w", err)
+	}
+	return s.updateShaped(ctx, schemaName, id, data, expectedUpdatedAt)
+}
+
+// updateShaped is Update for data the shaper already answered.
+func (s *ContentStore) updateShaped(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	var out *domain.Content
 	err := retryOwnTx(ctx, "content update", func() error {
 		var uerr error
@@ -1335,6 +1409,14 @@ func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items 
 		return nil, err
 	}
 
+	shaped := make([]map[string]any, len(items))
+	for i, data := range items {
+		if shaped[i], err = s.shape(ctx, sc, data); err != nil {
+			return nil, fmt.Errorf("bulk insert: item %d: %w", i, err)
+		}
+	}
+	items = shaped
+
 	var values []core.RelationValue
 	for _, data := range items {
 		if _, _, err := contentStatus(sc, data); err != nil {
@@ -1541,6 +1623,8 @@ func normalizeContentData(engine string, sc *domain.Schema, data map[string]any)
 			if str, isStr := v.(string); isStr && engine == "mssql" {
 				data[col] = strings.ToLower(str)
 			}
+		case "rich_text":
+			data[col] = core.RichTextValue(f, v)
 		}
 	}
 	if sc.WithSoftDelete {

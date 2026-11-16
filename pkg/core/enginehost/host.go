@@ -46,7 +46,8 @@ func NewHost(pool db.DB, rawDB *sql.DB, cfg *config.Config, registry *hooks.Regi
 		registry: registry,
 		version:  version,
 	}
-	h.contentStore = db.NewContentStore(pool, core.LazySchemaSource(h.SchemaSource))
+	h.contentStore = db.NewContentStore(pool, core.LazySchemaSource(h.SchemaSource)).
+		WithValueShaper(core.LazyContentValueShaper(h.ContentValueShaper))
 	return h
 }
 

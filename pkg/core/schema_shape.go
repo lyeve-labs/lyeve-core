@@ -58,6 +58,11 @@ type SchemaField struct {
 	Precision *int `json:"precision,omitempty"`
 	Scale     *int `json:"scale,omitempty"`
 
+	// Format says what a rich_text field stores: RichTextFormatHTML or
+	// RichTextFormatDocument. Empty is HTML, so a definition written before
+	// the option existed means what it always meant. It generates no DDL.
+	Format string `json:"format,omitempty"`
+
 	// Validation rules applied when content is created or updated.
 	// Only enforced when the field holds a value, unless Required.
 	Validation []ValidationRule `json:"validation,omitempty"`
