@@ -179,16 +179,18 @@ func TestContentStore_ShaperRefusalStoresNothing(t *testing.T) {
 }
 
 // A store with no shaper refuses, at every entry point, a write that names a
-// document field, as a write with no schema engine is refused, and stores
-// nothing. A write that names no document field is stored as it was sent, an
-// html value included.
-func TestContentStore_DocumentWithNoShaperIsRefused(t *testing.T) {
+// rich text field, an html one as well as a document, as a write with no
+// schema engine is refused, and stores nothing. A write that names no rich
+// text field is stored as before.
+func TestContentStore_RichTextWithNoShaperIsRefused(t *testing.T) {
 	eachDialect(t, func(t *testing.T, pool db.DB) {
 		ctx := context.Background()
 		reg, sc := richTextSchema(t, pool, "unshaped_entries")
 		store := db.NewContentStore(pool, reg.Source())
-		plain, err := store.Insert(ctx, sc.Name, map[string]any{"title": "plain", "body": "<div>as sent</div>"})
-		require.NoError(t, err, "an html value needs no shaper")
+		_, err := store.Insert(ctx, sc.Name, map[string]any{"title": "html", "body": "<div>x</div>"})
+		require.ErrorIs(t, err, core.ErrNoContentValueShaper, "an html value is refused too")
+		plain, err := store.Insert(ctx, sc.Name, map[string]any{"title": "plain"})
+		require.NoError(t, err, "a write naming no rich text field needs no shaper")
 		_, err = store.Update(ctx, sc.Name, plain.ID, map[string]any{"title": "plain again"}, plain.UpdatedAt)
 		require.NoError(t, err)
 
@@ -213,7 +215,7 @@ func TestContentStore_DocumentWithNoShaperIsRefused(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, rows, 1)
 		assert.Equal(t, "plain again", rows[0].Data["title"])
-		assert.Equal(t, "<div>as sent</div>", rows[0].Data["body"])
+		assert.Nil(t, rows[0].Data["body"])
 		assert.Nil(t, rows[0].Data["doc"])
 	})
 }

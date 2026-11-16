@@ -26,8 +26,9 @@ var richTextType = &Schema{Fields: []SchemaField{
 	{Name: "doc", FieldType: "rich_text", Format: RichTextFormatDocument},
 }}
 
-// absent asserts sh is the absent shaper: a document value is refused, and a
-// write naming no document field passes unchanged, an html value included.
+// absent asserts sh is the absent shaper: a rich text value is refused, an
+// html one as well as a document, and a write naming no rich text field
+// passes unchanged.
 func absent(t *testing.T, sh ContentValueShaper) {
 	t.Helper()
 	data, errs, err := sh.ShapeValues(context.Background(), richTextType, map[string]any{"title": "a", "doc": map[string]any{"document": map[string]any{"type": "doc"}}})
@@ -39,16 +40,16 @@ func absent(t *testing.T, sh ContentValueShaper) {
 	_, _, err = sh.ShapeValues(context.Background(), richTextType, map[string]any{"doc": nil})
 	require.ErrorIs(t, err, ErrNoContentValueShaper, "a null names the field too")
 
-	for _, sent := range []map[string]any{
-		{"title": "a", "body": "<div>b</div>"},
-		{"body": nil},
-		{"title": "a"},
-	} {
-		data, errs, err = sh.ShapeValues(context.Background(), richTextType, sent)
-		require.NoError(t, err)
-		assert.Empty(t, errs)
-		assert.Equal(t, sent, data)
+	for _, sent := range []map[string]any{{"title": "a", "body": "<div>b</div>"}, {"body": nil}} {
+		_, _, err = sh.ShapeValues(context.Background(), richTextType, sent)
+		require.ErrorIs(t, err, ErrNoContentValueShaper, "an html value is refused too")
 	}
+
+	plain := map[string]any{"title": "a"}
+	data, errs, err = sh.ShapeValues(context.Background(), richTextType, plain)
+	require.NoError(t, err)
+	assert.Empty(t, errs)
+	assert.Equal(t, plain, data)
 }
 
 func TestContentValueShaperOf_AnswersTheEnginesShaperOrTheAbsentOne(t *testing.T) {

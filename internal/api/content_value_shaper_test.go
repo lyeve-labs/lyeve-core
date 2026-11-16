@@ -63,9 +63,9 @@ func TestContentHandler_ShaperRefusalIsA422InTheErrorsShape(t *testing.T) {
 }
 
 // An install whose engine supplies no shaper answers 503 for a write naming a
-// document field and stores nothing, as it does with no schema engine. An
-// html field is stored as it was sent.
-func TestContentHandler_DocumentWithNoShaperIs503(t *testing.T) {
+// rich text field, an html one as well as a document, and stores nothing, as
+// it does with no schema engine. A write naming no rich text field is stored.
+func TestContentHandler_RichTextWithNoShaperIs503(t *testing.T) {
 	forEachDialectWithSchemas(t, []string{"rich_text"}, func(t *testing.T, fx schemaContentFixture) {
 		src := fx.eng.SchemaSource()
 		fx.content = &ContentHandler{store: newTestContentStore(fx.pool, src), schemas: src, rules: fx.rules, hooks: hooks.NewRegistry()}
@@ -74,8 +74,11 @@ func TestContentHandler_DocumentWithNoShaperIs503(t *testing.T) {
 		require.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
 		assert.Equal(t, 0, fx.rowCount(t, "rt_posts"))
 
-		id := createdID(t, fx.create(t, "rt_posts", map[string]any{"title": "html", "body": "<div>as sent</div>"}))
-		assert.Equal(t, "<div>as sent</div>", dataOf(t, fx.get(t, "rt_posts", id))["body"])
+		rr = fx.create(t, "rt_posts", map[string]any{"title": "html", "body": "<div>x</div>"})
+		require.Equal(t, http.StatusServiceUnavailable, rr.Code, rr.Body.String())
+		assert.Equal(t, 0, fx.rowCount(t, "rt_posts"))
+
+		id := createdID(t, fx.create(t, "rt_posts", map[string]any{"title": "plain"}))
 		rr = fx.send(t, fx.ctx, http.MethodPut, "/api/v1/content/rt_posts/"+id,
 			map[string]string{"schema": "rt_posts", "id": id},
 			map[string]any{"data": map[string]any{"doc": map[string]any{"document": map[string]any{"type": "doc"}}}}, fx.content.Update)

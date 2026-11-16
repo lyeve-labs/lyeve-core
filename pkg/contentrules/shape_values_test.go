@@ -61,9 +61,9 @@ func TestShapeValues_FailureReadsInTheRequestLocale(t *testing.T) {
 	assert.NotEqual(t, en[0].Message, fr[0].Message)
 }
 
-// With no shaper a document value is refused as unavailable, and a write
-// naming no document field passes unchanged, an html value included.
-func TestShapeValues_NoShaperRefusesDocumentsOnly(t *testing.T) {
+// With no shaper a rich text value is refused as unavailable, an html one as
+// well as a document, and a write naming no rich text field passes unchanged.
+func TestShapeValues_NoShaperRefusesRichText(t *testing.T) {
 	hosts := map[string]core.Host{
 		"host without the role": shaperHost{}.Host,
 		"role answers nil":      shaperHost{},
@@ -77,7 +77,10 @@ func TestShapeValues_NoShaperRefusesDocumentsOnly(t *testing.T) {
 			assert.Nil(t, data)
 			assert.Nil(t, errs)
 
-			plain := map[string]any{"title": "x", "body": "<div>x</div>"}
+			_, _, err = ShapeValues(context.Background(), host, richTextType, map[string]any{"body": "<div>x</div>"})
+			assert.ErrorIs(t, err, core.ErrNoContentValueShaper, "an html value is refused too")
+
+			plain := map[string]any{"title": "x"}
 			data, errs, err = ShapeValues(context.Background(), host, richTextType, plain)
 			require.NoError(t, err)
 			assert.Empty(t, errs)

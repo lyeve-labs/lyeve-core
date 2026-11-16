@@ -41,15 +41,15 @@ var ErrNoContentValueShaper = fmt.Errorf("%w, or it supplies no content value sh
 
 // AbsentContentValueShaper is what an install has with no schema engine, or
 // with one that supplies no shaper. It refuses a write that names a rich_text
-// field stored as a document with ErrNoContentValueShaper, because only a
-// shaper checks the document and draws the HTML a read serves from it. Every
-// other write, an html field's included, is answered unchanged.
+// field with ErrNoContentValueShaper, because a read serves stored rich text
+// as HTML, and only a shaper cleans it or draws it from a document. A write
+// that names no rich_text field is answered unchanged.
 type AbsentContentValueShaper struct{}
 
 func (AbsentContentValueShaper) ShapeValues(_ context.Context, sc *Schema, data map[string]any) (map[string]any, []SchemaValidationError, error) {
 	if sc != nil {
 		for _, f := range sc.Fields {
-			if f.FieldType != "rich_text" || f.Format != RichTextFormatDocument {
+			if f.FieldType != "rich_text" {
 				continue
 			}
 			if _, ok := data[f.Name]; ok {

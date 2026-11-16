@@ -883,7 +883,7 @@ func (h *ScopedHost) ContentRules() ContentRules {
 // ContentValueShaper forwards to inner if it implements
 // ContentValueShaperProvider. It is the shaper every content write's values
 // pass, which is the registered engine's. A host that provides none answers
-// the absent shaper, which refuses a document value.
+// the absent shaper, which refuses a rich_text value.
 func (h *ScopedHost) ContentValueShaper() ContentValueShaper {
 	if p, ok := h.inner.(ContentValueShaperProvider); ok {
 		if s := p.ContentValueShaper(); s != nil {

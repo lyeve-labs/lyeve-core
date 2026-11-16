@@ -75,7 +75,7 @@ type routerOptions struct {
 	publicGlobalOverride *apimw.PublicRateLimitConfig           // operator override for the aggregate cap
 	trustedProxies       apimw.TrustedProxies                   // CIDRs whose XFF is trusted (nil -> RemoteAddr only)
 	contentStoreSink     func(*db.ContentStore)                 // nil -> the router's content store is not shared
-	contentValueShaper   core.ContentValueShaper                // nil -> a document value is refused
+	contentValueShaper   core.ContentValueShaper                // nil -> a rich_text value is refused
 	permissionChecker    core.PermissionCheckerProvider         // nil -> the kernel's role-only checker
 	schemaSource         core.SchemaSource                      // nil -> this install has no schema engine
 	contentRules         core.ContentRules                      // nil -> every content write is refused
@@ -226,8 +226,8 @@ func WithContentRules(r core.ContentRules) RouterOption {
 
 // WithContentValueShaper supplies the shaper every content write's values
 // pass before the store writes them, which is the schema engine's. Without it
-// a write that names a rich_text field stored as a document is refused,
-// because nothing would check the document.
+// a write that names a rich_text field is refused, because nothing would
+// clean the value.
 func WithContentValueShaper(s core.ContentValueShaper) RouterOption {
 	return func(o *routerOptions) { o.contentValueShaper = s }
 }

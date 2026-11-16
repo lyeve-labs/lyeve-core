@@ -41,7 +41,7 @@ type ContentStore struct {
 	onInvalidate func(ctx context.Context, schemaName string) // nullable
 
 	// shaper turns every write's values into the ones stored. Nil is
-	// core.AbsentContentValueShaper, which refuses a document value.
+	// core.AbsentContentValueShaper, which refuses a rich_text value.
 	shaper core.ContentValueShaper
 
 	// ensured records the generated tables this process has already verified
@@ -79,7 +79,7 @@ func NewContentStoreWithCache(
 
 // WithValueShaper sets the shaper every write's values pass before the row
 // is written, and returns s. Call it before the store serves a
-// write. A store without one refuses a write that names a document field.
+// write. A store without one refuses a write that names a rich_text field.
 func (s *ContentStore) WithValueShaper(shaper core.ContentValueShaper) *ContentStore {
 	s.shaper = shaper
 	return s
@@ -87,7 +87,7 @@ func (s *ContentStore) WithValueShaper(shaper core.ContentValueShaper) *ContentS
 
 // shape answers the values a write stores, from the registered shaper. A
 // refusal wraps domain.ErrValidation and a *core.ContentValueError naming
-// each field. A shaper that could not answer, or no shaper for a document
+// each field. A shaper that could not answer, or no shaper for a rich_text
 // value, is the shaper's error, which wraps core.ErrNoSchemaEngine when none
 // is registered.
 func (s *ContentStore) shape(ctx context.Context, sc *domain.Schema, data map[string]any) (map[string]any, error) {

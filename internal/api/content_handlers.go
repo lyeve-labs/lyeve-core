@@ -852,7 +852,7 @@ func storeError(w http.ResponseWriter, r *http.Request, err error, msg string) {
 	}
 	if errors.Is(err, core.ErrNoContentValueShaper) {
 		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
-			"no schema engine shapes rich text documents, so this field cannot be saved")
+			"no schema engine shapes rich text, so this field cannot be saved")
 		return
 	}
 	// An install with no schema engine says so, on every route, rather than

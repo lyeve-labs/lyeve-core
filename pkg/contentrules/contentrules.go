@@ -62,7 +62,7 @@ func ValidatePatch(ctx context.Context, host core.Host, sc *core.Schema, patch, 
 // may go ahead with the data returned. An error means the values could not be
 // shaped, and the write must not go ahead. A host whose engine supplies no
 // shaper answers core.ErrNoContentValueShaper for data naming a rich_text
-// field stored as a document, and data unchanged otherwise.
+// field, and data unchanged otherwise.
 func ShapeValues(ctx context.Context, host core.Host, sc *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
 	data, errs, err := shaperOf(host).ShapeValues(ctx, sc, data)
 	if err != nil {

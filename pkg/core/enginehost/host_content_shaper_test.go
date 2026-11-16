@@ -47,8 +47,8 @@ func (draftingEngine) ShapeValues(_ context.Context, sc *core.Schema, data map[s
 }
 
 // A plugin's write through the host passes the shaper of the registered
-// engine. While the registered engine supplies none, a document value is
-// refused as unavailable and an html value is stored as it was sent.
+// engine, and is refused as unavailable while the registered engine supplies
+// none.
 func TestEngineHost_ContentWriteUsesTheRegisteredShaper(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
@@ -87,18 +87,16 @@ func TestEngineHost_ContentWriteUsesTheRegisteredShaper(t *testing.T) {
 			id := uuid.New()
 			err = h.UpsertContent(ctx, schema, id, map[string]any{"title": "a", "doc": map[string]any{"document": map[string]any{"type": "doc"}}})
 			require.ErrorIs(t, err, core.ErrNoContentValueShaper, "an engine with no shaper cannot store a document")
-			require.NoError(t, h.UpsertContent(ctx, schema, id, map[string]any{"title": "a", "body": "<div>as sent</div>"}))
-			rows, err := h.ContentPage(ctx, schema, uuid.Nil, 10)
-			require.NoError(t, err)
-			require.Len(t, rows, 1)
-			assert.Equal(t, "<div>as sent</div>", rows[0]["body"], "an engine with no shaper stores an html value as sent")
+			err = h.UpsertContent(ctx, schema, id, map[string]any{"title": "a", "body": "<p>a</p>"})
+			require.ErrorIs(t, err, core.ErrNoContentValueShaper, "nor an html value")
+			require.NoError(t, h.UpsertContent(ctx, schema, id, map[string]any{"title": "a"}))
 
 			require.NoError(t, h.RegisterSchemaEngine(draftingEngine{plain}))
 			require.NoError(t, h.UpsertContent(ctx, schema, id, map[string]any{
 				"body": "<p>b</p>",
 				"doc":  map[string]any{"document": map[string]any{"type": "doc"}, "html": "<script>sent</script>"},
 			}))
-			rows, err = h.ContentPage(ctx, schema, uuid.Nil, 10)
+			rows, err := h.ContentPage(ctx, schema, uuid.Nil, 10)
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			assert.Equal(t, "<p>b</p>", rows[0]["body"])

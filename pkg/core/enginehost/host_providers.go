@@ -294,7 +294,7 @@ func (h *engineHost) ContentRules() core.ContentRules {
 
 // ContentValueShaper implements core.ContentValueShaperProvider. It answers
 // the shaper of whatever engine a plugin registered, and the absent shaper,
-// which refuses a document value, when none has or the registered one
+// which refuses a rich_text value, when none has or the registered one
 // supplies none.
 func (h *engineHost) ContentValueShaper() core.ContentValueShaper {
 	return core.ContentValueShaperOf(h.Schema())
