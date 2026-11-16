@@ -42,6 +42,22 @@ type schemaContentFixture struct {
 type fixtureRules struct {
 	eng    *schemaengine.Engine
 	refuse map[string]core.SchemaValidationError
+
+	// unshapeable names the fields the fixture's shaper refuses.
+	unshapeable map[string]core.SchemaValidationError
+}
+
+// ShapeValues is the fixture store's shaper. It stores what it is sent, so a
+// test here reads what the kernel does with a rich text value rather than what
+// cleaning one means, and refuses any field named in unshapeable.
+func (f *fixtureRules) ShapeValues(_ context.Context, _ *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	var out []core.SchemaValidationError
+	for field, failure := range f.unshapeable {
+		if _, ok := data[field]; ok {
+			out = append(out, failure)
+		}
+	}
+	return data, out, nil
 }
 
 // fixtureDefaults are the defaults contentDefaultSchemas declare.
@@ -139,6 +155,17 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "photo", "field_type": "media"},
 			{"name": "meta", "field_type": "json"},
 			{"name": "secret", "field_type": "text"}
+		]
+	}`},
+	"rich_text": {`{
+		"name": "rt_posts",
+		"display_name": "Posts",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "body", "field_type": "rich_text"},
+			{"name": "doc", "field_type": "rich_text", "format": "document"}
 		]
 	}`},
 	"drafts": {`{
@@ -545,7 +572,7 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 			rules := &fixtureRules{eng: eng}
 			fn(t, schemaContentFixture{
 				ctx:     ctx,
-				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, rules: rules, hooks: hooks.NewRegistry()},
+				content: &ContentHandler{store: newTestContentStore(pool, src).WithValueShaper(rules), schemas: src, rules: rules, hooks: hooks.NewRegistry()},
 				eng:     eng,
 				rules:   rules,
 				pool:    pool,

@@ -412,7 +412,7 @@ func (h *ContentHandler) BulkCreate(w http.ResponseWriter, r *http.Request) {
 
 	results, err := h.store.BulkInsert(r.Context(), schemaName, body.Items)
 	if err != nil {
-		if !relationRefused(w, r, err) {
+		if !storeRefused(w, r, err) {
 			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "bulk insert failed")
 		}
 		return
@@ -847,7 +847,12 @@ func queriedColumns(filters map[string]any, ranges map[string]db.ListRange, cond
 // the caller as "failed to create content" and the operator as nothing at all:
 // a 503 in the access log with no line anywhere saying why.
 func storeError(w http.ResponseWriter, r *http.Request, err error, msg string) {
-	if relationRefused(w, r, err) {
+	if storeRefused(w, r, err) {
+		return
+	}
+	if errors.Is(err, core.ErrNoContentValueShaper) {
+		httpx.ErrorReq(w, r, http.StatusServiceUnavailable,
+			"no schema engine shapes rich text documents, so this field cannot be saved")
 		return
 	}
 	// An install with no schema engine says so, on every route, rather than

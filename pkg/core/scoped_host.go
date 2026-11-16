@@ -880,6 +880,19 @@ func (h *ScopedHost) ContentRules() ContentRules {
 	return AbsentContentRules{}
 }
 
+// ContentValueShaper forwards to inner if it implements
+// ContentValueShaperProvider. It is the shaper every content write's values
+// pass, which is the registered engine's. A host that provides none answers
+// the absent shaper, which refuses a document value.
+func (h *ScopedHost) ContentValueShaper() ContentValueShaper {
+	if p, ok := h.inner.(ContentValueShaperProvider); ok {
+		if s := p.ContentValueShaper(); s != nil {
+			return s
+		}
+	}
+	return AbsentContentValueShaper{}
+}
+
 // RegisterSchemaEngine forwards to inner if it implements
 // SchemaEngineRegistrar, for a plugin holding CapSchema. Every content read
 // and write goes through the engine. More than one plugin holds CapSchema

@@ -354,6 +354,13 @@ func (h *testHost) ContentRules() core.ContentRules {
 	return core.ContentRulesOf(h.schema)
 }
 
+// ContentValueShaper implements core.ContentValueShaperProvider, answering
+// the shaper of whatever engine was registered or supplied, and the absent
+// shaper otherwise.
+func (h *testHost) ContentValueShaper() core.ContentValueShaper {
+	return core.ContentValueShaperOf(h.schema)
+}
+
 // SchemaSource implements core.SchemaSourceProvider, answering the registry
 // the content path reads. It is whatever engine was registered or supplied,
 // and no engine at all otherwise.

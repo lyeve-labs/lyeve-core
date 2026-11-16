@@ -222,7 +222,7 @@ func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request)
 	h.snapshot(r, schemaName, id, existing.Data)
 	item, err := h.store.Update(r.Context(), schemaName, id, restored, existing.UpdatedAt)
 	if err != nil {
-		if !relationRefused(w, r, err) {
+		if !storeRefused(w, r, err) {
 			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to restore revision")
 		}
 		return

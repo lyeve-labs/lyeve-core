@@ -541,11 +541,17 @@ func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Requ
 	return s, true
 }
 
-// relationRefused answers a write the store refused because a relation names
-// no entry of the caller's tenant, as a validation error naming the field, and
-// reports whether it did. A row another tenant holds and a row nobody holds
-// get the same answer, so it says nothing about other tenants.
-func relationRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+// storeRefused answers a write the store refused for a value the caller
+// sent, as validation errors naming each field, and reports whether it did.
+// That is a relation naming no entry of the caller's tenant, or values the
+// shaper refused. A row another tenant holds and a row nobody holds get the
+// same answer, so it says nothing about other tenants.
+func storeRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	var shaped *core.ContentValueError
+	if errors.As(err, &shaped) {
+		respondValidation(w, r, shaped.Failures)
+		return true
+	}
 	var refused *core.RelationTargetError
 	if !errors.As(err, &refused) {
 		return false

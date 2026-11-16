@@ -133,7 +133,7 @@ func (h *ContentHandler) SetRelations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.store.SetRelations(r.Context(), schemaName, id, f, targetIDs); err != nil {
-		if !relationRefused(w, r, err) {
+		if !storeRefused(w, r, err) {
 			httpx.ErrorReq(w, r, storeFailureStatus(r, err), "failed to set relations")
 		}
 		return
