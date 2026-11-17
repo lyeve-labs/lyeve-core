@@ -351,17 +351,13 @@ func scanUserList(engine string, rows *sql.Rows) ([]*domain.User, error) {
 	return users, rows.Err()
 }
 
-// List returns a page of users ordered by created_at ascending, then by id.
-// Postgres stamps every row of one transaction with the same created_at, and
-// offset pages over tied rows can repeat some and skip others, so the unique
-// id breaks the tie. limit caps the result set. Offset controls the starting
-// position. Both are mandatory: callers must supply explicit bounds.
-func (s *UserStore) List(ctx context.Context, limit, offset int) ([]*domain.User, error) {
-	return s.ListMatching(ctx, "", "", limit, offset)
-}
-
-// ListMatching is List narrowed to the accounts whose address contains q and
-// that hold role. An empty q or role narrows nothing.
+// ListMatching returns a page of the accounts whose address contains q and
+// that hold role, ordered by created_at ascending, then by id. An empty q or
+// role narrows nothing. Postgres stamps every row of one transaction with the
+// same created_at, and offset pages over tied rows can repeat some and skip
+// others, so the unique id breaks the tie. limit caps the result set. Offset
+// controls the starting position. Both are mandatory: callers must supply
+// explicit bounds.
 func (s *UserStore) ListMatching(ctx context.Context, q, role string, limit, offset int) ([]*domain.User, error) {
 	engine := s.pool.Engine()
 	args := []any{limit, offset}

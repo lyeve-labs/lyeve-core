@@ -39,7 +39,7 @@ func TestUserStore_ListPagesEachAccountOnce(t *testing.T) {
 
 		seen := make(map[uuid.UUID]int, total)
 		for offset := 0; ; offset += page {
-			got, err := store.List(ctx, page, offset)
+			got, err := store.ListMatching(ctx, "", "", page, offset)
 			if err != nil {
 				t.Fatalf("List offset %d: %v", offset, err)
 			}

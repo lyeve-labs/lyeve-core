@@ -132,7 +132,7 @@ func TestUserStore_ReadsCarryTokenVersionAfterBump(t *testing.T) {
 
 		// List has its own paged query per dialect, so reading the single-row
 		// getters alone would leave the mssql paging branch unread.
-		page, err := store.List(ctx, 100, 0)
+		page, err := store.ListMatching(ctx, "", "", 100, 0)
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}

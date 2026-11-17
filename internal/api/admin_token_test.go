@@ -116,9 +116,13 @@ func (f *fakeAdminTokens) Get(ctx context.Context, tenantID string, id uuid.UUID
 	return f.hydrate(ctx, t), nil
 }
 
-func (f *fakeAdminTokens) List(ctx context.Context, tenantID string, owner *uuid.UUID, limit, offset int) ([]*core.AdminToken, int, error) {
+// ListMatching records the search and the status and lists by tenant and
+// owner alone. The store applies q and status, so the tests here read only
+// what the handler asked for.
+func (f *fakeAdminTokens) ListMatching(ctx context.Context, tenantID string, owner *uuid.UUID, q, status string, now time.Time, limit, offset int) ([]*core.AdminToken, int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.match = adminTokenMatch{q: q, status: status, now: now, calls: f.match.calls + 1}
 	var all []*core.AdminToken
 	for _, t := range f.rows {
 		if t.TenantID != tenantID {
@@ -161,15 +165,6 @@ func (f *fakeAdminTokens) List(ctx context.Context, tenantID string, owner *uuid
 		}
 	}
 	return page, total, nil
-}
-
-// ListMatching records the search and the status and lists as List does.
-// The store applies them, so the tests here read only what the handler asked.
-func (f *fakeAdminTokens) ListMatching(ctx context.Context, tenantID string, owner *uuid.UUID, q, status string, now time.Time, limit, offset int) ([]*core.AdminToken, int, error) {
-	f.mu.Lock()
-	f.match = adminTokenMatch{q: q, status: status, now: now, calls: f.match.calls + 1}
-	f.mu.Unlock()
-	return f.List(ctx, tenantID, owner, limit, offset)
 }
 
 func (f *fakeAdminTokens) Revoke(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {

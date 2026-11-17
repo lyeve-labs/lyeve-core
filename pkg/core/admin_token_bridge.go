@@ -77,16 +77,13 @@ type AdminTokenStore interface {
 	// Get returns one of the tenant's tokens by id, or ErrNotFound.
 	Get(ctx context.Context, tenantID string, id uuid.UUID) (*AdminToken, error)
 
-	// List returns a page of the tenant's tokens and the total, optionally
-	// narrowed to one owner. ReplacedBy is filled on the page.
-	List(ctx context.Context, tenantID string, owner *uuid.UUID, limit, offset int) ([]*AdminToken, int, error)
-
-	// ListMatching is List narrowed by a search and a status. q is a contains
-	// match on the token's name, its display prefix, its owner's address and
-	// the text of its grants, without regard to case, and an empty q narrows
-	// nothing. status is "", active, expired, revoked or replaced, judged at
-	// now, and any other value is ErrValidation. The total counts the tokens
-	// both keep.
+	// ListMatching returns a page of the tenant's tokens and the total,
+	// optionally narrowed to one owner, with ReplacedBy filled on the page.
+	// q is a contains match on the token's name, its display prefix, its
+	// owner's address and the text of its grants, without regard to case, and
+	// an empty q narrows nothing. status is "", active, expired, revoked or
+	// replaced, judged at now, and any other value is ErrValidation. The total
+	// counts the tokens both keep.
 	ListMatching(ctx context.Context, tenantID string, owner *uuid.UUID, q, status string, now time.Time, limit, offset int) ([]*AdminToken, int, error)
 
 	// Revoke stamps the token revoked at the given time, or ErrNotFound.
