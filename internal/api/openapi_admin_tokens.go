@@ -101,8 +101,11 @@ func documentAdminTokens(paths map[string]openAPIPath) {
 	set("/api/admin/admin-tokens", "get", &openAPIOperation{
 		Tags: tag, Summary: "List admin tokens", Security: both,
 		Description: "The tenant's admin tokens, newest first: every one for a super admin, the caller's own for an admin. Each carries its owner's email, grants, address list, expiry, last use, revocation and display prefix, never the token or its hash.",
-		Parameters:  []openAPIParameter{limit, offset},
-		Responses:   resp("200", "400", "401", "403"),
+		Parameters: []openAPIParameter{limit, offset,
+			{Name: "q", In: "query", Description: "Lists only the tokens whose name, display prefix, owner's email or grants contain this text, without regard to case. Trimmed, and an empty value narrows nothing.", Schema: map[string]any{"type": "string", "maxLength": maxListSearch}},
+			{Name: "status", In: "query", Description: "Lists only the tokens in this state now: revoked, expired and not revoked, replaced by a rotation and neither, or active, which is none of them.", Schema: map[string]any{"type": "string", "enum": []string{"active", "expired", "revoked", "replaced"}}},
+		},
+		Responses: resp("200", "400", "401", "403"),
 	})
 	set("/api/admin/admin-tokens", "post", &openAPIOperation{
 		Tags: tag, Summary: "Issue an admin token", Security: both,

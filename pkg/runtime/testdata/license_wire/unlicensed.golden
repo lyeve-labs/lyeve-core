@@ -2003,9 +2003,34 @@ body (json, newline):
     "/api/admin/users": {
       "get": {
         "operationId": "listUsers",
+        "parameters": [
+          {
+            "description": "Lists only the accounts whose email address contains this text, without regard to case. Trimmed, and an empty value narrows nothing.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Lists only the accounts that hold this role, named exactly. Any role name is accepted, and one nobody holds lists nobody. Trimmed, and an empty value narrows nothing.",
+            "in": "query",
+            "name": "role",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
+          },
+          "400": {
+            "description": "Bad request"
           },
           "401": {
             "description": "Unauthorized"

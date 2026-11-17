@@ -357,19 +357,54 @@ func scanUserList(engine string, rows *sql.Rows) ([]*domain.User, error) {
 // id breaks the tie. limit caps the result set. Offset controls the starting
 // position. Both are mandatory: callers must supply explicit bounds.
 func (s *UserStore) List(ctx context.Context, limit, offset int) ([]*domain.User, error) {
+	return s.ListMatching(ctx, "", "", limit, offset)
+}
+
+// ListMatching is List narrowed to the accounts whose address contains q and
+// that hold role. An empty q or role narrows nothing.
+func (s *UserStore) ListMatching(ctx context.Context, q, role string, limit, offset int) ([]*domain.User, error) {
+	engine := s.pool.Engine()
+	args := []any{limit, offset}
+	var conds []string
+	if q != "" {
+		// Every stored address went through core.NormalizeEmail, and the
+		// column compares as bytes on some dialects, so the needle goes
+		// through it too or a capital or a decomposed accent finds nothing.
+		args = append(args, core.ILikeValue(engine, core.NormalizeEmail(q)))
+		ph := fmt.Sprintf("$%d", len(args))
+		conds = append(conds, core.ILike(engine, "email", ph)+core.ILikeEscapeClause(engine))
+	}
+	if role != "" {
+		args = append(args, role)
+		ph := fmt.Sprintf("$%d", len(args))
+		switch engine {
+		case "mysql":
+			conds = append(conds, "JSON_CONTAINS(roles, JSON_QUOTE("+ph+"))")
+		case "mssql":
+			// roles takes the database's default collation, which ignores
+			// case, and every role check in the engine compares exactly.
+			conds = append(conds, "EXISTS (SELECT 1 FROM OPENJSON(roles) WHERE value COLLATE Latin1_General_100_BIN2 = "+ph+")")
+		default:
+			conds = append(conds, ph+" = ANY(roles)")
+		}
+	}
+	where := ""
+	if len(conds) > 0 {
+		where = " WHERE " + strings.Join(conds, " AND ")
+	}
 	var query string
-	if s.pool.Engine() == "mssql" {
+	if engine == "mssql" {
 		query = `SELECT ` + userColumns + `
-		FROM sys_users ORDER BY created_at ASC, id ASC OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY`
+		FROM sys_users` + where + ` ORDER BY created_at ASC, id ASC OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY`
 	} else {
 		query = `SELECT ` + userColumns + `
-		FROM sys_users ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2`
+		FROM sys_users` + where + ` ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2`
 	}
-	rows, err := s.pool.Query(ctx, query, limit, offset)
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
-	return scanUserList(s.pool.Engine(), rows)
+	return scanUserList(engine, rows)
 }
 
 // UpdateRoles changes the roles of a user.

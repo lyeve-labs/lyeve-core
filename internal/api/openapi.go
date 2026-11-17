@@ -333,7 +333,11 @@ func buildOpenAPIDoc(schemaNames []string, plugins []plugin.PluginRoutes, opts o
 	paths["/api/admin/users"] = openAPIPath{
 		"get": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "List all users", Security: bothAuth,
-			Responses: map[string]any{"200": ok200, "401": err401, "403": err403},
+			Parameters: []openAPIParameter{
+				{Name: "q", In: "query", Description: "Lists only the accounts whose email address contains this text, without regard to case. Trimmed, and an empty value narrows nothing.", Schema: map[string]any{"type": "string", "maxLength": maxListSearch}},
+				{Name: "role", In: "query", Description: "Lists only the accounts that hold this role, named exactly. Any role name is accepted, and one nobody holds lists nobody. Trimmed, and an empty value narrows nothing.", Schema: map[string]any{"type": "string", "maxLength": maxListSearch}},
+			},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": err403},
 		}, super...),
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{"Admin / Users"}, Summary: "Create a user", Security: bothAuth,

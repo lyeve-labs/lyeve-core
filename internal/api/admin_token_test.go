@@ -45,6 +45,21 @@ type fakeAdminTokens struct {
 	rows      map[uuid.UUID]*core.AdminToken
 	reqs      []core.AdminTokenRequest
 	createErr error // returned by Create when set, as a store that cannot write does
+	match     adminTokenMatch
+}
+
+// adminTokenMatch is what the last ListMatching call was asked for, and how
+// many calls there were.
+type adminTokenMatch struct {
+	q, status string
+	now       time.Time
+	calls     int
+}
+
+func (f *fakeAdminTokens) lastMatch() adminTokenMatch {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.match
 }
 
 func newFakeAdminTokens(pool db.DB) *fakeAdminTokens {
@@ -146,6 +161,15 @@ func (f *fakeAdminTokens) List(ctx context.Context, tenantID string, owner *uuid
 		}
 	}
 	return page, total, nil
+}
+
+// ListMatching records the search and the status and lists as List does.
+// The store applies them, so the tests here read only what the handler asked.
+func (f *fakeAdminTokens) ListMatching(ctx context.Context, tenantID string, owner *uuid.UUID, q, status string, now time.Time, limit, offset int) ([]*core.AdminToken, int, error) {
+	f.mu.Lock()
+	f.match = adminTokenMatch{q: q, status: status, now: now, calls: f.match.calls + 1}
+	f.mu.Unlock()
+	return f.List(ctx, tenantID, owner, limit, offset)
 }
 
 func (f *fakeAdminTokens) Revoke(_ context.Context, tenantID string, id uuid.UUID, at time.Time) error {

@@ -59,8 +59,9 @@ func NewUsersHandler(users *db.UserStore, passwordHashAlgo ...string) *UsersHand
 	}
 }
 
-// List returns a paginated list of users.
-// GET /api/admin/users
+// List returns a paginated list of users whose address contains q and who
+// hold role.
+// GET /api/admin/users?limit&offset&q&role
 // Auth: super_admin.
 func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 	limit, err := reqparse.QueryInt(r, "limit", 25)
@@ -74,8 +75,21 @@ func (h *UsersHandler) List(w http.ResponseWriter, r *http.Request) {
 		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeInvalidBody, nil)
 		return
 	}
+	q, ok := listTextParam(r, "q")
+	if !ok {
+		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeValidationMaxLength, map[string]any{"field": "q", "max": maxListSearch})
+		return
+	}
+	// Roles are an open set: a permission rule may name any role and an
+	// identity provider may map any, so a role nobody holds lists nobody
+	// rather than answering 400.
+	role, ok := listTextParam(r, "role")
+	if !ok {
+		respondErrCode(w, r, http.StatusBadRequest, i18n.CodeValidationMaxLength, map[string]any{"field": "role", "max": maxListSearch})
+		return
+	}
 
-	users, err := h.users.List(r.Context(), limit, offset)
+	users, err := h.users.ListMatching(r.Context(), q, role, limit, offset)
 	if err != nil {
 		respondStoreErrCode(w, r, http.StatusServiceUnavailable, err, i18n.CodeDatabaseError)
 		return
