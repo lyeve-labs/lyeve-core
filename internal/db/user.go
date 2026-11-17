@@ -351,17 +351,19 @@ func scanUserList(engine string, rows *sql.Rows) ([]*domain.User, error) {
 	return users, rows.Err()
 }
 
-// List returns a page of users ordered by created_at ascending.
-// limit caps the result set. Offset controls the starting position.
-// Both are mandatory: callers must supply explicit bounds.
+// List returns a page of users ordered by created_at ascending, then by id.
+// Postgres stamps every row of one transaction with the same created_at, and
+// offset pages over tied rows can repeat some and skip others, so the unique
+// id breaks the tie. limit caps the result set. Offset controls the starting
+// position. Both are mandatory: callers must supply explicit bounds.
 func (s *UserStore) List(ctx context.Context, limit, offset int) ([]*domain.User, error) {
 	var query string
 	if s.pool.Engine() == "mssql" {
 		query = `SELECT ` + userColumns + `
-		FROM sys_users ORDER BY created_at ASC OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY`
+		FROM sys_users ORDER BY created_at ASC, id ASC OFFSET $2 ROWS FETCH NEXT $1 ROWS ONLY`
 	} else {
 		query = `SELECT ` + userColumns + `
-		FROM sys_users ORDER BY created_at ASC LIMIT $1 OFFSET $2`
+		FROM sys_users ORDER BY created_at ASC, id ASC LIMIT $1 OFFSET $2`
 	}
 	rows, err := s.pool.Query(ctx, query, limit, offset)
 	if err != nil {
