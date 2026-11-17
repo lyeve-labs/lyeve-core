@@ -27,7 +27,7 @@ type AdminToken struct {
 	LastUsedAt    *time.Time `json:"last_used_at"`
 	RevokedAt     *time.Time `json:"revoked_at"`
 	RotatedFrom   *uuid.UUID `json:"rotated_from"`
-	// ReplacedBy is the newest token rotated from this one, filled by List.
+	// ReplacedBy is the newest token rotated from this one, filled by ListMatching.
 	ReplacedBy *uuid.UUID `json:"replaced_by"`
 }
 
