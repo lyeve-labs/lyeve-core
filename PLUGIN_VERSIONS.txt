@@ -15,7 +15,7 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-11-17T11:43:47Z from origin default branches.
+# Generated 2026-11-18T04:11:36Z from origin default branches.
 
 lyeve-libs = 7c9140e7c4201a25052865cf81f6db495249159c
 lyeve-plugin-ab-testing = 2dac4a4ad6ff4e865416dac3275c5b12b2475121
@@ -55,7 +55,7 @@ lyeve-plugin-password-reset = 67bccf239622eb57636aa859086c4f6f464d867f
 lyeve-plugin-permissions = 0d0f0b755155657d6a3763f059ac35878968149c
 lyeve-plugin-pii-mask = 6c52504e61369af72420e27d11737db854a717d0
 lyeve-plugin-profiler = 0aefa01100646cbfe6ff4ea5afbd8ebef5ccbdb7
-lyeve-plugin-query-monitor = e4f4cecbc345b41aef0178a22a8263dce6316199
+lyeve-plugin-query-monitor = e24bb78e1703f246031230ffeb02a7ccaa43c9b7
 lyeve-plugin-rate-limit = 8a253af4bca98600ad46a360df7f859166ad5177
 lyeve-plugin-realtime = b9fd649d05e030e28bcc83deeee99d75ec99e467
 lyeve-plugin-recommendations = 2de0f15a368b73a7e630ab59f80a4bd43b757ee4
