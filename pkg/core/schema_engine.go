@@ -64,7 +64,7 @@ type SchemaCreator interface {
 // already holds. It wraps ErrConflict, so it maps to 409, and it is a
 // sentinel of its own because another tenant storing the table another way
 // is a conflict too, and a caller acts on the two differently.
-var ErrSchemaExists = fmt.Errorf("the tenant already holds a schema of that name: %w", ErrConflict)
+var ErrSchemaExists = fmt.Errorf("the tenant already holds a content type of that name: %w", ErrConflict)
 
 // SchemaValidationError is a single schema validation failure returned by
 // SchemaEngine.ValidateContent.
