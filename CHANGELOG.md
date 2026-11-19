@@ -4,6 +4,12 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.62.1] - 2026-11-19
+
+### Fixed
+
+- An engine rolled back to this release on a database that a later release of the builder plugin migrated now starts, and deleting a tenant still empties the tables that release added. The release build takes the builder plugin at v0.2.1.
+
 ## [0.62.0] - 2026-11-11
 
 ### Added
