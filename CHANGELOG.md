@@ -43,6 +43,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Through the plugin releases this engine pins: the webhook delivery log, the delivery search and the dead letter reads apply the reader's access rules, where they returned every stored payload whole to an admin who could read webhooks. A refused content type's deliveries answer with no body, and a masked field is dropped. A tenant backup import whose file writes a document field's column in the importing tenant's definitions is refused whole with 422 before anything is written.
 - Through the plugin releases this engine pins: the data export's start, download and schedule routes apply the access rules the flow nodes already applied. An export reads only the content types the caller may read and leaves out the fields their mask hides, a download asks the downloader's rules when it runs, and a job read leaves out the signed link for a caller who may not read the file.
 
+## [0.62.1] - 2026-11-19
+
+### Fixed
+
+- An engine rolled back to this release on a database that a later release of the builder plugin migrated now starts, and deleting a tenant still empties the tables that release added. The release build takes the builder plugin at v0.2.1.
+
 ## [0.62.0] - 2026-11-11
 
 ### Added
