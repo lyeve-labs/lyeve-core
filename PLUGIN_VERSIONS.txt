@@ -15,9 +15,9 @@
 # commit fails the build. Run `make lock-plugin-versions` to update, and
 # review the diff before committing.
 #
-# Generated 2026-11-20T15:21:25Z from origin default branches.
+# Generated 2026-11-20T15:59:42Z from origin default branches.
 
-lyeve-libs = 7c9140e7c4201a25052865cf81f6db495249159c
+lyeve-libs = 17554a8542e00a9cef6c8bac2a850ecd98b7afb0
 lyeve-plugin-ab-testing = 2dac4a4ad6ff4e865416dac3275c5b12b2475121
 lyeve-plugin-ai = c14b16f03e2406c2556d738aa2570f4b30127bc8
 lyeve-plugin-analytics = 9e0aeba211bebd3b346cdebff13ed521b0a31979
