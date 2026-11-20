@@ -44,6 +44,9 @@ func actorIDFromCtx(ctx context.Context) *uuid.UUID {
 // PUT /api/v1/content/{schema}/{id}/publish
 func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
+	if !h.checkTransport(w, r, schemaName, "update") {
+		return
+	}
 	if !h.checkPermission(w, r, schemaName, "update") {
 		return
 	}
@@ -59,6 +62,9 @@ func (h *ContentHandler) Publish(w http.ResponseWriter, r *http.Request) {
 // PUT /api/v1/content/{schema}/{id}/unpublish
 func (h *ContentHandler) Unpublish(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
+	if !h.checkTransport(w, r, schemaName, "update") {
+		return
+	}
 	if !h.checkPermission(w, r, schemaName, "update") {
 		return
 	}
@@ -159,6 +165,9 @@ func (h *ContentHandler) ListRevisions(w http.ResponseWriter, r *http.Request) {
 // PUT /api/v1/content/{schema}/{id}/revisions/{rev_id}/restore
 func (h *ContentHandler) RestoreRevision(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
+	if !h.checkTransport(w, r, schemaName, "update") {
+		return
+	}
 	if !h.checkPermission(w, r, schemaName, "update") {
 		return
 	}
