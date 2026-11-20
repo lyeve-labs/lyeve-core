@@ -98,6 +98,9 @@ func (h *ContentHandler) ListRelations(w http.ResponseWriter, r *http.Request) {
 // Body: {"ids": ["uuid1", "uuid2"]}
 func (h *ContentHandler) SetRelations(w http.ResponseWriter, r *http.Request) {
 	schemaName := chi.URLParam(r, "schema")
+	if !h.checkTransport(w, r, schemaName, "update") {
+		return
+	}
 	if !h.checkPermission(w, r, schemaName, "update") {
 		return
 	}
