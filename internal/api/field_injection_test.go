@@ -1775,7 +1775,10 @@ func TestParsePopulateFromQuery_Empty(t *testing.T) {
 	t.Parallel()
 
 	r := httptest.NewRequest(http.MethodGet, "/content/posts", nil)
-	cfg := parsePopulateFromQuery(r)
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		t.Fatal("the query was refused")
+	}
 	if !cfg.IsEmpty() {
 		t.Error("populate config should be empty with no query params")
 	}
@@ -1785,7 +1788,10 @@ func TestParsePopulateFromQuery_SingleField(t *testing.T) {
 	t.Parallel()
 
 	r := httptest.NewRequest(http.MethodGet, "/content/posts?populate=author", nil)
-	cfg := parsePopulateFromQuery(r)
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		t.Fatal("the query was refused")
+	}
 	if cfg.IsEmpty() {
 		t.Error("populate config should not be empty")
 	}
@@ -1795,7 +1801,10 @@ func TestParsePopulateFromQuery_MultipleFields(t *testing.T) {
 	t.Parallel()
 
 	r := httptest.NewRequest(http.MethodGet, "/content/posts?populate=author,tags,category", nil)
-	cfg := parsePopulateFromQuery(r)
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		t.Fatal("the query was refused")
+	}
 	if cfg.IsEmpty() {
 		t.Error("populate config should not be empty with multiple fields")
 	}
@@ -1805,7 +1814,10 @@ func TestParsePopulateFromQuery_WithDepth(t *testing.T) {
 	t.Parallel()
 
 	r := httptest.NewRequest(http.MethodGet, "/content/posts?populate=author.tags&depth=3", nil)
-	cfg := parsePopulateFromQuery(r)
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		t.Fatal("the query was refused")
+	}
 	if cfg.IsEmpty() {
 		t.Error("populate config should support nested relations and depth")
 	}

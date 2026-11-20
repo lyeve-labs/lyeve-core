@@ -124,7 +124,7 @@ const (
 	// configuration.
 	CapConfigSectionsRead // read every registered configuration section (ConfigSections)
 
-	// Each capability from here to CapUserProvisioner appoints a plugin to
+	// Each capability from here to CapMediaLibrary appoints a plugin to
 	// supply a host role, a service the engine and every other plugin use,
 	// through the role's registrar on ScopedHost. Without it the registrar
 	// refuses a registration and a clear alike, so no other plugin can
@@ -151,6 +151,10 @@ const (
 	// CapUserProvisioner grants SetUserProvisioner. The provisioner creates
 	// accounts at single sign-on.
 	CapUserProvisioner // set the single sign-on user provisioner
+	// CapMediaLibrary grants RegisterMediaLibrary. A plugin that lets a
+	// person pick or add files where they edit lists, uploads and publishes
+	// them through the library.
+	CapMediaLibrary // register the media library
 
 	// CapSessionSign grants SignSessionToken: a session for any active
 	// account, which is a sign-in as that account. Only the plugins whose job
@@ -202,7 +206,7 @@ const (
 	// flow roles hang on CapSchema and CapFlowRegistry, which also grant
 	// reach, so a declaration narrows those as it always has.
 	CapRoles Capability = CapPermissionChecker | CapEmailSender | CapContentLocalizer |
-		CapContentEntryWriter | CapRecordRevisionStore | CapStorage | CapUserProvisioner
+		CapContentEntryWriter | CapRecordRevisionStore | CapStorage | CapUserProvisioner | CapMediaLibrary
 )
 
 // Has reports whether this capability set includes c.

@@ -3,6 +3,7 @@ package enginehost
 import (
 	"context"
 	"errors"
+	stdlog "log"
 	"log/slog"
 	"sync"
 	"testing"
@@ -99,9 +100,13 @@ func TestEngineHost_RevokePasskeysWithNoSupplierRemovesNothingAndWarns(t *testin
 	require.NoError(t, err)
 
 	log := &warningLog{}
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), stdlog.Writer(), stdlog.Flags()
 	slog.SetDefault(slog.New(log))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		stdlog.SetOutput(logOut)
+		stdlog.SetFlags(logFlags)
+	})
 
 	unwired := &engineHost{pool: pool}
 	wired := &engineHost{pool: pool}

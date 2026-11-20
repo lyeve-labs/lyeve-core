@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	goruntime "runtime"
@@ -129,8 +130,9 @@ func Run(ctx context.Context) error {
 //  8. Mount admin (:3001) and API (:3002) HTTP servers
 //  9. Block on ctx.Done(), then graceful-stop everything
 //
-// Returns the first fatal boot error. HTTP server errors after boot are
-// logged but never returned. The canonical shutdown signal is ctx.Done().
+// Returns the first fatal boot error, a listen address that cannot be bound
+// among them. A server that stops with an error after boot shuts the engine
+// down as ctx.Done() does, and Run returns that error.
 //
 // Callers: a main package that blank-imports the plugins it links, so the
 // activator sees a populated registry, and passes the licensing
@@ -752,7 +754,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// that silently has no rule engine is the shape this is meant to prevent.
 	if pcp, ok := hostBase.(core.PermissionCheckerProvider); ok {
 		if _, roleOnly := pcp.PermissionChecker().(core.RoleOnlyPermissionChecker); roleOnly {
-			logger.Info("no plugin supplies a permission checker, so authorization is roles only: a super admin is allowed everything, an admin is allowed the resources of kinds a plugin opens to admins, and every other role is refused")
+			logger.Info("no plugin supplies a permission checker, so authorization is roles only: a super admin is allowed everything, an admin is allowed every content type and the resources of kinds a plugin opens to admins, and every other role is refused")
 		}
 	}
 
@@ -1249,6 +1251,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	// built-in one for the life of the process.
 	contentSchemaSource := core.LazySchemaSource(hostBase.(core.SchemaSourceProvider).SchemaSource)
 	contentRules := core.LazyContentRules(hostBase.(core.ContentRulesProvider).ContentRules)
+	contentValueShaper := core.LazyContentValueShaper(hostBase.(core.ContentValueShaperProvider).ContentValueShaper)
 
 	// Router option builder
 	// Closure so both the initial construction and the hot-reload callback
@@ -1337,6 +1340,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 			api.WithPermissionChecker(hostBase.(core.PermissionCheckerProvider)),
 			api.WithSchemaSource(contentSchemaSource),
 			api.WithContentRules(contentRules),
+			api.WithContentValueShaper(contentValueShaper),
 			// The content reads ask the host per request for the registered
 			// core.ContentLocalizer, so a locale is honored while a plugin
 			// provides one and ignored otherwise.
@@ -1404,8 +1408,8 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 
 	// Readiness gate
 	// Block all non-health-check requests with 503 until the startup probe
-	// passes at least once. This closes the window between ListenAndServe
-	// (kernel accepts connections) and readiness (plugins signal ready).
+	// passes at least once. This closes the window between the listen (the
+	// kernel accepts connections) and readiness (plugins signal ready).
 	const readinessGateTimeout = 5 * time.Second
 	readinessGate := api.ReadinessGateWithTimeout(healthReg, readinessGateTimeout)
 	adminHandler := readinessGate(adminSwapper)
@@ -1520,17 +1524,6 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
-	// A panic recovered here would leave the process running with no
-	// listener, which reads as healthy to anything but a request. Ending the
-	// process lets its supervisor restart it.
-	// lyeve:bare-goroutine the server must take the process down with it
-	go func() {
-		logger.Info("admin server listening", "addr", cfg.AdminListenAddr, "tls", listenerTLS != nil)
-		if err := serve(adminSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("admin server error", "err", err)
-		}
-	}()
-
 	apiSrv := &http.Server{
 		Addr:         cfg.APIListenAddr,
 		Handler:      apiHandler,
@@ -1546,11 +1539,36 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 		MaxHeaderBytes:    1 << 20,
 		TLSConfig:         listenerTLS,
 	}
+
+	// Both addresses are bound before either server starts, so a taken port
+	// fails the boot before the readiness gate opens.
+	adminLn, err := net.Listen("tcp", cfg.AdminListenAddr)
+	if err != nil {
+		return fmt.Errorf("admin server: %w", err)
+	}
+	apiLn, err := net.Listen("tcp", cfg.APIListenAddr)
+	if err != nil {
+		_ = adminLn.Close()
+		return fmt.Errorf("api server: %w", err)
+	}
+
+	// A server that stops with an error, or a panic recovered here, would
+	// leave the process running with no listener, which reads as healthy to
+	// anything but a request. Ending the process lets its supervisor restart
+	// it, so the error ends Run below.
+	serveErrs := make(chan error, 2)
+	// lyeve:bare-goroutine the server must take the process down with it
+	go func() {
+		logger.Info("admin server listening", "addr", cfg.AdminListenAddr, "tls", listenerTLS != nil)
+		if err := serve(adminSrv, adminLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrs <- fmt.Errorf("admin server: %w", err)
+		}
+	}()
 	// lyeve:bare-goroutine the server must take the process down with it, as above
 	go func() {
 		logger.Info("api server listening", "addr", cfg.APIListenAddr, "instance_id", cfg.InstanceID, "tls", listenerTLS != nil)
-		if err := serve(apiSrv); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("api server error", "err", err)
+		if err := serve(apiSrv, apiLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErrs <- fmt.Errorf("api server: %w", err)
 		}
 	}()
 
@@ -1579,8 +1597,14 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	//
 	// Each phase consumes from the global budget so the total shutdown
 	// never exceeds GracefulShutdownTimeout regardless of how long
-	// individual phases take.
-	<-ctx.Done()
+	// individual phases take. A server that stops with an error runs the
+	// same sequence, and Run returns its error.
+	var serveErr error
+	select {
+	case <-ctx.Done():
+	case serveErr = <-serveErrs:
+		logger.Error("server stopped", "err", serveErr)
+	}
 	logger.Info("shutting down", "timeout", cfg.GracefulShutdownTimeout)
 
 	// 0. Flip readiness to 503 so load balancers deregister the pod.
@@ -1669,7 +1693,7 @@ func RunWithOptions(ctx context.Context, opts Options) error {
 	}
 
 	logger.Info("shutdown complete", "total_elapsed", time.Since(shutStart))
-	return nil
+	return serveErr
 }
 
 // attachSessionPools gives the host its two side pools. RawDB serves a small

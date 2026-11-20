@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"log"
 	"log/slog"
 	"testing"
 
@@ -41,9 +42,13 @@ func TestSysUserEraser_LinesCarryNoTenant(t *testing.T) {
 		ring := logstream.NewBuffer(256)
 		base := slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})
 		enrich := logging.NewEnrichHandler(logstream.NewInterceptor(base, ring), levels)
-		prev := slog.Default()
+		prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 		slog.SetDefault(enrich.Logger())
-		t.Cleanup(func() { slog.SetDefault(prev) })
+		t.Cleanup(func() {
+			slog.SetDefault(prev)
+			log.SetOutput(logOut)
+			log.SetFlags(logFlags)
+		})
 
 		n, err := newSysUserEraser(failingRevokerHost{Host: host}).EraseSubject(ctx, address)
 		require.NoError(t, err)

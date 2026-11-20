@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lyeve-labs/lyeve-core/internal/db"
 	"github.com/lyeve-labs/lyeve-core/internal/hooks"
 	"github.com/lyeve-labs/lyeve-core/pkg/core"
 	"github.com/lyeve-labs/lyeve-core/pkg/plugin"
@@ -111,10 +112,11 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	field := openAPIParameter{Name: "field", In: "path", Required: true, Description: "A relation field of the content type", Schema: map[string]any{"type": "string"}}
 	body := &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{"application/json": {Schema: map[string]any{"type": "object"}}}}
 	populate := openAPIParameter{Name: "populate", In: "query", Description: "Relation fields to resolve inline, comma-separated, or * for all.", Schema: map[string]any{"type": "string"}}
-	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0}}
+	depth := openAPIParameter{Name: "depth", In: "query", Description: "How many levels of relations to resolve.", Schema: map[string]any{"type": "integer", "minimum": 0, "maximum": db.MaxPopulateDepth}}
 	locale := openAPIParameter{Name: "locale", In: "query", Description: "The locale to serve the record's fields in, a language tag such as fr or pt-BR. Without it the Accept-Language header's preferred language is used. Honored only when a localizer is registered: each record's fields are then merged with its translation and the record carries resolved_locale, the locale the fields came from after the tenant's fallback chain. Otherwise the parameter is ignored and the response is unchanged.", Schema: map[string]any{"type": "string"}}
 	fields := openAPIParameter{Name: "fields", In: "query", Description: "The fields of each record's data to return, comma-separated. A relation field keeps both its stored column and its populated record. Every record carries id, created_at and updated_at whatever the list names. A name this caller cannot read, because the content type has no such field or a field mask hides it, answers 400.", Schema: map[string]any{"type": "string"}}
-	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value. A field the content type does not have answers 400, and one a field mask hides from this caller answers 403. The list serves published records unless filters[_status] names another status, which needs permission to read drafts.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+	filters := openAPIParameter{Name: "filters", In: "query", Style: "deepObject", Explode: true, Description: "Records whose field equals a value, written filters[field]=value or filters[field][eq]=value, or meets another operator, written filters[field][op]=value. The bounds gt, gte, lt and lte apply to created_at, updated_at and number, integer, decimal, date and datetime fields. ne and empty apply to every field with a column, contains and ncontains to uid, text, rich text, email and URL fields and to id, and in and nin to those text fields, the number fields, belongs_to relations and id, with the field repeated once for each of up to 50 values: filters[field][in]=a&filters[field][in]=b. A list binds at most 200 values across its conditions. A media or json field takes empty alone. contains matches without regard to case and reads %, _ and the backslash as themselves. empty=true matches a record with no value, an empty string in a text or media field, an empty list in a media field, and a JSON null, empty string, empty list or empty object in a json field, and empty=false the others. ne, ncontains and nin also match a record with no value, and a text value for them is never empty. On SQL Server, and on MySQL with a PAD SPACE collation, text comparisons ignore trailing spaces. Conditions combine with AND. A field the content type does not have, an operator its type does not take, or a value it cannot hold answers 400, and a field a field mask hides from this caller answers 403. A key may also be a path to a field of a related record through at most two relations, counting one it ends on, such as filters[author.name][contains]=Ann or filters[author.company.name]=Acme. A positive operator matches a record with a related record for which it holds, and ne, ncontains and nin a record with none. A path into a content type, or onto a field, this caller may not read answers 400 as an unknown field does, and a path cannot sort. A list takes at most 4 path conditions. The list serves published records unless filters[_status] names another status, which needs permission to read drafts, and _status takes no operator but eq.", Schema: map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+	sort := openAPIParameter{Name: "sort", In: "query", Description: "The field to order by, written sort=field, or sort=-field for the reverse order: created_at, updated_at, or a number, integer, decimal, date or datetime field. Records with no value come last either way, and records with equal values follow their id. Any other field answers 400, and one a field mask hides from this caller answers 403. Without it the list is newest first and the cursor list follows the record id.", Schema: map[string]any{"type": "string"}}
 	err400 := map[string]any{"description": "A query parameter that cannot be read"}
 	err503Locale := map[string]any{"description": "The translations could not be read"}
 	err422 := map[string]any{"description": "Validation failed"}
@@ -127,8 +129,8 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Maximum records per page. Clamped to 1-200 (default 25). Values above 200 are silently reduced to 200 and bypass the list cache. For traversing large result sets, use the cursor endpoint instead.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0}},
-				filters, populate, depth, locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter names a field this caller may not read"}, "404": err404, "503": err503Locale},
+				filters, sort, populate, depth, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "A filter or the sort names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 		"post": requiringRoles(&openAPIOperation{
 			Tags: []string{tag}, Summary: "Create a record", Security: bearer,
@@ -139,12 +141,12 @@ func documentContentFamily(paths map[string]openAPIPath, collections []string) {
 	}
 	paths[base+"/cursor"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned.", Security: bearer,
+			Tags: []string{tag}, Summary: "List records by cursor", Description: "Keyset pagination for large result sets: pass the cursor the previous page returned, with the same sort on every page. A sorted page whose cursor names a record this caller cannot read, or one that no longer exists, answers 400.", Security: bearer,
 			Parameters: []openAPIParameter{schema,
 				{Name: "cursor", In: "query", Description: "The cursor from the previous page; empty for the first page.", Schema: map[string]any{"type": "string"}},
 				{Name: "limit", In: "query", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
-				locale, fields},
-			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "404": err404, "503": err503Locale},
+				sort, locale, fields},
+			Responses: map[string]any{"200": ok200, "400": err400, "401": err401, "403": map[string]any{"description": "The sort names a field this caller may not read"}, "404": err404, "503": err503Locale},
 		},
 	}
 	paths[base+"/stream"] = openAPIPath{
@@ -865,10 +867,11 @@ func documentDelivery(paths map[string]openAPIPath) {
 	}
 	paths["/api/v1/delivery/{schema}"] = openAPIPath{
 		"get": {
-			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 exact-match filters, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, each value at most 255 characters and in the form of its field.",
+			Tags: []string{tag}, Summary: "List published records", Description: served + " A list takes up to 4 filters, each value at most 255 characters and in the form of its field: exact matches, written filters[field]=value, on id and on the text, email, URL, uid, relation, integer, decimal, boolean, date and datetime fields served here, the operators ne, contains, ncontains, in, nin and empty on those fields as the content list applies them, written filters[field][op]=value, and bounds on created_at, written filters[created_at][gt]=value, and gte, lt and lte the same way. An in or a nin repeats its field once for each of up to 50 different values and counts as one filter. An equality is written filters[field]=value only.",
 			Parameters: []openAPIParameter{schema,
 				{Name: "limit", In: "query", Description: "Records per page.", Schema: map[string]any{"type": "integer", "default": contentListDefaultLimit, "minimum": contentListMinLimit, "maximum": contentListMaxLimit}},
 				{Name: "offset", In: "query", Schema: map[string]any{"type": "integer", "default": 0, "minimum": 0, "maximum": deliveryMaxOffset}},
+				{Name: "sort", In: "query", Description: "The order of the list: sort=created_at for oldest first, or sort=-created_at for newest first, which is also the order without it. Records created at the same moment follow their id. Any other field answers 400.", Schema: map[string]any{"type": "string"}},
 				populate, depth, fields},
 			Responses: responses,
 		},

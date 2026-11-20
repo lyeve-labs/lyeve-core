@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -233,8 +234,13 @@ func TestGoroutineTracker_LeakDetection(t *testing.T) {
 	// Capture slog output at WARN level.
 	var buf bytes.Buffer
 	h := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(h))
-	defer slog.SetDefault(slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)))
+	defer func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	}()
 
 	// Use a very short leak threshold so we can trigger detection quickly.
 	tracker := NewGoroutineTracker(TrackerConfig{

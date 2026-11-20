@@ -2,6 +2,7 @@ package api
 
 import (
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -29,9 +30,13 @@ func TestAccessLog_LongRequestLinesAreNotRetained(t *testing.T) {
 
 	ring := logstream.NewBuffer(logstream.DefaultBufferSize)
 	enrich := logging.NewEnrichHandler(logstream.NewInterceptor(slog.NewJSONHandler(io.Discard, nil), ring), nil)
-	previous := slog.Default()
+	previous, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(enrich))
-	t.Cleanup(func() { slog.SetDefault(previous) })
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	previousTailer := observability.GlobalTailer()
 	observability.SetGlobalTailer(observability.NewLogTailer())
 	t.Cleanup(func() { observability.SetGlobalTailer(previousTailer) })

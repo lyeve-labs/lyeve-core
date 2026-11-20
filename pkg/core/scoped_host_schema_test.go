@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -80,5 +82,59 @@ func TestScopedHostSchema_GrantedPluginGetsTheHostsEngine(t *testing.T) {
 	engine := &stubSchemaEngine{}
 	if se := NewScopedHost(&schemaHost{schema: engine}, "owner", CapSchema).Schema(); se != engine {
 		t.Fatalf("Schema() with CapSchema = %T, want the host's engine", se)
+	}
+}
+
+// creatingSchemaEngine is an engine that also creates without altering, and
+// records each create that reaches it.
+type creatingSchemaEngine struct {
+	stubSchemaEngine
+	created []string
+}
+
+func (e *creatingSchemaEngine) Create(_ context.Context, name string, _ json.RawMessage) error {
+	e.created = append(e.created, name)
+	return nil
+}
+
+// A plugin holding CapSchema reaches the engine's create-only apply through
+// its scoped host, because it gets the engine itself. A plugin without
+// CapSchema gets the refusing engine, which offers no create, so creating a
+// type needs the capability Apply needs.
+func TestScopedHostSchema_CreateFollowsCapSchema(t *testing.T) {
+	engine := &creatingSchemaEngine{}
+	inner := &schemaHost{schema: engine}
+
+	c, ok := NewScopedHost(inner, "owner", CapSchema).Schema().(SchemaCreator)
+	if !ok {
+		t.Fatal("Schema() with CapSchema is not a SchemaCreator, want the engine's create passed through")
+	}
+	if err := c.Create(context.Background(), "products", json.RawMessage(`{"fields":[]}`)); err != nil {
+		t.Fatalf("Create = %v, want nil", err)
+	}
+	if len(engine.created) != 1 || engine.created[0] != "products" {
+		t.Fatalf("engine created %v, want [products]", engine.created)
+	}
+
+	if se, ok := NewScopedHost(inner, "reader", CapDBRead).Schema().(SchemaCreator); ok {
+		t.Fatalf("Schema() without CapSchema = %T, a SchemaCreator, want no create offered", se)
+	}
+}
+
+// A create of a name the tenant holds answers ErrSchemaExists. It is a
+// conflict, so a route that maps only the sentinels answers 409, and a
+// caller tells it apart from another tenant storing the table another way,
+// which is a conflict too.
+func TestErrSchemaExists_IsAConflictOfItsOwn(t *testing.T) {
+	if !errors.Is(ErrSchemaExists, ErrConflict) {
+		t.Fatal("ErrSchemaExists is not an ErrConflict")
+	}
+	exists := fmt.Errorf("create products: %w", ErrSchemaExists)
+	if !errors.Is(exists, ErrSchemaExists) || !errors.Is(exists, ErrConflict) {
+		t.Fatalf("wrapped %v lost a sentinel", exists)
+	}
+	shared := fmt.Errorf("field %q cannot share table _products: %w", "price", ErrConflict)
+	if errors.Is(shared, ErrSchemaExists) {
+		t.Fatalf("%v reads as ErrSchemaExists, want only ErrConflict", shared)
 	}
 }

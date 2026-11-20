@@ -100,7 +100,8 @@ func NewAPIRouter(pool db.DB, cfg *config.Config, hookRegistry *hooks.Registry, 
 	}
 	schemaPresent := func() bool { return !schemaEngineAbsent(contentSchemas) }
 
-	contentStore := newContentStore(pool, contentSchemas, cfg.CacheTTL, cfg.CacheMaxEntries)
+	contentStore := newContentStore(pool, contentSchemas, cfg.CacheTTL, cfg.CacheMaxEntries).
+		WithValueShaper(o.contentValueShaper)
 	// Hand the same instance to the plugin host: a plugin that writes content
 	// must invalidate the very caches these reads are served from.
 	if o.contentStoreSink != nil {

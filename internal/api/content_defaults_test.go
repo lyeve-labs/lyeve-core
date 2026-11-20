@@ -42,6 +42,22 @@ type schemaContentFixture struct {
 type fixtureRules struct {
 	eng    *schemaengine.Engine
 	refuse map[string]core.SchemaValidationError
+
+	// unshapeable names the fields the fixture's shaper refuses.
+	unshapeable map[string]core.SchemaValidationError
+}
+
+// ShapeValues is the fixture store's shaper. It stores what it is sent, so a
+// test here reads what the kernel does with a rich text value rather than what
+// cleaning one means, and refuses any field named in unshapeable.
+func (f *fixtureRules) ShapeValues(_ context.Context, _ *core.Schema, data map[string]any) (map[string]any, []core.SchemaValidationError, error) {
+	var out []core.SchemaValidationError
+	for field, failure := range f.unshapeable {
+		if _, ok := data[field]; ok {
+			out = append(out, failure)
+		}
+	}
+	return data, out, nil
 }
 
 // fixtureDefaults are the defaults contentDefaultSchemas declare.
@@ -92,6 +108,64 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "amount", "field_type": "decimal", "precision": 10, "scale": 2},
 			{"name": "rate", "field_type": "number"},
 			{"name": "meta", "field_type": "json"}
+		]
+	}`},
+	// A field of each type a list sorts and bounds, and one a mask can hide.
+	"fixtures": {`{
+		"name": "fixtures",
+		"display_name": "Fixtures",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "score", "field_type": "number"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "seed", "field_type": "integer"}
+		]
+	}`},
+	// A field of each type a list filter puts an operator on, a field a mask
+	// can hide, drafts and deletion.
+	"operators": {`{
+		"name": "op_owners",
+		"display_name": "Owners",
+		"fields": [{"name": "name", "field_type": "text"}]
+	}`, `{
+		"name": "op_items",
+		"display_name": "Items",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"with_draft_publish": true,
+		"with_soft_delete": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "notes", "field_type": "rich_text"},
+			{"name": "mail", "field_type": "email"},
+			{"name": "link", "field_type": "url"},
+			{"name": "code", "field_type": "uid"},
+			{"name": "score", "field_type": "number"},
+			{"name": "rank", "field_type": "integer"},
+			{"name": "price", "field_type": "decimal", "precision": 10, "scale": 2},
+			{"name": "live", "field_type": "boolean"},
+			{"name": "day", "field_type": "date"},
+			{"name": "at", "field_type": "datetime"},
+			{"name": "owner", "field_type": "relation", "relation_to": "op_owners", "relation_type": "belongs_to"},
+			{"name": "photo", "field_type": "media"},
+			{"name": "meta", "field_type": "json"},
+			{"name": "secret", "field_type": "text"}
+		]
+	}`},
+	"rich_text": {`{
+		"name": "rt_posts",
+		"display_name": "Posts",
+		"with_created_at": true,
+		"with_updated_at": true,
+		"fields": [
+			{"name": "title", "field_type": "text"},
+			{"name": "body", "field_type": "rich_text"},
+			{"name": "doc", "field_type": "rich_text", "format": "document"}
 		]
 	}`},
 	"drafts": {`{
@@ -247,6 +321,70 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "shelves", "field_type": "relation", "relation_to": "shelves", "relation_type": "belongs_to"}
 		]
 	}`},
+	// The inverse relation kinds, one field for each row of the key rule:
+	// one belongs_to back, a named key among two, two with no name, a named
+	// key that is no belongs_to back, a column named for the source type, and
+	// nothing to read.
+	// A has_one into a type with draft and publish: a person's profile is
+	// the newest profile pointing back that the caller may read.
+	"profiles": {`{
+		"name": "pf_people",
+		"display_name": "People",
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "profile", "field_type": "relation", "relation_to": "pf_profiles", "relation_type": "has_one"}
+		]
+	}`, `{
+		"name": "pf_profiles",
+		"display_name": "Profiles",
+		"with_draft_publish": true,
+		"fields": [
+			{"name": "bio", "field_type": "text", "required": true},
+			{"name": "person", "field_type": "relation", "relation_to": "pf_people", "relation_type": "belongs_to"}
+		]
+	}`},
+	"inverse": {`{
+		"name": "iv_posts",
+		"display_name": "Posts",
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "comments", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_many"},
+			{"name": "lead", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_one"},
+			{"name": "replies", "field_type": "relation", "relation_to": "iv_replies", "relation_type": "has_many", "relation_fk_name": "reply_to_id"},
+			{"name": "ambiguous", "field_type": "relation", "relation_to": "iv_replies", "relation_type": "has_many"},
+			{"name": "wrongkey", "field_type": "relation", "relation_to": "iv_comments", "relation_type": "has_many", "relation_fk_name": "author_id"},
+			{"name": "legacy", "field_type": "relation", "relation_to": "iv_legacy", "relation_type": "has_many"},
+			{"name": "orphans", "field_type": "relation", "relation_to": "iv_orphans", "relation_type": "has_many"},
+			{"name": "lone", "field_type": "relation", "relation_to": "iv_orphans", "relation_type": "has_one"}
+		]
+	}`, `{
+		"name": "iv_comments",
+		"display_name": "Comments",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "post", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"},
+			{"name": "author_id", "field_type": "text"}
+		]
+	}`, `{
+		"name": "iv_replies",
+		"display_name": "Replies",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "post", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"},
+			{"name": "reply_to", "field_type": "relation", "relation_to": "iv_posts", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "iv_legacy",
+		"display_name": "Legacy",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "iv_posts_id", "field_type": "text"}
+		]
+	}`, `{
+		"name": "iv_orphans",
+		"display_name": "Orphans",
+		"fields": [{"name": "body", "field_type": "text", "required": true}]
+	}`},
 	// The public delivery routes: a marked type with a private field, typed
 	// fields, a relation into another marked type and into an unmarked one,
 	// and a many_to_many. dl_tags is marked and has no draft and publish.
@@ -281,6 +419,7 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "title", "field_type": "text", "required": true, "indexed": true},
 			{"name": "body", "field_type": "text"},
 			{"name": "secret", "field_type": "text", "private": true},
+			{"name": "tally", "field_type": "integer", "private": true},
 			{"name": "author", "field_type": "relation", "relation_to": "dl_people", "relation_type": "belongs_to"},
 			{"name": "vault", "field_type": "relation", "relation_to": "dl_vaults", "relation_type": "belongs_to"},
 			{"name": "tags", "field_type": "relation", "relation_to": "dl_tags", "relation_type": "many_to_many"},
@@ -290,6 +429,57 @@ var contentDefaultSchemas = map[string][]string{
 			{"name": "day", "field_type": "date"},
 			{"name": "at", "field_type": "datetime"},
 			{"name": "extra", "field_type": "json"}
+		]
+	}`},
+	// The types a list filter path crosses: a belongs_to chain posts,
+	// authors, companies, countries, a many_to_many to tags, a has_many and
+	// a has_one to comments, a has_many with no key back, and a
+	// many_to_many from posts to posts. Authors have draft and publish and
+	// a trash.
+	"related": {`{
+		"name": "rf_countries",
+		"display_name": "Countries",
+		"fields": [{"name": "name", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "rf_companies",
+		"display_name": "Companies",
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "country", "field_type": "relation", "relation_to": "rf_countries", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "rf_authors",
+		"display_name": "Authors",
+		"with_draft_publish": true,
+		"with_soft_delete": true,
+		"fields": [
+			{"name": "name", "field_type": "text", "required": true},
+			{"name": "secret", "field_type": "text"},
+			{"name": "company", "field_type": "relation", "relation_to": "rf_companies", "relation_type": "belongs_to"}
+		]
+	}`, `{
+		"name": "rf_tags",
+		"display_name": "Tags",
+		"fields": [{"name": "slug", "field_type": "text", "required": true}]
+	}`, `{
+		"name": "rf_posts",
+		"display_name": "Posts",
+		"fields": [
+			{"name": "title", "field_type": "text", "required": true},
+			{"name": "author", "field_type": "relation", "relation_to": "rf_authors", "relation_type": "belongs_to"},
+			{"name": "tags", "field_type": "relation", "relation_to": "rf_tags", "relation_type": "many_to_many"},
+			{"name": "comments", "field_type": "relation", "relation_to": "rf_comments", "relation_type": "has_many"},
+			{"name": "lead", "field_type": "relation", "relation_to": "rf_comments", "relation_type": "has_one"},
+			{"name": "sources", "field_type": "relation", "relation_to": "rf_companies", "relation_type": "has_many"},
+			{"name": "related", "field_type": "relation", "relation_to": "rf_posts", "relation_type": "many_to_many"}
+		]
+	}`, `{
+		"name": "rf_comments",
+		"display_name": "Comments",
+		"fields": [
+			{"name": "body", "field_type": "text", "required": true},
+			{"name": "rating", "field_type": "integer"},
+			{"name": "post", "field_type": "relation", "relation_to": "rf_posts", "relation_type": "belongs_to"}
 		]
 	}`},
 	// Three schemas with draft and publish, linked by a belongs_to and a
@@ -363,6 +553,10 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 					if id == "shelves" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("shelves", "pages"))
 					}
+					if id == "related" {
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("rf_posts", "rf_tags"))
+						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("rf_posts", "rf_posts"))
+					}
 					if id == "delivery" {
 						_, _ = pool.Exec(context.Background(), "DROP TABLE "+core.PivotTableName("dl_posts", "dl_tags"))
 					}
@@ -378,7 +572,7 @@ func forEachDialectWithSchemas(t *testing.T, setIDs []string, fn func(t *testing
 			rules := &fixtureRules{eng: eng}
 			fn(t, schemaContentFixture{
 				ctx:     ctx,
-				content: &ContentHandler{store: newTestContentStore(pool, src), schemas: src, rules: rules, hooks: hooks.NewRegistry()},
+				content: &ContentHandler{store: newTestContentStore(pool, src).WithValueShaper(rules), schemas: src, rules: rules, hooks: hooks.NewRegistry()},
 				eng:     eng,
 				rules:   rules,
 				pool:    pool,

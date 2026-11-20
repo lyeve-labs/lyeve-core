@@ -28,8 +28,8 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     host role: permissions the permission checker, email the email sender,
 //     localization the content localizer, content the entry writer and the
 //     revision store, storage the storage backend, scim the user
-//     provisioner. Each is held by that one plugin, and the role's registrar
-//     refuses every other. The schema engine and the flow roles need
+//     provisioner, media the media library. Each is held by that one plugin,
+//     and the role's registrar refuses every other. The schema engine and the flow roles need
 //     core.CapSchema and core.CapFlowRegistry, which schema and flow hold.
 //   - core.CapSessionSign, because the plugin signs a user in: magic-link,
 //     mfa, oauth and saml. A session it signs acts as the account it names.
@@ -48,7 +48,9 @@ import "github.com/lyeve-labs/lyeve-core/pkg/core"
 //     session stops signing in once the password changes.
 //   - core.CapTenantRoles, because the plugin acts for a person long after
 //     their session ended and re-checks the roles they hold in the tenant
-//     on every call: builder, for each call a connection signs.
+//     on every call: builder, for each call a connection signs, and
+//     data-export, for each scheduled export it runs as the account that
+//     saved it.
 var capPolicy = map[string]core.Capability{
 	"ab-testing":           core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"ai":                   core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,
@@ -63,7 +65,7 @@ var capPolicy = map[string]core.Capability{
 	"cluster":              core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"content":              core.CapDBWrite | core.CapRawDB | core.CapSchema | core.CapRoutes | core.CapHooks | core.CapContentEntryWriter | core.CapRecordRevisionStore,
 	"cron":                 core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
-	"data-export":          core.CapDBWrite | core.CapRawDB | core.CapRoutes,
+	"data-export":          core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapTenantRoles,
 	"data-residency":       core.CapDBWrite | core.CapRawDB | core.CapRoutes,
 	"device-fingerprint":   core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"email":                core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapEmailSender | core.CapSessionKey,
@@ -77,7 +79,8 @@ var capPolicy = map[string]core.Capability{
 	"localization":         core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapHooks | core.CapContentLocalizer,
 	"logging":              core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
 	"magic-link":           core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey,
-	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret,
+	"mcp":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes,
+	"media":                core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapMediaLibrary,
 	"messagebroker":        core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret,
 	"mfa":                  core.CapDBWrite | core.CapRawDB | core.CapRoutes | core.CapConfigSecret | core.CapSessionSign | core.CapSessionKey | core.CapStepUp,
 	"multitenant":          core.CapDBWrite | core.CapRawDB | core.CapHooks | core.CapRoutes | core.CapConfigSecret | core.CapSessionKey,

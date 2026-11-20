@@ -3,6 +3,7 @@ package ssrf
 import (
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"net"
 	"testing"
@@ -105,9 +106,13 @@ type tenantKey struct{}
 // the tenant or the trace from it can put them on the line.
 func TestRefusal_LogsWithCallerContext(t *testing.T) {
 	var got []context.Context
-	orig := slog.Default()
+	orig, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(ctxHandler{got: &got}))
-	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Cleanup(func() {
+		slog.SetDefault(orig)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	ctx := context.WithValue(context.Background(), tenantKey{}, "acme")
 	require.Error(t, ValidateURL(ctx, "http://100.100.100.200/"))
@@ -119,9 +124,13 @@ func TestRefusal_LogsWithCallerContext(t *testing.T) {
 // may hand to a client, does not.
 func TestRefusal_LogsRangeClassOnly(t *testing.T) {
 	var buf bytes.Buffer
-	orig := slog.Default()
+	orig, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(orig) })
+	t.Cleanup(func() {
+		slog.SetDefault(orig)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	ctx := context.Background()
 
 	for _, tc := range []struct{ target, class string }{

@@ -24,6 +24,7 @@ const (
 	HostRoleRecordRevisionStore     HostRole = "record revision store"     // CapRecordRevisionStore
 	HostRoleStorage                 HostRole = "storage"                   // CapStorage
 	HostRoleUserProvisioner         HostRole = "user provisioner"          // CapUserProvisioner
+	HostRoleMediaLibrary            HostRole = "media library"             // CapMediaLibrary
 )
 
 // ErrHostRoleHeld is returned when a plugin registers or clears a host role

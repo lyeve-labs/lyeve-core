@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log"
 	"log/slog"
 	"strings"
 	"testing"
@@ -40,9 +41,13 @@ func TestWarnIfTenantMissing(t *testing.T) {
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
-			prev := slog.Default()
+			prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			t.Cleanup(func() {
+				slog.SetDefault(prev)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			})
 
 			h := &AuthHandler{multiTenant: c.multiTenant, tenantValidator: c.validator}
 			h.warnIfTenantMissing(context.Background(), c.tenant, "person@example.com")

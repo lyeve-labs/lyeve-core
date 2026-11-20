@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -27,9 +28,13 @@ import (
 func engineLog(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(logging.NewEnrichHandler(slog.NewJSONHandler(&buf, nil), nil).Logger())
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 	return &buf
 }
 
@@ -95,6 +100,7 @@ func TestStoreError_LogsNothingForACallerOutcome(t *testing.T) {
 	}{
 		{core.ErrNotFound, http.StatusNotFound},
 		{fmt.Errorf("create: %w", core.ErrConflict), http.StatusConflict},
+		{fmt.Errorf("create products: %w", core.ErrSchemaExists), http.StatusConflict},
 		{fmt.Errorf("save: %w", core.ErrValidation), http.StatusBadRequest},
 	} {
 		w := httptest.NewRecorder()

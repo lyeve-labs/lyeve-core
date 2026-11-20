@@ -223,9 +223,11 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 			// is a table of its own. Which one depends on the cardinality, and
 			// the content path reads whichever the definition declares, so an
 			// engine that creates neither leaves every relation read failing
-			// against a column that does not exist.
+			// against a column that does not exist. A has_one and a has_many
+			// keep nothing here, as the engine an install runs keeps nothing:
+			// they read the key of a belongs_to on their target.
 			switch f.RelationType {
-			case core.RelBelongsTo, core.RelHasOne:
+			case core.RelBelongsTo:
 				// The column alone is not the relation. What happens to a row
 				// whose target is deleted is declared by the key, and the
 				// content store relies on the database to apply it, so a
@@ -297,7 +299,7 @@ func (e *Engine) createTableOn(ctx context.Context, q execer, sc *core.Schema) e
 			}
 			continue
 		}
-		colType := e.columnType(f, boundedText, unboundedText, tsType)
+		colType := e.columnType(f, uuidType, boundedText, unboundedText, tsType)
 		if f.Unique && colType == unboundedText {
 			colType = boundedText
 		}
@@ -367,8 +369,12 @@ func (e *Engine) createTableSQL(table, body string) string {
 // write into. The store passes a Go value of the field's own type, so a column
 // that cannot hold it is not a smaller fixture, it is a broken one: a boolean
 // written into TEXT fails on insert with "cannot encode true into text format".
-func (e *Engine) columnType(f core.SchemaField, boundedText, unboundedText, tsType string) string {
+func (e *Engine) columnType(f core.SchemaField, uuidType, boundedText, unboundedText, tsType string) string {
 	switch f.FieldType {
+	case "uid":
+		// The column a shipped install creates, so a read that treats the
+		// value as text meets the UUID type it has to convert.
+		return uuidType
 	case "boolean":
 		switch e.host.Dialect() {
 		case "mysql":
@@ -409,7 +415,7 @@ func (e *Engine) columnType(f core.SchemaField, boundedText, unboundedText, tsTy
 		default:
 			return "JSONB"
 		}
-	case "uid", "email", "url", "media":
+	case "email", "url", "media":
 		// Short, and each of them is a candidate for an index.
 		return boundedText
 	default:

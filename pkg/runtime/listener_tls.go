@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -91,11 +92,11 @@ func listenerTLSConfig(certFile, keyFile string) (*tls.Config, error) {
 	}, nil
 }
 
-// serve runs srv over TLS when it carries a TLS configuration, which then
-// supplies the certificate, and over plain HTTP otherwise.
-func serve(srv *http.Server) error {
+// serve runs srv on ln over TLS when it carries a TLS configuration, which
+// then supplies the certificate, and over plain HTTP otherwise.
+func serve(srv *http.Server, ln net.Listener) error {
 	if srv.TLSConfig != nil {
-		return srv.ListenAndServeTLS("", "")
+		return srv.ServeTLS(ln, "", "")
 	}
-	return srv.ListenAndServe()
+	return srv.Serve(ln)
 }

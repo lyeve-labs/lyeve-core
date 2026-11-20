@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +37,13 @@ func TestEndToEnd_CorrelationIDTraceability(t *testing.T) {
 	enrichHandler := logging.NewEnrichHandler(logHandler, nil)
 	logging.SetGlobalEnrichHandler(enrichHandler)
 	defer logging.SetGlobalEnrichHandler(nil)
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(enrichHandler.Logger())
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	// Build a realistic middleware stack.
 	r := chi.NewRouter()
@@ -155,7 +162,13 @@ func TestEndToEnd_LogEnrichment(t *testing.T) {
 	enrichHandler := logging.NewEnrichHandler(logHandler, nil)
 	logging.SetGlobalEnrichHandler(enrichHandler)
 	defer logging.SetGlobalEnrichHandler(nil)
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(enrichHandler.Logger())
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	r := chi.NewRouter()
 	r.Use(apimw.CorrelationID())

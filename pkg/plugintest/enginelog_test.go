@@ -2,6 +2,7 @@ package plugintest_test
 
 import (
 	"context"
+	"log"
 	"log/slog"
 	"testing"
 
@@ -36,4 +37,19 @@ func TestCaptureEngineLog_StampsWhatTheEngineStamps(t *testing.T) {
 	slog.InfoContext(ctx, "export refused", "tenant", "acme")
 	require.Len(t, log.Mentioning("acme"), 1)
 	require.Equal(t, "export refused tenant=acme", plugintest.LineText(log.Mentioning("acme")[0]))
+}
+
+// A capture ends with the test that made it. Making the engine's logger the
+// default also sent the log package's output to its handler, so without the
+// restore every later line of the default logger lands in a log nobody reads.
+func TestCaptureEngineLog_RestoresTheLogPackageOutput(t *testing.T) {
+	writer, flags, logger := log.Writer(), log.Flags(), slog.Default()
+	t.Run("capture", func(t *testing.T) {
+		captured := plugintest.CaptureEngineLog(t, nil)
+		slog.Info("a captured line")
+		require.Len(t, captured.Entries(), 1)
+	})
+	require.Same(t, writer, log.Writer(), "the log package still writes to the ended capture")
+	require.Equal(t, flags, log.Flags())
+	require.Same(t, logger, slog.Default())
 }

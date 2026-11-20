@@ -68,6 +68,8 @@ replace github.com/lyeve-labs/lyeve-plugin-logging => ../../../lyeve-plugin-logg
 
 replace github.com/lyeve-labs/lyeve-plugin-magic-link => ../../../lyeve-plugin-magic-link
 
+replace github.com/lyeve-labs/lyeve-plugin-mcp => ../../../lyeve-plugin-mcp
+
 replace github.com/lyeve-labs/lyeve-plugin-media => ../../../lyeve-plugin-media
 
 replace github.com/lyeve-labs/lyeve-plugin-messagebroker => ../../../lyeve-plugin-messagebroker
@@ -147,6 +149,7 @@ require (
 	github.com/lyeve-labs/lyeve-plugin-localization v0.6.1
 	github.com/lyeve-labs/lyeve-plugin-logging v0.8.0
 	github.com/lyeve-labs/lyeve-plugin-magic-link v0.11.0
+	github.com/lyeve-labs/lyeve-plugin-mcp v0.1.0
 	github.com/lyeve-labs/lyeve-plugin-media v0.8.2
 	github.com/lyeve-labs/lyeve-plugin-messagebroker v0.9.1
 	github.com/lyeve-labs/lyeve-plugin-mfa v0.7.1

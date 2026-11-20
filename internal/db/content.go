@@ -40,6 +40,10 @@ type ContentStore struct {
 
 	onInvalidate func(ctx context.Context, schemaName string) // nullable
 
+	// shaper turns every write's values into the ones stored. Nil is
+	// core.AbsentContentValueShaper, which refuses a document value.
+	shaper core.ContentValueShaper
+
 	// ensured records the generated tables this process has already verified
 	// to carry the tenant_id column, so the conditional ALTER runs once per
 	// table instead of once per request.
@@ -73,21 +77,57 @@ func NewContentStoreWithCache(
 	return &ContentStore{pool: pool, schemas: schemas, itemCache: itemCache, listCache: listCache}
 }
 
+// WithValueShaper sets the shaper every write's values pass before the row
+// is written, and returns s. Call it before the store serves a
+// write. A store without one refuses a write that names a document field.
+func (s *ContentStore) WithValueShaper(shaper core.ContentValueShaper) *ContentStore {
+	s.shaper = shaper
+	return s
+}
+
+// shape answers the values a write stores, from the registered shaper. A
+// refusal wraps domain.ErrValidation and a *core.ContentValueError naming
+// each field. A shaper that could not answer, or no shaper for a document
+// value, is the shaper's error, which wraps core.ErrNoSchemaEngine when none
+// is registered.
+func (s *ContentStore) shape(ctx context.Context, sc *domain.Schema, data map[string]any) (map[string]any, error) {
+	shaper := s.shaper
+	if shaper == nil {
+		shaper = core.AbsentContentValueShaper{}
+	}
+	shaped, failures, err := shaper.ShapeValues(ctx, sc, data)
+	if err != nil {
+		return nil, fmt.Errorf("shape content values: %w", err)
+	}
+	if len(failures) > 0 {
+		return nil, fmt.Errorf("%w: %w", domain.ErrValidation, &core.ContentValueError{Failures: failures})
+	}
+	return shaped, nil
+}
+
+// schema answers a content type's definition. A supplied engine reports an
+// unknown content type with the public sentinel. Joining the kernel's own
+// keeps every caller's errors.Is(err, domain.ErrNotFound) working, so a name
+// nobody defined is a 404 rather than an outage.
+func (s *ContentStore) schema(ctx context.Context, schemaName string) (*domain.Schema, error) {
+	sc, err := s.schemas.GetByName(ctx, schemaName)
+	if err != nil {
+		if errors.Is(err, core.ErrSchemaNotFound) {
+			return nil, fmt.Errorf("%w: %w", domain.ErrNotFound, err)
+		}
+		return nil, err
+	}
+	return sc, nil
+}
+
 // table returns the physical table name for a schema, validating the schema
 // exists. The returned name is engine-qualified so it resolves on a
 // tenant-scoped MySQL/MSSQL connection. Postgres resolves through search_path.
 // Tables created by engines without tenant isolation get their tenant_id
 // column added on first use (once per process).
 func (s *ContentStore) table(ctx context.Context, schemaName string) (*domain.Schema, string, error) {
-	sc, err := s.schemas.GetByName(ctx, schemaName)
+	sc, err := s.schema(ctx, schemaName)
 	if err != nil {
-		// A supplied engine reports an unknown content type with the public
-		// sentinel. Joining the kernel's own keeps every caller's
-		// errors.Is(err, domain.ErrNotFound) working, so a name nobody
-		// defined is a 404 rather than an outage.
-		if errors.Is(err, core.ErrSchemaNotFound) {
-			return nil, "", fmt.Errorf("%w: %w", domain.ErrNotFound, err)
-		}
 		return nil, "", err
 	}
 	table := domain.TableName(schemaName)
@@ -132,11 +172,22 @@ func cacheItemKey(tenantID, schemaName string, id uuid.UUID) string {
 }
 
 // cacheListKey returns a stable cache key for a list query.
-func cacheListKey(tenantID, schemaName string, limit, offset int, filters map[string]any) string {
-	h := fmt.Sprintf("%s:%s:l=%d:o=%d", tenantID, schemaName, limit, offset)
-	if len(filters) > 0 {
-		b, _ := json.Marshal(filters)
+func cacheListKey(tenantID, schemaName string, q ListQuery) string {
+	h := fmt.Sprintf("%s:%s:l=%d:o=%d", tenantID, schemaName, q.Limit, q.Offset)
+	if len(q.Filters) > 0 {
+		b, _ := json.Marshal(q.Filters)
 		h += ":f=" + string(b)
+	}
+	if len(q.Ranges) > 0 {
+		b, _ := json.Marshal(q.Ranges)
+		h += ":r=" + string(b)
+	}
+	if len(q.Conditions) > 0 {
+		b, _ := json.Marshal(q.Conditions)
+		h += ":c=" + string(b)
+	}
+	if q.Sort.Column != "" {
+		h += ":s=" + q.Sort.String()
 	}
 	return h
 }
@@ -208,6 +259,9 @@ func (s *ContentStore) Insert(ctx context.Context, schemaName string, data map[s
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
 	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
 
 	if _, _, err := contentStatus(sc, data); err != nil {
 		return nil, fmt.Errorf("content insert: %w", err)
@@ -278,6 +332,18 @@ func (s *ContentStore) insertRow(ctx context.Context, sc *domain.Schema, schemaN
 // the mirrored row shares its id with the source record and later updates and
 // deletes land on the same row.
 func (s *ContentStore) InsertWithID(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return nil, fmt.Errorf("content insert: resolve table: %w", err)
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content insert: %w", err)
+	}
+	return s.insertShapedWithID(ctx, schemaName, id, data)
+}
+
+// insertShapedWithID is InsertWithID for data the shaper already answered.
+func (s *ContentStore) insertShapedWithID(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any) (*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, fmt.Errorf("content insert: resolve table: %w", err)
@@ -362,6 +428,13 @@ func (s *ContentStore) UpsertContent(ctx context.Context, schemaName string, id 
 // either comes back as it is, and nothing is written. Nil for both is
 // UpsertContent.
 func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, beforeUpdate func(context.Context, map[string]any) error, beforeInsert func(context.Context) error) error {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return fmt.Errorf("content upsert: resolve table: %w", err)
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return fmt.Errorf("content upsert: %w", err)
+	}
 	if beforeUpdate != nil {
 		existing, err := s.GetByID(ctx, schemaName, id)
 		switch {
@@ -373,7 +446,7 @@ func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName stri
 			return err
 		}
 	}
-	if _, err := s.Update(ctx, schemaName, id, data, time.Time{}); err == nil {
+	if _, err := s.updateShaped(ctx, schemaName, id, data, time.Time{}); err == nil {
 		return nil
 	} else if !errors.Is(err, ErrContentConflict) && !errors.Is(err, domain.ErrNotFound) {
 		return err
@@ -390,7 +463,7 @@ func (s *ContentStore) UpsertContentChecked(ctx context.Context, schemaName stri
 			return err
 		}
 	}
-	_, err = s.InsertWithID(ctx, schemaName, id, data)
+	_, err = s.insertShapedWithID(ctx, schemaName, id, data)
 	return err
 }
 
@@ -414,41 +487,70 @@ func (s *ContentStore) softDeleted(ctx context.Context, schemaName string, id uu
 	return n > 0, nil
 }
 
-// List returns up to limit rows from the calling tenant's collection table,
-// ordered by created_at DESC, then id DESC. Rows can share a created_at:
-// Postgres stamps every row of one transaction with one time, and MySQL every
-// row of one statement. Offset pages over tied rows can repeat some and skip
-// others, so the unique id breaks the tie. filters maps column names to
-// exact-match values (safe: column names come from schema). User-defined field
-// values are returned inside Content.Data.
+// List returns up to limit rows from the calling tenant's collection table
+// in the default order, filtered by exact-match values. See ListPage.
 func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offset int, filters map[string]any) ([]*domain.Content, error) {
+	return s.ListPage(ctx, schemaName, ListQuery{Limit: limit, Offset: offset, Filters: filters})
+}
+
+// ListPage returns up to q.Limit rows from the calling tenant's collection
+// table. With no sort the order is created_at DESC, then id DESC. Rows can
+// share a created_at: Postgres stamps every row of one transaction with one
+// time, and MySQL every row of one statement. Offset pages over tied rows can
+// repeat some and skip others, so the unique id breaks the tie, and it breaks
+// a tie on a sort field the same way. q.Filters maps column names to
+// exact-match values, q.Ranges to bounds and q.Conditions holds the other
+// operators (safe: column names come from schema). A condition whose key is
+// a path reads a related entry's field, under q.PathGate. User-defined field
+// values are returned inside Content.Data.
+func (s *ContentStore) ListPage(ctx context.Context, schemaName string, q ListQuery) ([]*domain.Content, error) {
+	limit, offset, filters := q.Limit, q.Offset, q.Filters
 	// limit<=0 means "no rows" per the pagination contract. MSSQL rejects
 	// FETCH NEXT 0 ROWS ONLY, so short-circuit before building the query.
 	if limit <= 0 {
 		return []*domain.Content{}, nil
 	}
 
-	// A filtered list resolves its schema before the cache, so the key holds
-	// each value as the column compares it: 10 and 10.00 on a decimal field
-	// are one entry. An unfiltered list keeps the cache read first.
+	// A filtered or sorted list resolves its schema before the cache, so the
+	// key holds each value as the column compares it (10 and 10.00 on a
+	// decimal field are one entry) and names only a sort the schema allows.
+	// A plain list keeps the cache read first.
 	var (
-		sc    *domain.Schema
-		table string
-		err   error
+		sc     *domain.Schema
+		table  string
+		err    error
+		ranges map[string]ListRange
+		paths  []pathCondition
 	)
-	if len(filters) > 0 {
+	if len(filters) > 0 || len(q.Ranges) > 0 || len(q.Conditions) > 0 || q.Sort.Column != "" {
 		if sc, table, err = s.table(ctx, schemaName); err != nil {
 			return nil, err
 		}
 		if filters, err = typedFilters(sc, filters); err != nil {
 			return nil, err
 		}
+		if ranges, err = typedRanges(sc, q.Ranges); err != nil {
+			return nil, err
+		}
+		if q.Conditions, paths, err = s.pathConditions(ctx, schemaName, sc, q.Conditions, q.PathGate); err != nil {
+			return nil, err
+		}
+		if q.Conditions, err = typedConditions(sc, q.Conditions); err != nil {
+			return nil, err
+		}
+		if _, err = orderedField(sc, q.Sort.Column); err != nil {
+			return nil, err
+		}
+		q.Filters, q.Ranges = filters, ranges
 	}
 
-	// Cache read
+	// Cache read. A list with a path is never cached: it reads rows of other
+	// types, whose writes flush only their own lists, and which of those rows
+	// count follows the caller's rights there.
 	tenantID := tenant.ID(ctx)
-	if s.listCache != nil && writeTx(ctx) == nil {
-		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
+	cached := s.listCache != nil && writeTx(ctx) == nil && len(paths) == 0
+	if cached {
+		key := cacheListKey(tenantID, schemaName, q)
 		if cached, ok := s.listCache.Get(ctx, key); ok {
 			s.ListCacheHits.Add(1)
 			// Copied: callers decorate Data in place. See content_clone.go.
@@ -495,9 +597,45 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 
 		i++
 	}
+	for _, col := range slices.Sorted(maps.Keys(ranges)) {
+		bound := ranges[col]
+		for _, b := range []struct {
+			op string
+			v  any
+		}{{">=", bound.GTE}, {"<=", bound.LTE}, {">", bound.GT}, {"<", bound.LT}} {
+			if b.v == nil {
+				continue
+			}
+			whereClauses = append(whereClauses, fmt.Sprintf("r.%s %s %s", d.QuoteIdentifier(col), b.op, filterParam(s.pool.Engine(), sc, col, i)))
+			args = append(args, b.v)
+			i++
+		}
+	}
+	for _, c := range q.Conditions {
+		clause, cargs, err := conditionClause(s.pool.Engine(), sc, c, i)
+		if err != nil {
+			return nil, err
+		}
+		whereClauses = append(whereClauses, clause)
+		args = append(args, cargs...)
+		i += len(cargs)
+	}
+	for _, p := range paths {
+		clause, pargs, err := pathClause(s.pool.Engine(), p, i)
+		if err != nil {
+			return nil, err
+		}
+		whereClauses = append(whereClauses, clause)
+		args = append(args, pargs...)
+		i += len(pargs)
+	}
 	where := ""
 	if len(whereClauses) > 0 {
 		where = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+	orderBy := "created_at DESC, id DESC"
+	if q.Sort.Column != "" {
+		orderBy = q.Sort.orderBy(d)
 	}
 
 	rows, err := s.pool.Query(ctx, fmt.Sprintf(`
@@ -505,8 +643,8 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 		       %s
 		FROM %s r
 		%s
-		ORDER BY created_at DESC, id DESC
-		%s`, plan.selectExpr, table, where, plan.pagination),
+		ORDER BY %s
+		%s`, plan.selectExpr, table, where, orderBy, plan.pagination),
 		args...,
 	)
 	if err != nil {
@@ -527,8 +665,8 @@ func (s *ContentStore) List(ctx context.Context, schemaName string, limit, offse
 	}
 	// Cache write: skip for oversized limits (abusive or direct-caller paths).
 	// The handler clamps to ≤200. This guard covers unclamped callers.
-	if s.listCache != nil && limit <= 200 && writeTx(ctx) == nil {
-		key := cacheListKey(tenantID, schemaName, limit, offset, filters)
+	if cached && limit <= 200 {
+		key := cacheListKey(tenantID, schemaName, q)
 		// The cache keeps its own copy so that what it holds stays as the
 		// database returned it, whatever the caller does to the page it got.
 		_ = s.listCache.Set(ctx, key, cloneContents(items), 0) // err suppressed: cache is best-effort
@@ -740,11 +878,16 @@ func filterField(sc *domain.Schema, col string) (domain.SchemaField, bool) {
 // column with or without it. PostgreSQL types the parameter from the NUMERIC
 // column it is compared with.
 func filterParam(engine string, sc *domain.Schema, col string, n int) string {
-	ph := fmt.Sprintf("$%d", n)
 	f, ok := filterField(sc, col)
 	if !ok {
-		return ph
+		return fmt.Sprintf("$%d", n)
 	}
+	return fieldParam(engine, f, n)
+}
+
+// fieldParam is filterParam for the field f.
+func fieldParam(engine string, f domain.SchemaField, n int) string {
+	ph := fmt.Sprintf("$%d", n)
 	if f.FieldType == "number" {
 		switch engine {
 		case "mysql":
@@ -857,6 +1000,18 @@ func softDeleteWhere(sc *domain.Schema) string {
 // reach the caller as a 503 on a write that never happened. Inside a caller's
 // transaction the deadlock goes to the caller instead, as retryOwnTx says.
 func (s *ContentStore) Update(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
+	sc, err := s.schema(ctx, schemaName)
+	if err != nil {
+		return nil, err
+	}
+	if data, err = s.shape(ctx, sc, data); err != nil {
+		return nil, fmt.Errorf("content update: %w", err)
+	}
+	return s.updateShaped(ctx, schemaName, id, data, expectedUpdatedAt)
+}
+
+// updateShaped is Update for data the shaper already answered.
+func (s *ContentStore) updateShaped(ctx context.Context, schemaName string, id uuid.UUID, data map[string]any, expectedUpdatedAt time.Time) (*domain.Content, error) {
 	var out *domain.Content
 	err := retryOwnTx(ctx, "content update", func() error {
 		var uerr error
@@ -1169,9 +1324,22 @@ func (w *actionWalker) ids(q string, args ...any) ([]uuid.UUID, error) {
 // no filter, so it cannot follow the offset list's default of published
 // unless a status is named.
 func (s *ContentStore) ListCursor(ctx context.Context, schemaName string, cursor string, limit int, drafts bool) ([]*domain.Content, error) {
+	return s.ListCursorSorted(ctx, schemaName, cursor, limit, drafts, ListSort{})
+}
+
+// ListCursorSorted is ListCursor in the order sort names, or in id order
+// when it names none. The cursor stays the id of the last row served, and the
+// next page compares against that row's stored value, read under the
+// caller's tenant, so no value travels through the client. A cursor that
+// names no row of the tenant is domain.ErrBadRequest: an empty page would
+// read as the end of the list.
+func (s *ContentStore) ListCursorSorted(ctx context.Context, schemaName string, cursor string, limit int, drafts bool, sort ListSort) ([]*domain.Content, error) {
 	sc, table, err := s.table(ctx, schemaName)
 	if err != nil {
 		return nil, err
+	}
+	if sort.Column != "" {
+		return s.listCursorSorted(ctx, sc, table, cursor, limit, drafts, sort)
 	}
 	if limit <= 0 || limit > 1000 {
 		limit = 20
@@ -1240,6 +1408,14 @@ func (s *ContentStore) BulkInsert(ctx context.Context, schemaName string, items 
 	if err != nil {
 		return nil, err
 	}
+
+	shaped := make([]map[string]any, len(items))
+	for i, data := range items {
+		if shaped[i], err = s.shape(ctx, sc, data); err != nil {
+			return nil, fmt.Errorf("bulk insert: item %d: %w", i, err)
+		}
+	}
+	items = shaped
 
 	var values []core.RelationValue
 	for _, data := range items {
@@ -1326,7 +1502,7 @@ func (s *ContentStore) SetStatus(ctx context.Context, schemaName string, id uuid
 		return fmt.Errorf("set status %s: %w", schemaName, err)
 	}
 	if !sc.WithDraftPublish {
-		return fmt.Errorf("set status %s: %w: schema has no draft and publish", schemaName, domain.ErrValidation)
+		return fmt.Errorf("set status %s: %w: content type has no draft and publish", schemaName, domain.ErrValidation)
 	}
 	d := dialect.Must(s.pool.Engine())
 	tag, err := s.pool.Exec(ctx,
@@ -1364,21 +1540,28 @@ func (j *jsonColumn) Scan(src any) error {
 
 // scanFullRow scans a row that returns (id, created_at, updated_at, data::jsonb).
 func scanFullRow(engine string, row interface{ Scan(...any) error }, schemaName string, sc *domain.Schema) (*domain.Content, error) {
+	c, _, err := scanSizedRow(engine, row, schemaName, sc)
+	return c, err
+}
+
+// scanSizedRow is scanFullRow that also reports the bytes the database
+// answered the row's data in, which the populate walk holds to its bound.
+func scanSizedRow(engine string, row interface{ Scan(...any) error }, schemaName string, sc *domain.Schema) (*domain.Content, int, error) {
 	c := &domain.Content{SchemaName: schemaName}
 	var rawData jsonColumn
 	if err := row.Scan(scanUUID(engine, &c.ID), &c.CreatedAt, &c.UpdatedAt, &rawData); err != nil {
-		return nil, fmt.Errorf("scan content row: %w", err)
+		return nil, 0, fmt.Errorf("scan content row: %w", err)
 	}
 	if len(rawData.raw) > 0 {
 		if err := json.Unmarshal(rawData.raw, &c.Data); err != nil {
-			return nil, fmt.Errorf("unmarshal content data: %w", err)
+			return nil, 0, fmt.Errorf("unmarshal content data: %w", err)
 		}
 	}
 	if c.Data == nil {
 		c.Data = make(map[string]any)
 	}
 	normalizeContentData(engine, sc, c.Data)
-	return c, nil
+	return c, len(rawData.raw), nil
 }
 
 // contentTimeLayout is how a datetime reads on every dialect. It is the form
@@ -1440,6 +1623,8 @@ func normalizeContentData(engine string, sc *domain.Schema, data map[string]any)
 			if str, isStr := v.(string); isStr && engine == "mssql" {
 				data[col] = strings.ToLower(str)
 			}
+		case "rich_text":
+			data[col] = core.RichTextValue(f, v)
 		}
 	}
 	if sc.WithSoftDelete {

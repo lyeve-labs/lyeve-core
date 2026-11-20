@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"log"
 	"log/slog"
 	"strings"
 	"testing"
@@ -180,9 +181,13 @@ func TestRunSubjectErasure_ResolvesOnlyEmailAddresses(t *testing.T) {
 		compliance.RegisterSubjectEraser(mail)
 
 		var buf bytes.Buffer
-		restore := slog.Default()
+		restore, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-		t.Cleanup(func() { slog.SetDefault(restore) })
+		t.Cleanup(func() {
+			slog.SetDefault(restore)
+			log.SetOutput(logOut)
+			log.SetFlags(logFlags)
+		})
 
 		_, err = compliance.RunSubjectErasureWithHolds(ctx, id.String())
 		require.NoError(t, err)
@@ -291,9 +296,13 @@ func TestResolveSubjectAddresses_AnAddressAnotherAccountHoldsReachesNeither(t *t
 
 		t.Run("composed and decomposed", func(t *testing.T) {
 			var buf bytes.Buffer
-			restore := slog.Default()
+			restore, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-			t.Cleanup(func() { slog.SetDefault(restore) })
+			t.Cleanup(func() {
+				slog.SetDefault(restore)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			})
 
 			assert.ElementsMatch(t, inAcme(at("a-idp")), resolve(t, a.String()), "the address b holds decomposed is not a's to reach")
 			out := buf.String()

@@ -527,3 +527,51 @@ func TestContentHandler_APIKey_RolelessKeyOnAFreshInstall(t *testing.T) {
 		})
 	})
 }
+
+// A fresh install has written no access rule, and an admin may use every
+// content type through the Content API: it passes the editor-or-above gate on
+// the write routes, the checker on every action, and reads every field,
+// drafts included. An editor on the same install is refused, because no rule
+// opens a content type to it.
+func TestContentHandler_APIKey_AdminOnAFreshInstall(t *testing.T) {
+	forEachDialectWithSchemas(t, []string{"drafts"}, func(t *testing.T, fx schemaContentFixture) {
+		fx.content.perms = nil
+		r := keyRouter(fx, map[string]*core.AuthClaims{
+			"admin":  {Roles: []string{core.RoleAdmin}, Scopes: []string{"content:read", "content:write"}},
+			"editor": {Roles: []string{"editor"}, Scopes: []string{"content:read", "content:write"}},
+		})
+
+		rr := call(t, r, http.MethodPost, "admin", "/api/v1/content/drafts", strings.NewReader(`{"data": {"title": "From an admin"}}`))
+		require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+		id := createdID(t, rr)
+
+		rr = call(t, r, http.MethodPut, "admin", "/api/v1/content/drafts/"+id, strings.NewReader(`{"data": {"title": "Changed"}}`))
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		rr = call(t, r, http.MethodPut, "admin", "/api/v1/content/drafts/"+id+"/publish", nil)
+		require.Less(t, rr.Code, 300, rr.Body.String())
+
+		rr = call(t, r, http.MethodGet, "admin", "/api/v1/content/drafts/"+id, nil)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		assert.Equal(t, "Changed", dataOf(t, rr)["title"])
+
+		rr = call(t, r, http.MethodGet, "admin", "/api/v1/content/drafts", nil)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var entries []map[string]any
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &entries))
+		require.Len(t, entries, 1, rr.Body.String())
+		data, ok := entries[0]["data"].(map[string]any)
+		require.True(t, ok, "entry without data: %v", entries[0])
+		assert.Equal(t, "Changed", data["title"], "the admin's read was masked")
+
+		for _, w := range []struct{ method, path, body string }{
+			{http.MethodGet, "/api/v1/content/drafts", ""},
+			{http.MethodGet, "/api/v1/content/drafts/" + id, ""},
+			{http.MethodPost, "/api/v1/content/drafts", `{"data": {"title": "From an editor"}}`},
+			{http.MethodPut, "/api/v1/content/drafts/" + id, `{"data": {"title": "Edited"}}`},
+		} {
+			rr := call(t, r, w.method, "editor", w.path, strings.NewReader(w.body))
+			require.Equal(t, http.StatusForbidden, rr.Code, "%s %s: %s", w.method, w.path, rr.Body.String())
+			assert.Contains(t, rr.Body.String(), "permission denied", "%s %s", w.method, w.path)
+		}
+	})
+}

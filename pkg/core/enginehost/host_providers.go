@@ -230,6 +230,20 @@ func (h *engineHost) ContentEntryWriter() core.ContentEntryWriter {
 	return h.contentEntryWriter
 }
 
+// RegisterMediaLibrary implements MediaLibraryRegistrar. Called by the plugin
+// that owns the media library, with its library when it activates and with
+// nil in Stop.
+func (h *engineHost) RegisterMediaLibrary(l core.MediaLibrary) error {
+	h.mediaLibrary = l
+	return nil
+}
+
+// MediaLibrary implements MediaLibraryProvider. Returns the registered
+// library, or nil when no plugin has registered one.
+func (h *engineHost) MediaLibrary() core.MediaLibrary {
+	return h.mediaLibrary
+}
+
 // RegisterMetricsGatherer implements MetricsGathererRegistrar. Called once
 // by the runtime at boot with the engine's registry.
 func (h *engineHost) RegisterMetricsGatherer(g core.MetricsGatherer) {
@@ -276,6 +290,14 @@ func (h *engineHost) SchemaSource() core.SchemaSource {
 // when none has or the registered one supplies none.
 func (h *engineHost) ContentRules() core.ContentRules {
 	return core.ContentRulesOf(h.Schema())
+}
+
+// ContentValueShaper implements core.ContentValueShaperProvider. It answers
+// the shaper of whatever engine a plugin registered, and the absent shaper,
+// which refuses a document value, when none has or the registered one
+// supplies none.
+func (h *engineHost) ContentValueShaper() core.ContentValueShaper {
+	return core.ContentValueShaperOf(h.Schema())
 }
 
 // WithContentStore replaces the host's content store with the one the API

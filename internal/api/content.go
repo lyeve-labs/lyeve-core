@@ -226,8 +226,8 @@ func (h *ContentHandler) runAfterResponse(r *http.Request, schema, method string
 
 // checker is the authorization this handler enforces. Never nil: with no rule
 // engine supplied it is the kernel's role-only checker, which allows
-// super_admin everything and refuses every other role on a schema, so an
-// install without a rule engine is closed, not open.
+// super_admin everything and admin every schema, and refuses every other role
+// on a schema, so an install without a rule engine is closed, not open.
 //
 // Read per request, never held: the plugin that owns the rules registers its
 // checker when it starts and clears it when it stops, so a request served
@@ -361,54 +361,102 @@ func (h *ContentHandler) hiddenFields(r *http.Request, schema string) (core.Hidd
 // or by the rules, is left out of the entry, and one it may read comes back
 // with the target's field mask applied.
 //
-// Population stays best-effort for a relation the store cannot read. A rule
-// store that cannot answer is different: the read answers 503 rather than
-// guess, and populate reports false after writing it.
-func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content) bool {
-	cfg := parsePopulateFromQuery(r)
+// A relation the store cannot read, or a rule store that cannot answer,
+// fails the read rather than serving the relation empty, and a walk past its
+// bounds is refused rather than cut short. A has_one or has_many whose key
+// cannot be read is refused when the request names it, and left out when a
+// wildcard or a depth reaches it. A relation field the caller's mask hides
+// on the items' own type is not read. populate reports false after writing
+// the answer.
+func (h *ContentHandler) populate(w http.ResponseWriter, r *http.Request, items []*domain.Content, hidden core.HiddenFields) bool {
+	cfg, ok := parsePopulateFromQuery(r)
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "invalid query parameter: depth")
+		return false
+	}
 	if cfg.IsEmpty() || len(items) == 0 {
 		return true
 	}
 	var ruleErr error
 	type decision struct {
-		mask func(map[string]any) map[string]any
-		ok   bool
+		mask   func(map[string]any) map[string]any
+		hides  func(string) bool
+		drafts bool
+		ok     bool
 	}
 	decided := map[string]decision{}
-	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, bool) {
+	gate := func(_ context.Context, f domain.SchemaField) (func(map[string]any) map[string]any, func(string) bool, bool, bool) {
 		target := f.RelationTo
 		if d, seen := decided[target]; seen {
-			return d.mask, d.ok
+			return d.mask, d.hides, d.drafts, d.ok
 		}
 		d := decision{}
+		// A relation into a content type that was deleted stays declared on
+		// the type that pointed at it, so a wildcard read of that type would
+		// otherwise fail for good. It is left out, as the delivery routes
+		// leave it out.
+		if h.schemas != nil {
+			sc, err := h.schemas.GetByName(r.Context(), target)
+			switch {
+			case errors.Is(err, core.ErrSchemaNotFound) || errors.Is(err, domain.ErrNotFound) || (err == nil && sc == nil):
+				decided[target] = d
+				return nil, nil, false, false
+			case err != nil:
+				ruleErr = err
+				decided[target] = d
+				return nil, nil, false, false
+			}
+		}
 		switch err := h.authorize(r, target, "read"); {
 		case err == nil:
-			mask, mErr := h.fieldMask(r, target)
+			hidden, mErr := h.hiddenFields(r, target)
 			if mErr != nil {
 				ruleErr = mErr
 				break
 			}
+			mask := hidden.Apply
 			// A related row is held to the rule its own schema's reads
 			// follow: a draft is served to a caller who may read drafts
 			// there, and to anyone else it is absent.
-			if !h.draftResponse(w, r, target) {
+			drafts := h.draftResponse(w, r, target)
+			if !drafts {
 				mask = publishedOnly(mask)
 			}
-			d = decision{mask: mask, ok: true}
+			d = decision{mask: mask, hides: hidden.Names, drafts: drafts, ok: true}
 		case errors.Is(err, errSchemaNotAllowed), errors.Is(err, errScopeDenied), errors.Is(err, errPermissionDenied), errors.Is(err, errNoCaller):
 		default:
 			ruleErr = err
 		}
 		decided[target] = d
-		return d.mask, d.ok
+		return d.mask, d.hides, d.drafts, d.ok
 	}
-	_ = h.store.PopulateGated(r.Context(), items, cfg, gate) // err suppressed: a relation the store cannot read is served empty
-	if ruleErr != nil {
+	err := h.store.PopulateStrict(r.Context(), items, cfg, hidden.Names, gate)
+	var keyErr *db.InverseKeyError
+	switch {
+	case ruleErr != nil:
 		httpx.StoreError(w, r, ruleErr, "database error")
+		return false
+	case errors.Is(err, db.ErrPopulateTooLarge):
+		httpx.ErrorReq(w, r, http.StatusBadRequest, populateTooLarge)
+		return false
+	case errors.As(err, &keyErr):
+		// The names come from the type's definition, which the caller may
+		// read, and say which part of populate to drop or which field's
+		// relation_fk_name to set.
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fmt.Sprintf(
+			"invalid query parameter: populate names %s, and no single key on %s points back to read it by: set its relation_fk_name or leave it out",
+			keyErr.Field, keyErr.Target))
+		return false
+	case err != nil:
+		httpx.StoreError(w, r, err, "related entries could not be read")
 		return false
 	}
 	return true
 }
+
+// populateTooLarge refuses a walk past its bounds with what the caller can
+// narrow.
+const populateTooLarge = "populate reaches more related entries than one read serves: name fewer relations, a smaller depth or a smaller page"
 
 // publishedOnly wraps a field mask so an unpublished record is hidden, which
 // the populate walk serves as a null relation or leaves out of a list.
@@ -493,11 +541,17 @@ func (h *ContentHandler) schemaForValidation(w http.ResponseWriter, r *http.Requ
 	return s, true
 }
 
-// relationRefused answers a write the store refused because a relation names
-// no entry of the caller's tenant, as a validation error naming the field, and
-// reports whether it did. A row another tenant holds and a row nobody holds
-// get the same answer, so it says nothing about other tenants.
-func relationRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+// storeRefused answers a write the store refused for a value the caller
+// sent, as validation errors naming each field, and reports whether it did.
+// That is a relation naming no entry of the caller's tenant, or values the
+// shaper refused. A row another tenant holds and a row nobody holds get the
+// same answer, so it says nothing about other tenants.
+func storeRefused(w http.ResponseWriter, r *http.Request, err error) bool {
+	var shaped *core.ContentValueError
+	if errors.As(err, &shaped) {
+		respondValidation(w, r, shaped.Failures)
+		return true
+	}
 	var refused *core.RelationTargetError
 	if !errors.As(err, &refused) {
 		return false

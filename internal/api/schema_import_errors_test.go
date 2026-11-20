@@ -132,7 +132,7 @@ func TestSchemaImport_RefusedDefinitionIs422OnPlanAndApply(t *testing.T) {
 				Error string `json:"error"`
 			}
 			require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
-			assert.Equal(t, `schema "article": field "title": unknown field_type`, body.Error)
+			assert.Equal(t, `content type "article": field "title": unknown field_type`, body.Error)
 			assert.Empty(t, eng.applied, "a refused bundle applies nothing, the valid definitions included")
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -62,9 +63,13 @@ func TestContentHandler_StreamOutlivesTheServerWriteTimeout(t *testing.T) {
 // stream. It replaces the default logger, so it does not run in parallel.
 func TestContentHandler_StreamWarnsOnceWhenTheDeadlineCannotMove(t *testing.T) {
 	var logs lockedLogBuffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	h := &ContentHandler{
 		hooks:              hooks.NewRegistry(),

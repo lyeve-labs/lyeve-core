@@ -40,6 +40,21 @@ type ContentEntryWriter interface {
 	DeleteContentEntry(ctx context.Context, id uuid.UUID) error
 }
 
+// ContentEntryRevisionDeleter deletes an entry only while it is still at a
+// revision, as DeleteContentEntry deletes it. A consumer finds it by
+// asserting it on the writer ContentEntryWriter returns. A writer without it
+// cannot guard a delete, so a consumer that must not lose an edit refuses to
+// delete instead.
+type ContentEntryRevisionDeleter interface {
+	// DeleteContentEntryAt removes an entry the tenant on ctx holds while
+	// it is still at revision. The revision is compared under the lock the
+	// delete takes, so an edit that commits after the caller read the entry
+	// keeps it, and the answer wraps ErrConflict. A revision below 1 is
+	// ErrValidation. An entry the tenant does not hold is ErrNotFound, and a
+	// context without a tenant is ErrTenantRequired.
+	DeleteContentEntryAt(ctx context.Context, id uuid.UUID, revision int) error
+}
+
 // ContentEntryInput is one entry to write.
 type ContentEntryInput struct {
 	// ID names the entry to update. uuid.Nil creates or matches as

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"io"
+	"log"
 	"log/slog"
 	"testing"
 
@@ -29,9 +30,13 @@ func TestKernelPurge_LinesAboutAnotherTenantCarryNoTenant(t *testing.T) {
 		ring := logstream.NewBuffer(256)
 		base := slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo})
 		enrich := logging.NewEnrichHandler(logstream.NewInterceptor(base, ring), levels)
-		prev := slog.Default()
+		prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 		slog.SetDefault(enrich.Logger())
-		t.Cleanup(func() { slog.SetDefault(prev) })
+		t.Cleanup(func() {
+			slog.SetDefault(prev)
+			log.SetOutput(logOut)
+			log.SetFlags(logFlags)
+		})
 
 		ctx := core.WithTenantID(context.Background(), home)
 		q := host.Querier(context.Background())

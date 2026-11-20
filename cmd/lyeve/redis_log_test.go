@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"log/slog"
 	"testing"
 
@@ -15,9 +16,13 @@ import (
 // boot, and it has to arrive as one JSON object at warning level.
 func TestRedisLog_WritesAStructuredWarning(t *testing.T) {
 	var buf bytes.Buffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	redisLog{}.Printf(context.Background(), "redis: connection pool: failed to dial after %d attempts: %v",
 		5, errors.New("dial tcp [::1]:6379: connect: connection refused"))

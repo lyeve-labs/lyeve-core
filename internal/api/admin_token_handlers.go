@@ -4,12 +4,14 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -109,9 +111,9 @@ func (h *adminTokenHandler) Grants(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"data": out})
 }
 
-// List returns the tenant's tokens: a super admin sees every one, an admin
-// only their own.
-// GET /api/admin/admin-tokens?limit&offset
+// List returns the tenant's tokens that match q and status: a super admin
+// sees every one, an admin only their own.
+// GET /api/admin/admin-tokens?limit&offset&q&status
 func (h *adminTokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	caller := h.sessionCaller(w, r)
 	if caller == nil {
@@ -125,6 +127,17 @@ func (h *adminTokenHandler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	q, ok := listSearch(w, r)
+	if !ok {
+		return
+	}
+	status := r.URL.Query().Get("status")
+	switch status {
+	case "", "active", "expired", "revoked", "replaced":
+	default:
+		httpx.ErrorReq(w, r, http.StatusBadRequest, "status must be active, expired, revoked or replaced")
+		return
+	}
 	var owner *uuid.UUID
 	if !caller.HasRole("super_admin") {
 		id, err := uuid.Parse(caller.UserID)
@@ -134,7 +147,7 @@ func (h *adminTokenHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		owner = &id
 	}
-	tokens, total, err := h.store.List(r.Context(), tenant, owner, limit, offset)
+	tokens, total, err := h.store.ListMatching(r.Context(), tenant, owner, q, status, h.now(), limit, offset)
 	if err != nil {
 		httpx.StoreError(w, r, err, "failed to list admin tokens")
 		return
@@ -536,6 +549,26 @@ func pageParams(w http.ResponseWriter, r *http.Request) (int, int, bool) {
 		offset = n
 	}
 	return limit, offset, true
+}
+
+// maxListSearch caps the q an admin list takes, in characters.
+const maxListSearch = 200
+
+// listTextParam reads a list's text parameter, trimmed, and reports whether it
+// is within maxListSearch characters. An empty value narrows nothing.
+func listTextParam(r *http.Request, name string) (string, bool) {
+	v := strings.TrimSpace(r.URL.Query().Get(name))
+	return v, utf8.RuneCountInString(v) <= maxListSearch
+}
+
+// listSearch reads a list's q, or writes the refusal of one over
+// maxListSearch characters.
+func listSearch(w http.ResponseWriter, r *http.Request) (string, bool) {
+	q, ok := listTextParam(r, "q")
+	if !ok {
+		httpx.ErrorReq(w, r, http.StatusBadRequest, fmt.Sprintf("q is longer than %d characters", maxListSearch))
+	}
+	return q, ok
 }
 
 // stepUp confirms, before a token is issued or rotated, that the person at

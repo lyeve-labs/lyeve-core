@@ -3,6 +3,7 @@ package config_test
 import (
 	"bytes"
 	"io"
+	"log"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -1501,9 +1502,13 @@ func TestLoad_ConsoleKeyNames(t *testing.T) {
 			// The engine logs one JSON object per line, so the deprecation
 			// goes through slog and never to stderr as plain text.
 			var logs bytes.Buffer
-			prev := slog.Default()
+			prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			t.Cleanup(func() { slog.SetDefault(prev) })
+			t.Cleanup(func() {
+				slog.SetDefault(prev)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			})
 
 			orig := os.Stderr
 			r, w, err := os.Pipe()

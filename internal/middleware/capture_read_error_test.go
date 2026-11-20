@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -69,9 +70,13 @@ func TestRequestCapture_FailedBodyReadNeverReachesTheHandler(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
-			prev := slog.Default()
+			prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
-			defer slog.SetDefault(prev)
+			defer func() {
+				slog.SetDefault(prev)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			}()
 
 			reached := false
 			h := middleware.RequestCaptureWithPolicy(&testSink{}, nil, nil)(

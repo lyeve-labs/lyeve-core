@@ -46,7 +46,8 @@ func NewHost(pool db.DB, rawDB *sql.DB, cfg *config.Config, registry *hooks.Regi
 		registry: registry,
 		version:  version,
 	}
-	h.contentStore = db.NewContentStore(pool, core.LazySchemaSource(h.SchemaSource))
+	h.contentStore = db.NewContentStore(pool, core.LazySchemaSource(h.SchemaSource)).
+		WithValueShaper(core.LazyContentValueShaper(h.ContentValueShaper))
 	return h
 }
 
@@ -151,6 +152,11 @@ type engineHost struct {
 	// writes the generated table directly.
 	contentEntryWriter core.ContentEntryWriter
 
+	// mediaLibrary is the library the plugin owning the media files
+	// registers when it activates. Nil until one registers, and nil again
+	// when it stops.
+	mediaLibrary core.MediaLibrary
+
 	// recordRevisionStore is the plugin that keeps the schema-driven content
 	// API's revision snapshots. Nil until one registers, and nil again when
 	// it stops.
@@ -245,6 +251,8 @@ var (
 	_ core.ConfigSectionRegistrar           = (*engineHost)(nil)
 	_ core.ContentEntryWriterProvider       = (*engineHost)(nil)
 	_ core.ContentEntryWriterRegistrar      = (*engineHost)(nil)
+	_ core.MediaLibraryProvider             = (*engineHost)(nil)
+	_ core.MediaLibraryRegistrar            = (*engineHost)(nil)
 	_ core.RecordRevisionStoreProvider      = (*engineHost)(nil)
 	_ core.RecordRevisionStoreRegistrar     = (*engineHost)(nil)
 	_ core.SchemaEngineRegistrar            = (*engineHost)(nil)
@@ -403,6 +411,10 @@ func (h *engineHost) DistLock(name string) *engine.DistLock {
 // GoroutineTunables implements GoroutineTunablesProvider over the scaling
 // primitives this host was built with.
 func (h *engineHost) GoroutineTunables() core.GoroutineTunables { return core.NewGoroutineTunables(h) }
+
+// ScopedHost forwards the mark by type assertion, so the method set is held
+// here rather than left to that assertion to discover at run time.
+var _ core.LoopbackMarker = (*engineHost)(nil)
 
 // MarkLoopback implements core.LoopbackMarker with the mark the engine's
 // listeners recognize as their own process.

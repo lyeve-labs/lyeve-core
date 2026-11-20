@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"log/slog"
 	"strings"
 	"testing"
@@ -39,9 +40,13 @@ func TestRunSubjectErasure_DoesNotWriteTheSubjectIdentifierToTheLog(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			restore := slog.Default()
+			restore, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
-			t.Cleanup(func() { slog.SetDefault(restore) })
+			t.Cleanup(func() {
+				slog.SetDefault(restore)
+				log.SetOutput(logOut)
+				log.SetFlags(logFlags)
+			})
 
 			reg := &SubjectEraserRegistry{}
 			reg.Register(tc.eraser)

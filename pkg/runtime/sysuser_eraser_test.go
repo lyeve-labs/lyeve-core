@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"log/slog"
 	"strings"
 	"testing"
@@ -214,9 +215,13 @@ func TestSysUserEraser_LogsADigestNotTheIdentifier(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	if _, err := newSysUserEraser(host).EraseSubject(ctx, email); err != nil {
 		t.Fatalf("erase: %v", err)
@@ -258,9 +263,13 @@ func TestSysUserEraser_RevocationFailureLogsADigestNotTheAccount(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	prev := slog.Default()
+	prev, logOut, logFlags := slog.Default(), log.Writer(), log.Flags()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(logOut)
+		log.SetFlags(logFlags)
+	})
 
 	if _, err := newSysUserEraser(failingRevokerHost{Host: host}).EraseSubject(ctx, email); err != nil {
 		t.Fatalf("erase: %v", err)
